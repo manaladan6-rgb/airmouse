@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "airmouse"
-version = "1.0.2"
+version = "1.0.3"
 description = "Physics-driven webcam finger mouse — control your cursor with hand gestures using pure spring-damper physics"
 readme = "README.txt"
 license = {text = "MIT"}

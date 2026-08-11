@@ -92,6 +92,52 @@ def draw_debug(frame, hand_data, cursor_pos, velocity, spring, fps, config):
         )
 
 
+def _get_screen_size():
+    """Get screen resolution — tries multiple methods for cross-platform support."""
+    # Method 1: ctypes (Windows)
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        w = user32.GetSystemMetrics(0)
+        h = user32.GetSystemMetrics(1)
+        if w > 0 and h > 0:
+            return w, h
+    except Exception:
+        pass
+
+    # Method 2: tkinter
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+        w = root.winfo_screenwidth()
+        h = root.winfo_screenheight()
+        root.destroy()
+        if w > 0 and h > 0:
+            return w, h
+    except Exception:
+        pass
+
+    # Method 3: X11 (Linux)
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["xrandr"], capture_output=True, text=True, timeout=2
+        )
+        for line in result.stdout.splitlines():
+            if "*" in line:
+                parts = line.split()
+                for p in parts:
+                    if "x" in p:
+                        w, h = p.split("x")
+                        return int(w), int(h.split("+")[0])
+    except Exception:
+        pass
+
+    # Fallback
+    print("  Warning: Could not detect screen size, using 1920x1080")
+    return 1920, 1080
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="airmouse",
@@ -128,7 +174,7 @@ def main():
     )
 
     mouse = MouseController()
-    screen_w, screen_h = mouse.mouse._display.size  # type: ignore
+    screen_w, screen_h = _get_screen_size()
 
     spring = SpringDamper(
         mass=config.MASS,
