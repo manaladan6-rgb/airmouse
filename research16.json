@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://www.facebook.com/groups/332087790866175/posts/1293268484748096",
+    "name": "Air Gesture Control or Voice Command Control?",
+    "snippet": "I really do love gesture controls.\n\nGlad to see this prototype from XaneAir. These guys are doing great.\n\nThis is the Air clicks\n\nI'm curious though. ...",
+    "host_name": "www.facebook.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=EUK80_ZesrU&vl=en",
+    "name": "XR Hands: Track, Record, & Detect Custom Hand Gestures in",
+    "snippet": "In today's video, I walk through a variety of hand tracking features available in XR Hands 1.7+, including hand tracking visualizer setup, ...",
+    "host_name": "www.youtube.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.mdpi.com/2414-4088/4/3/61",
+    "name": "Mid-Air Gesture Control of Multiple Home Devices in",
+    "snippet": "by P Vogiatzidakis · 2020 · Cited by 33 — We have developed an interactive prototype based on spatial Augmented Reality (AR) of seven home devices. Each device responds to touchless gestures",
+    "host_name": "www.mdpi.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=sQY7TmSQPz0",
+    "name": "Comparing the Old and New Hand Gesture Tracking in",
+    "snippet": "Comparing the Old and New Hand Gesture Tracking in Nebula OS with XREAL Air 2 Ultra. Review: Hand - Tracking MR [Smart Glasses]",
+    "host_name": "www.youtube.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.manomotion.com/xr-interaction",
+    "name": "XR Hand Tracking & Spatial Intelligence for HMD OEMs",
+    "snippet": "The most versatile hand tracking features are available in one SDK, supporting dynamic movements and various trigger gestures . It is optimized for mobile use, ... Read more",
+    "host_name": "www.manomotion.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://jimmyo6dof.com/hands-on-quest",
+    "name": "Hand Tracking on Quest - Jim O'Donnell",
+    "snippet": "Before hand tracking could launch on Quest, users needed to be able to summon and dismiss the system UI just as easily as with controllers.",
+    "host_name": "jimmyo6dof.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.rayneo.com/blogs/news/from-gestures-to-spatial-computing",
+    "name": "From Gestures to Spatial Computing: The Power of Hand",
+    "snippet": "Mar 27, 2026 — The AI model is the second layer. Its main job is identifying hand keypoints in video streams. It maps these points to actions like clicking , ... Read more",
+    "host_name": "www.rayneo.com",
+    "rank": 6,
+    "date": "Mar 27, 2026",
+    "favicon": ""
+  }
+]

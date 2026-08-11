@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://github.com/topics/virtual-mouse?o=desc&s=updated",
+    "name": "virtual-mouse · GitHub Topics",
+    "snippet": "AI-powered virtual mouse using hand gesture recognition with OpenCV and MediaPipe. Control cursor movement, volume, and brightness using real-time hand gestures ...",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/hand-gesture-mouse-controller",
+    "name": "hand-gesture-mouse-controller",
+    "snippet": "The project leverages MediaPipe for hand tracking to create a virtual mouse interface, enabling precise cursor control and clicking through intuitive hand ...",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/Viral-Doshi/Gesture-Controlled-Virtual-Mouse",
+    "name": "Viral-Doshi/Gesture-Controlled-Virtual-Mouse",
+    "snippet": "Virtual Mouse makes human computer interaction simple by making use of Hand Gestures and Voice Commands. The computer requires almost no direct contact.",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/Python/comments/1db05gm/archand_control_your_mouse_entirely_using_hand",
+    "name": "Archand: Control your mouse entirely using hand gestures.",
+    "snippet": "Archand allows you to control your mouse entirely using hand gestures which are performed in the air and captured via a webcam.",
+    "host_name": "www.reddit.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=4NmwNEYtL1s",
+    "name": "Virtual Mouse Using Hand Gesture Recognition | AI Mouse",
+    "snippet": "In this video, we demonstrate how to make a Virtual Mouse Using Hand Gesture Recognition leveraging the capabilities of MediaPipe (Computer ...",
+    "host_name": "www.youtube.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/handtracking?l=python&o=asc&s=stars",
+    "name": "handtracking · GitHub Topics",
+    "snippet": "This project allows users to control system volume with hand gestures detected by a webcam. It uses MediaPipe and OpenCV for real-time hand tracking .",
+    "host_name": "github.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/air-writing",
+    "name": "air-writing · GitHub Topics",
+    "snippet": "Virtual AI Writer uses fingertip detection for gesture-based interactions. Features include air writing, drawing, selecting, erasing, and moving objects , as ...",
+    "host_name": "github.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.iieta.org/download/file/fid/101191",
+    "name": "Enhancing Virtual and Augmented Reality Interactions with",
+    "snippet": "May 18, 2023 — All of the implementations are available at https:// github .com/torauma06/ hand -gesture- mouse . To increase the understandability of all the ...",
+    "host_name": "www.iieta.org",
+    "rank": 7,
+    "date": "May 18, 2023",
+    "favicon": ""
+  }
+]

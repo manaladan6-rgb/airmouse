@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://www.stanford.edu/class/ee267/Spring2016/report_lin.pdf",
+    "name": "Hand movement and gesture recognition using Leap",
+    "snippet": "by L Shao · Cited by 54 — The Leap Motion Controller could detect palm and fingers move- ments on top of it. The tracking data which contains the palm and fingers' position, direction, ... Read more 5 pages",
+    "host_name": "www.stanford.edu",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/leapmotion/comments/jbkphd/leap_motion_what_can_i_do_with_it",
+    "name": "Leap Motion - what can I do with it? : r/leapmotion",
+    "snippet": "I have a leap motion I have bought back in July 2013, and have never really used it too much - I've played around it in the beginning trying out ways to ...",
+    "host_name": "www.reddit.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://mocap.reallusion.com/iclone-motion-live-mocap/leap-motion.html",
+    "name": "Leap Motion | Mocap Animation | iClone Motion LIVE",
+    "snippet": "Flexible and fast gesture capture for forearms, hands and fingers . lots of hand gestures when talking. to wrist rotation, all the way to detailed finger ...",
+    "host_name": "mocap.reallusion.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://en.wikipedia.org/wiki/Leap_Motion",
+    "name": "Leap Motion",
+    "snippet": "The devices supported hand and finger motions as input, analogous to a mouse , but required no hand contact or touching. hand tracking in virtual reality.",
+    "host_name": "en.wikipedia.org",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.amazon.com/Leap-Motion-Controller-Gesture-Control/dp/B00E3CP9UM",
+    "name": "Leap Motion Controller, Gesture Motion Control for PC or",
+    "snippet": "It's a super-wide 150° field of view and a Z-axis for depth . That means you can move your hands in 3D, just like you do in the real world. Read more",
+    "host_name": "www.amazon.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://au.pcmag.com/migrated-39864-input-devices/5086/leap-motion-controller-review",
+    "name": "Leap Motion Controller Review",
+    "snippet": "Jul 22, 2013 — Your hand motions are tracked in a hemisphere of space emanating from the device , letting you gesture not just up, down and around, but forward ...",
+    "host_name": "au.pcmag.com",
+    "rank": 5,
+    "date": "Jul 22, 2013",
+    "favicon": ""
+  },
+  {
+    "url": "https://arxiv.org/pdf/2311.04373",
+    "name": "A Comprehensive Review of Leap Motion Controller-based",
+    "snippet": "by B Chakravarthi · 2023 · Cited by 16 — Hand gesture recognition plays a crucial role in facilitating human-computer interaction (HCI), allowing for natural and intuitive communication ... Read more",
+    "host_name": "arxiv.org",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://derivative.ca/UserGuide/Leap_Motion",
+    "name": "Leap Motion | Derivative - TouchDesigner",
+    "snippet": "It offers low latency, precise tracking and recognizes a number of motions and gestures . The gestures are provided to TouchDesigner through the Leap Motion SDK. Read more",
+    "host_name": "derivative.ca",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  }
+]

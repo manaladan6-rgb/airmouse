@@ -1,0 +1,83 @@
+[
+  {
+    "url": "https://www.reddit.com/r/Python/comments/1db05gm/archand_control_your_mouse_entirely_using_hand",
+    "name": "Archand: Control your mouse entirely using hand gestures.",
+    "snippet": "Archand allows you to control your mouse entirely using hand gestures which are performed in the air and captured via a webcam.",
+    "host_name": "www.reddit.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=mKTmh4eM_Uk",
+    "name": "Control Your Computer Screen Brightness With Your Hand",
+    "snippet": "In this tutorial we're going to learn how to use Gesture control to change the brightness of a computer. We will first look at hand tracking.  ...",
+    "host_name": "www.youtube.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.techrxiv.org/doi/pdf/10.36227/techrxiv.174914054.46512037/v1?onload=true",
+    "name": "A Vision-Based Virtual Mouse Using Hand Gesture",
+    "snippet": "by A Goel · 2025 — With PyAutoGUI, you can precisely click, drag, scroll, and move the cursor , among other functions. This automation tool simplifies what ... Read more",
+    "host_name": "www.techrxiv.org",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/Viral-Doshi/Gesture-Controlled-Virtual-Mouse",
+    "name": "Viral-Doshi/Gesture-Controlled-Virtual-Mouse",
+    "snippet": "Gesture Controlled Virtual Mouse makes human computer interaction simple by making use of Hand Gestures and Voice Commands. The computer requires almost no ... Read more",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.researchgate.net/publication/372165002_Virtual_Mouse_Using_Hand_Gesture",
+    "name": "(PDF) Virtual Mouse Using Hand Gesture",
+    "snippet": "Jul 7, 2023 — This project proposes a way to control the position of the cursor with the bare hands without using any electronic device. While the operations ... Read more",
+    "host_name": "www.researchgate.net",
+    "rank": 4,
+    "date": "Jul 7, 2023",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=OA8mwoDTXtw",
+    "name": "Virtual AI Mouse | Hand Gesture Control | Python Tutorial",
+    "snippet": "Right Click 21:33 - Mouse Scroll 23:24. Virtual AI Mouse | Hand Gesture Control | Python Tutorial. Hand Gesture Recognition",
+    "host_name": "www.youtube.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://apps.microsoft.com/detail/9p7md73v1nx1?hl=en-US&gl=US",
+    "name": "HandControl - Download and install on Windows",
+    "snippet": "Jun 24, 2026 — HandControl transforms your standard webcam into a high-precision spatial sensor , allowing you to control your Windows PC entirely through ...",
+    "host_name": "apps.microsoft.com",
+    "rank": 6,
+    "date": "Jun 24, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://tijer.org/tijer/papers/TIJERE001165.pdf",
+    "name": "Gesture Controlled Virtual Mouse",
+    "snippet": "Aug 5, 2025 — It allows users to control the cursor, click, scroll and adjust brightness with finger gestures, providing a smooth, responsive and accessible ... 7 pages",
+    "host_name": "tijer.org",
+    "rank": 7,
+    "date": "Aug 5, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://ijsret.com/wp-content/uploads/2025/03/IJSRET_V11_issue2_812.pdf",
+    "name": "AI-Powered Virtual Mouse Controlled by Hand Gestures",
+    "snippet": "May 15, 2025 — Through the use of this technology, users are able to fluidly perform normal mouse functions such as dragging windows, minimizing programs,. Read more 7 pages",
+    "host_name": "ijsret.com",
+    "rank": 8,
+    "date": "May 15, 2025",
+    "favicon": ""
+  }
+]

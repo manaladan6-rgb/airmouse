@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://github.com/AchalTyagi/Air-Mouse",
+    "name": "️ AirMouse - Hand Gesture Virtual Mouse Control",
+    "snippet": "An advanced AI-powered virtual mouse that enables touchless computer control using hand gestures . Built with Python, OpenCV, and MediaPipe, it features a stable ...",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/virtual-mouse?o=desc&s=updated",
+    "name": "virtual-mouse · GitHub Topics",
+    "snippet": "AI-powered virtual mouse using hand gesture recognition with OpenCV. Control cursor movement, volume, and brightness using real-time hand gestures.",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/hand-gesture-mouse-controller",
+    "name": "hand-gesture-mouse-controller",
+    "snippet": "The project leverages MediaPipe for hand tracking to create a virtual mouse interface, enabling precise cursor control and clicking through intuitive hand ...",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/singharyans754/AI-Virtual-Mouse",
+    "name": "AI Virtual Mouse Using Hand Gestures",
+    "snippet": "The project uses computer vision techniques to recognize hand gestures and convert them into mouse movements. The application utilizes deep learning models to ...",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://circuitdigest.com/microcontroller-projects/esp32-air-mouse-using-hand-gesture-control",
+    "name": "ESP32 Air Mouse using Bluetooth and MPU6050",
+    "snippet": "Apr 22, 2025 — This project focuses on building a hand gesture control device using an ESP32 and an MPU6050 sensor. The MPU6050 acts as the primary sensor, ...",
+    "host_name": "circuitdigest.com",
+    "rank": 4,
+    "date": "Apr 22, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://q-viper.github.io/2021/07/12/air-mouse-control-mouse-with-gestures",
+    "name": "Air Mouse: Controlling Mouse With Gestures in Air",
+    "snippet": "Jul 12, 2021 — As the project name Air Mouse , it is a Computer Mouse except working by the Gestures of fingers. We will be using 2 python libraries, mouse and ...",
+    "host_name": "q-viper.github.io",
+    "rank": 5,
+    "date": "Jul 12, 2021",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/sarbosarcar/Air-Mouse",
+    "name": "sarbosarcar/Air-Mouse",
+    "snippet": "Air-mouse is a virtual mouse handling and operating tool allowing users to operate the mouse pointer using their hand gestures. - sarbosarcar/Air-Mouse.",
+    "host_name": "github.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  }
+]

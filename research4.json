@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://github.com/AchalTyagi/Air-Mouse",
+    "name": "️ AirMouse - Hand Gesture Virtual Mouse Control",
+    "snippet": "AirMouse is a Python-based application that converts hand gestures detected through your webcam into mouse movements and clicks.",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.researchgate.net/publication/392076847_AIRMOUSE_AI-Powered_Gesture_Control",
+    "name": "AIRMOUSE: AI-Powered Gesture Control",
+    "snippet": "May 31, 2026 — AirMouse is a novel, touchless cursor control system that leverages real-time hand- tracking and gesture-recognition technologies to replace ... Read more",
+    "host_name": "www.researchgate.net",
+    "rank": 1,
+    "date": "May 31, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://pavanelectrosource.com/esp8266-wifi-air-mouse-control-devices-with-hand-gestures",
+    "name": "ESP8266 WiFi Air Mouse – Control Devices with Hand",
+    "snippet": "Mar 9, 2026 — This project is an Air Mouse system that allows users to control a computer or smart device wirelessly using hand gestures. Read more",
+    "host_name": "pavanelectrosource.com",
+    "rank": 2,
+    "date": "Mar 9, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://play.google.com/store/apps/details?id=com.ginkage.wearmouse&hl=en_US",
+    "name": "WearMouse — Wear OS Air Mouse - Apps on Google Play",
+    "snippet": "This app allows you to use your Wear OS watch to remotely control ・ move the mouse pointer simply by waving your hand , The app features four input modes: air ...",
+    "host_name": "play.google.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://dl.ifip.org/db/conf/interact/interact2009-2/OrtegaN09.pdf",
+    "name": "AirMouse: Finger Gesture for 2D and 3D Interaction.",
+    "snippet": "by M Ortega · Cited by 40 — This paper presents AirMouse , a new interaction technique based on finger gestures above the laptop's keyboard. ing technique is based on computer vision for  ...",
+    "host_name": "dl.ifip.org",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://cheerdots.com/products/cheerdots2-air-mouse-voice-recorder?srsltid=AfmBOopNY-bBc_gd4urfGn-TVYG0RnlO399tiyBcvjwXEHcRQzpORVJl",
+    "name": "Wireless Office Mouse with Voice Recording | Cheerdots2",
+    "snippet": "Upgrade your meetings with Cheerdots2. This smart Bluetooth mouse detaches into an air mouse & wireless presentation clicker with voice recording.",
+    "host_name": "cheerdots.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://lablab.ai/ai-hackathons/ai-genesis/taurids/airmouse",
+    "name": "AI app: AirMouse for AI Genesis",
+    "snippet": "Nov 18, 2025 — AirMouse is an AI-powered desktop application that enables full mouse control using only hand movement. Using advanced real-time ... Read more",
+    "host_name": "lablab.ai",
+    "rank": 6,
+    "date": "Nov 18, 2025",
+    "favicon": ""
+  }
+]

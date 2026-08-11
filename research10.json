@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://www.reddit.com/r/Python/comments/1db05gm/archand_control_your_mouse_entirely_using_hand",
+    "name": "Archand: Control your mouse entirely using hand gestures.",
+    "snippet": "Archand allows you to control your mouse entirely using hand gestures which are performed in the air and captured via a webcam.",
+    "host_name": "www.reddit.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/hand-gesture-mouse-controller",
+    "name": "hand-gesture-mouse-controller",
+    "snippet": "This Python application enables control of the mouse cursor through hand gestures captured via webcam . It leverages Mediapipe for hand tracking and OpenCV ... Read more",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://towardsdatascience.com/i-ditched-my-mouse-how-i-control-my-computer-with-hand-gestures-in-60-lines-of-python",
+    "name": "I Ditched My Mouse: How I Control My Computer With",
+    "snippet": "Jan 28, 2026 — OpenCV is an extensive computer vision library that allows Python to access and process frames from a webcam . Put your hand in front of the  ...",
+    "host_name": "towardsdatascience.com",
+    "rank": 2,
+    "date": "Jan 28, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://online-journals.org/index.php/i-jim/article/view/51879/15789",
+    "name": "View of Hand Gesture Recognition for Virtual Mouse Control",
+    "snippet": "The webcam captures images, processes them, and interprets different hand and fingertip gestures to execute specific mouse commands. The virtual mouse system is ... Read more",
+    "host_name": "online-journals.org",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.facebook.com/groups/ComputerVisionGroup/posts/2194054807405375",
+    "name": "I have a project about using hand gesture to control mouse",
+    "snippet": "This Python application leverages computer vision to control the laptop's cursor using hand gestures . Python for scripting and implementation … ...",
+    "host_name": "www.facebook.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.geeksforgeeks.org/computer-vision/ai-virtual-mouse",
+    "name": "Real-Time AI Virtual Mouse System Using Computer Vision",
+    "snippet": "Jul 23, 2025 — Now we defines a Python class called \"Controller\" that provides methods for gesture recognition and control of various system functions such as ... Read more",
+    "host_name": "www.geeksforgeeks.org",
+    "rank": 5,
+    "date": "Jul 23, 2025",
+    "favicon": ""
+  }
+]

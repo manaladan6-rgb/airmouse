@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://github.com/ahmed-0egy/Hand-Gesture-Recognition-for-Cursor-Controlling",
+    "name": "ahmed-0egy/Hand-Gesture-Recognition-for-Cursor-",
+    "snippet": "This repository is a Python project that utilizes the Mediapipe library to recognize hand gestures through a webcam and control a computer's mouse cursor ...",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://towardsdatascience.com/i-ditched-my-mouse-how-i-control-my-computer-with-hand-gestures-in-60-lines-of-python",
+    "name": "I Ditched My Mouse: How I Control My Computer With",
+    "snippet": "Jan 28, 2026 — Hand Gestures (In 60 Lines of Python) A step-by-step guide to building a “Minority Report”-style interface. Control the mouse cursor simply by ...",
+    "host_name": "towardsdatascience.com",
+    "rank": 1,
+    "date": "Jan 28, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://app.readytensor.ai/publications/hand-cursor-M5YzfmJl5O5Z",
+    "name": "Hand Cursor",
+    "snippet": "Dec 29, 2024 — The Hand Cursor project offers an innovative solution for controlling a computer entirely through hand gestures , providing a hands-free ...",
+    "host_name": "app.readytensor.ai",
+    "rank": 2,
+    "date": "Dec 29, 2024",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.scribd.com/document/816092554/Project-Report-1-15",
+    "name": "Hand Gesture Virtual Mouse Project | PDF | Computer Vision",
+    "snippet": "The Principle application of this project is to imitate the mouse as a visual inputting device with all of its tasks such as left click, selecting, curser ...",
+    "host_name": "www.scribd.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://developers.google.com/edge/mediapipe/solutions/vision/gesture_recognizer",
+    "name": "Gesture recognition task guide | Google AI Edge",
+    "snippet": "May 28, 2026 — The MediaPipe Gesture Recognizer task lets you recognize hand gestures in real time, and provides the recognized hand gesture results. The ...",
+    "host_name": "developers.google.com",
+    "rank": 4,
+    "date": "May 28, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.facebook.com/groups/aitronix/posts/2551764158547926",
+    "name": "Introducing my latest project: a virtual mouse system using",
+    "snippet": "Hi everyone, There I present a hand gestures recognition system , based on Convolutional Neural Networks, that works on a Raspberry Pi. Read more",
+    "host_name": "www.facebook.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.researchgate.net/publication/381285096_Implementation_of_Hand_Gesture_Recognition_using_OpenCV",
+    "name": "Implementation of Hand Gesture Recognition using OpenCV",
+    "snippet": "Dec 17, 2024 — On May 17, 2024 , hand gesture recognition systems can detect and track hand movements in real-time,",
+    "host_name": "www.researchgate.net",
+    "rank": 6,
+    "date": "Dec 17, 2024",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@odil.tokhirov/how-i-built-a-hand-gesture-recognition-model-in-python-part-1-db378cf196e6",
+    "name": "How I Built a Hand Gesture Recognition Model in Python",
+    "snippet": "A hand gesture recognition model is a program that detects the hand , figures out which gesture the hand is performing, and predicts that gesture ... Read more",
+    "host_name": "medium.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  }
+]

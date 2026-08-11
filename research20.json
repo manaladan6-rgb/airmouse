@@ -1,0 +1,83 @@
+[
+  {
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC2410001",
+    "name": "A Gesture-based Tool for Sterile Browsing of Radiology Images - PMC",
+    "snippet": "They developed a computer vision system that enables surgeons to perform standard mouse functions (pointer movement and button presses) with hand gestures.",
+    "host_name": "pmc.ncbi.nlm.nih.gov",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.sciencedirect.com/science/article/pii/S153204641730165X",
+    "name": "On the utility of 3D hand cursors to explore medical volume datasets",
+    "snippet": "The main goals of this paper are to explore the capabilities of (simple) hand gestures to facilitate sterile manipulation of 3D medical data on a touchless ...",
+    "host_name": "www.sciencedirect.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@eng_elias/revolutionizing-input-building-an-ai-powered-virtual-mouse-and-keyboard-part1-from-concept-to-4d87ed931fd0",
+    "name": "Hand-Gesture Input: Building an AI-Powered Virtual Mouse and",
+    "snippet": "Dec 19, 2024 · Efficient hand landmark detection and tracking; Immediate translation of gestures to computer inputs; Smooth cursor movement interpolation. 2.2 ...",
+    "host_name": "medium.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://neural-lab.com/gesture-control",
+    "name": "Gesture Control and Hand Tracking Software | AirTouch - Neural Lab",
+    "snippet": "AirTouch turns any standard camera into a touchless interface, mapping hand gestures to the mouse, already understands. for sterile environments",
+    "host_name": "neural-lab.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://journals.sagepub.com/doi/10.1177/1460458217748342",
+    "name": "Touchless computer interfaces in hospitals: A review - Sage Journals",
+    "snippet": "Feb 10, 2018 · We present a review of touchless interaction with computer equipment in the hospital environment, based on a systematic search of the literature ...",
+    "host_name": "journals.sagepub.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.researchgate.net/publication/226193281_Gestix_A_Doctor-Computer_Sterile_Gesture_Interface_for_Dynamic_Environments",
+    "name": "Gestix: A Doctor-Computer Sterile Gesture Interface for Dynamic",
+    "snippet": "In this paper, we design a sterile gesture interface for users, such as doctors/surgeons, to browse medical images in a dynamic medical environment.",
+    "host_name": "www.researchgate.net",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.microsoft.com/en-gy/p/touch-on-air/9nfjhcg67p1z",
+    "name": "Touch On Air - Free download and install on Windows | Microsoft Store",
+    "snippet": "May 11, 2026 · -Medical & Sterile Environment Optimized: Features specialized color-recognition modes designed to flawlessly track hands even when wearing ... Description · System Requirements · Additional Information",
+    "host_name": "www.microsoft.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.semanticscholar.org/paper/Gestix%3A-A-Doctor-Computer-Sterile-Gesture-Interface-Wachs-Stern/af450da84a8f08f9093a4c282aaa04f8c07cac8c",
+    "name": "Gestix: A Doctor-Computer Sterile Gesture Interface for Dynamic",
+    "snippet": "A sterile gesture interface for users, such as doctors/surgeons, to browse medical images in a dynamic medical environment using a vision-based gesture ...",
+    "host_name": "www.semanticscholar.org",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.mpo-mag.com/exclusives/dont-touch-gesture-tech-is-reshaping-how-we-interact-with-devices",
+    "name": "Don't Touch: Gesture Tech Is Reshaping How We Interact with Devices",
+    "snippet": "Dec 2, 2019 · Microsoft has also worked on a camera-based gesture-recognition system designed to allow a surgeon in a sterile environment to interact with a ...",
+    "host_name": "www.mpo-mag.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  }
+]

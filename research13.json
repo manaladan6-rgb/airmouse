@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://apps.microsoft.com/detail/9p7md73v1nx1?hl=en-US&gl=US",
+    "name": "HandControl - Download and install on Windows",
+    "snippet": "Jun 24, 2026 — HandControl transforms your standard webcam into a high-precision spatial sensor , allowing you to control your Windows PC entirely through ... Read more",
+    "host_name": "apps.microsoft.com",
+    "rank": 0,
+    "date": "Jun 24, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://apps.microsoft.com/detail/9nvztnzdv336?hl=en-US&gl=US",
+    "name": "Gerik - Gesture Based Desktop Controller",
+    "snippet": "May 24, 2026 — Control your mouse or keyboard using hand and body gesture captured through a connected camera. This app also give you the hand and body gesture ... Read more",
+    "host_name": "apps.microsoft.com",
+    "rank": 1,
+    "date": "May 24, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://learn.microsoft.com/en-us/windows-app/input-keyboard-mouse-touch-pen",
+    "name": "Use keyboard, mouse, touch, and pen in Windows App",
+    "snippet": "Mar 31, 2026 — You can use touch gestures to replicate mouse actions in your remote session. Two mouse modes are available: Direct touch :",
+    "host_name": "learn.microsoft.com",
+    "rank": 2,
+    "date": "Mar 31, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://apps.microsoft.com/detail/9nfjhcg67p1z?hl=en-US&gl=US",
+    "name": "Touch On Air - Free download and install on Windows",
+    "snippet": "-Precision Hand Tracking: Enjoy smooth, real-time cursor control using just your webcam —no extra hardware required. -Medical & Sterile Environment Optimized: ... Read more",
+    "host_name": "apps.microsoft.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.facebook.com/groups/assistive.technology.group/posts/26500943936200720",
+    "name": "Access computer with facial gestures",
+    "snippet": "Gameface is completely free and uses your webcam . It has 5-6 facial gestures available for accessing mouse functions and/or keyboard keys and ... Read more",
+    "host_name": "www.facebook.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/Python/comments/1db05gm/archand_control_your_mouse_entirely_using_hand",
+    "name": "Archand: Control your mouse entirely using hand gestures.",
+    "snippet": "Archand allows you to control your mouse entirely using hand gestures which are performed in the air and captured via a webcam.",
+    "host_name": "www.reddit.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.microsoft.com/en-us/windows/digital-pen-touch-voice-features",
+    "name": "Windows 11 Voice Navigation, Digital Pen, and",
+    "snippet": "Windows 11 now recognizes more touch gestures . Easily switch between apps, drag and drop files, and manipulate content with a simple touch. ures Pinch to zoom, ...",
+    "host_name": "www.microsoft.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.microsoft.com/en-us/research/video/gesture-recognition-with-next-generation-webcam-2",
+    "name": "Gesture Recognition with Next-Generation Webcam",
+    "snippet": "Mar 6, 2012 — The new prototype webcam has an extremely wider view angle than traditional webcams and can capture stereo movie and high-accuracy depth images ... Read more",
+    "host_name": "www.microsoft.com",
+    "rank": 7,
+    "date": "Mar 6, 2012",
+    "favicon": ""
+  }
+]

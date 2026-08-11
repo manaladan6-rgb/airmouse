@@ -1,0 +1,56 @@
+[
+  {
+    "url": "https://www.reddit.com/r/Python/comments/1db05gm/archand_control_your_mouse_entirely_using_hand",
+    "name": "Archand: Control your mouse entirely using hand gestures.",
+    "snippet": "Archand allows you to control your mouse entirely using hand gestures which are performed in the air and captured via a webcam.",
+    "host_name": "www.reddit.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://support.apple.com/en-us/102482",
+    "name": "Use Multi-Touch gestures on Mac",
+    "snippet": "May 6, 2026 — Use three fingers to drag items on your screen , then click or tap to drop. Turn on this feature in Accessibility settings.",
+    "host_name": "support.apple.com",
+    "rank": 1,
+    "date": "May 6, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.facebook.com/groups/ComputerVisionGroup/posts/2194054807405375",
+    "name": "I have a project about using hand gesture to control mouse",
+    "snippet": "Here is an example of a gesture - controlled mouse which will enable one to control the movement of the cursor, perform left/right click , select, ...",
+    "host_name": "www.facebook.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://timingapp.com/blog/mac-trackpad-gestures",
+    "name": "Mac Trackpad Gestures: Swipe Your Way to a Smoother",
+    "snippet": "Mar 4, 2026 — Mac trackpad gestures let you navigate, multitask, and control your Mac with simple swipes, taps, and pinches. Key gestures include two-finger  ...",
+    "host_name": "timingapp.com",
+    "rank": 3,
+    "date": "Mar 4, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.researchgate.net/publication/390214710_Hand_Gesture_Controlled_Virtual_Mouse_based_on_ML_and_Computer_Vision",
+    "name": "Hand Gesture Controlled Virtual Mouse based on ML and",
+    "snippet": "Mar 27, 2025 — This paper proposes a hand gesture - controlled virtual mouse system that uses AI algorithms to recognize hand gestures and translate them into ... Read more",
+    "host_name": "www.researchgate.net",
+    "rank": 4,
+    "date": "Mar 27, 2025",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.macworld.com/article/670703/best-gestures-to-use-on-a-macs-mouse-and-trackpad.html",
+    "name": "Best gestures to use on a Mac's mouse and trackpad",
+    "snippet": "Dec 19, 2014 — Navigate quickly, zoom in and out, and learn to right click on a Mac. We show you how to control OS X with a Magic Mouse and Magic Trackpad.",
+    "host_name": "www.macworld.com",
+    "rank": 5,
+    "date": "Dec 19, 2014",
+    "favicon": ""
+  }
+]

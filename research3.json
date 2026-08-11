@@ -1,0 +1,65 @@
+[
+  {
+    "url": "https://github.com/whitehatboy005/Virtual-Mouse",
+    "name": "️ Virtual Mouse Using Hand Gestures",
+    "snippet": "Features · Hand Tracking: Utilizes Mediapipe to detect and track landmarks of the user's hand in real-time . · Cursor Control: Moves the mouse cursor based on ...",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=OA8mwoDTXtw",
+    "name": "Virtual AI Mouse | Hand Gesture Control | Python Tutorial",
+    "snippet": "Virtual Mouse Using Hand Gesture Recognition | AI Mouse | OpenCV Virtual Mouse | MediaPipe. Deepak Jose · 54K views ; Reddit May Have Just Found ...",
+    "host_name": "www.youtube.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@eng_elias/revolutionizing-input-building-an-ai-powered-virtual-mouse-and-keyboard-part1-from-concept-to-4d87ed931fd0",
+    "name": "Hand-Gesture Input: Building an AI-Powered Virtual Mouse",
+    "snippet": "At its core is MediaPipe's hand tracking technology , which maps 21 distinct points on your hand in real-time. The system focuses primarily on ...",
+    "host_name": "medium.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.scribd.com/document/852294121/Virtual-Mouse-Using-Hand-Gestures-Project",
+    "name": "AI Virtual Mouse via Hand Gestures | PDF | Computer Vision",
+    "snippet": "The integration of MediaPipe in the virtual mouse system enhances performance by leveraging its efficient multi-stage ML pipeline for hand and finger tracking,",
+    "host_name": "www.scribd.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.irjweb.com/user_upload/HAND%20GESTURE%20CONTROLLED%20VIRTUAL%20MOUSE%20USING%20OPENCV,MEDIAPIPE%20IN%20PYTHON.pdf",
+    "name": "HAND GESTURE CONTROLLED VIRTUAL MOUSE",
+    "snippet": "This project implements a virtual mouse using Python, OpenCV, and MediaPipe to track hand movements through a live video feed , enabling real-time actions like ... 3 pages",
+    "host_name": "www.irjweb.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.slideshare.net/slideshow/virtual-mouse-using-hand-gesturepptx/254142586",
+    "name": "virtual mouse using hand gesture.pptx",
+    "snippet": "This document describes a virtual mouse system that uses hand gestures as detected by a webcam to control the computer cursor and perform mouse functions like",
+    "host_name": "www.slideshare.net",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://online.coolestprojects.org/projects/14640",
+    "name": "Coolest Projects Online: AI Virtual Control",
+    "snippet": "This project is a hand gesture recognition and control system . It can move the mouse cursor, perform clicks, control scroll, and even adjust system volume and ...",
+    "host_name": "online.coolestprojects.org",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  }
+]
