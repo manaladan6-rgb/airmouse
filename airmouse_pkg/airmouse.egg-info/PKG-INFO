@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: airmouse
-Version: 2.1.0
+Version: 2.1.1
 Summary: AirMouse Iron Man Edition — physics-driven finger-relative mouse with gesture recognition, momentum throw, and adaptive spring-damper physics
 Author: AirMouse
 License-Expression: MIT
@@ -10,4 +10,5 @@ Requires-Dist: mediapipe>=0.10.9
 Requires-Dist: opencv-python>=4.8.0
 Requires-Dist: pynput>=1.7.6
 Requires-Dist: numpy>=1.24.0
-Requires-Dist: simpleaudio>=1.0.4
+Provides-Extra: sound
+Requires-Dist: sounddevice>=0.5.0; extra == "sound"

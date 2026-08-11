@@ -2,4 +2,6 @@ mediapipe>=0.10.9
 opencv-python>=4.8.0
 pynput>=1.7.6
 numpy>=1.24.0
-simpleaudio>=1.0.4
+
+[sound]
+sounddevice>=0.5.0
