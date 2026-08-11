@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "airmouse"
-version = "2.1.1"
-description = "AirMouse Iron Man Edition — physics-driven finger-relative mouse with gesture recognition, momentum throw, and adaptive spring-damper physics"
+version = "3.0.0"
+description = "AirMouse Iron Man Next-Gen Edition — 14-gesture physics-driven finger-relative mouse with momentum throw, adaptive spring-damper, and interactive tutorial"
 license = "MIT"
 requires-python = ">=3.9"
 authors = [{name = "AirMouse"}]

@@ -45,6 +45,7 @@ class Config:
 
     # Gesture thresholds
     pinch_threshold = 0.06
+    gesture_confirm_frames = 3  # Frames to confirm a gesture (state machine)
 
     # Click
     pinch_cooldown = 0.25
@@ -70,7 +71,7 @@ class Config:
             return
         os.makedirs(CONFIG_DIR, exist_ok=True)
         lines = [
-            "# AirMouse v2.0 Configuration — Iron Man Edition",
+            "# AirMouse v3.0 Configuration — Iron Man Next-Gen Edition",
             "# Edit this file to customize your airmouse feel.",
             "",
             "[physics]",
@@ -96,6 +97,7 @@ class Config:
             "[gesture]",
             f"pinch_threshold = {self.pinch_threshold}",
             f"pinch_cooldown = {self.pinch_cooldown}",
+            f"confirm_frames = {self.gesture_confirm_frames}   # Frames to confirm gesture (anti-misfire)",
             "",
             "[camera]",
             f"index = {self.camera_index}",
@@ -148,6 +150,7 @@ class Config:
                 g = data["gesture"]
                 self.pinch_threshold = g.get("pinch_threshold", self.pinch_threshold)
                 self.pinch_cooldown = g.get("pinch_cooldown", self.pinch_cooldown)
+                self.gesture_confirm_frames = g.get("confirm_frames", self.gesture_confirm_frames)
 
             if "camera" in data:
                 c = data["camera"]

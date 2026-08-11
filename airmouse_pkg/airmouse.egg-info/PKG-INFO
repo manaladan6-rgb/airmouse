@@ -1,7 +1,7 @@
 Metadata-Version: 2.4
 Name: airmouse
-Version: 2.1.1
-Summary: AirMouse Iron Man Edition — physics-driven finger-relative mouse with gesture recognition, momentum throw, and adaptive spring-damper physics
+Version: 3.0.0
+Summary: AirMouse Iron Man Next-Gen Edition — 14-gesture physics-driven finger-relative mouse with momentum throw, adaptive spring-damper, and interactive tutorial
 Author: AirMouse
 License-Expression: MIT
 Keywords: airmouse,hand-tracking,gesture,mouse,physics,mediapipe,iron-man

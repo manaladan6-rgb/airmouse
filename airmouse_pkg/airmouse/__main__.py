@@ -1,17 +1,21 @@
 """
-AirMouse v2.0 — Iron Man Edition
+AirMouse v3.0 — Iron Man Next-Gen Edition
 
     airmouse              # Start with tutorial (first run)
     airmouse --skip       # Skip tutorial
     airmouse --tutorial   # Force tutorial
 
-Gestures:
-    Point    (1)  → Move cursor          Pinch (🤏)  → Left click
-    Peace    (✌️) → Right click          Palm  (🖐️)  → Drag mode
-    Fist     (✊) → Freeze cursor        Thumb (👍)  → Double click
-    Three    (3)  → Scroll mode          Pinky (🤙)  → Middle click
-    Gun      (👉) → Snap to center       Rock  (🤘)  → Minimize
-    Shaka    (🤙) → Volume mode          Swipe → Back/Forward
+14 Gestures:
+    Point   (1)  -> Move cursor          Pinch  (2)  -> Left click
+    Peace   (3)  -> Right click          Palm   (4)  -> Drag mode
+    Fist    (5)  -> Freeze cursor        Thumb  (6)  -> Double click
+    Three   (7)  -> Scroll mode          Pinky  (8)  -> Middle click
+    Gun     (9)  -> Snap to center       Rock   (10) -> Minimize
+    Shaka   (11) -> Volume mode          OK     (12) -> Close window
+    Ring    (13) -> Brightness mode      Six    (14) -> Task switcher
+
+Swipe:
+    Left  -> Browser back    Right -> Browser forward
 """
 
 import os
@@ -26,7 +30,8 @@ import airmouse as _pkg
 from .physics import (JitterFilter, HomePosition, ExponentialCurve,
                        AdaptiveSpringDamper, MomentumThrow, EdgeGravity)
 from .tracker import HandTracker
-from .gestures import recognize_gesture, SwipeDetector, Gesture, GESTURE_INFO
+from .gestures import (recognize_gesture, SwipeDetector, GestureStateMachine,
+                        Gesture, GESTURE_INFO)
 from .mouse_controller import MouseController
 from .audio import AudioFeedback
 from .config import Config, CONFIG_PATH
@@ -54,7 +59,8 @@ def _get_screen_size():
     return 1920, 1080
 
 
-def _draw_hud(frame, gesture_result, spring, fps, config, frozen, dragging, scrolling):
+def _draw_hud(frame, gesture_result, spring, fps, config,
+              frozen, dragging, scrolling, volume_mode, brightness_mode):
     """Draw Iron Man HUD overlay."""
     if frame is None:
         return
@@ -67,7 +73,9 @@ def _draw_hud(frame, gesture_result, spring, fps, config, frozen, dragging, scro
         Gesture.FIST: (0, 0, 255), Gesture.THUMBS_UP: (0, 200, 0),
         Gesture.THREE: (255, 0, 255), Gesture.PINKY: (200, 200, 0),
         Gesture.GUN: (0, 200, 200), Gesture.ROCK: (200, 0, 200),
-        Gesture.SHAKA: (0, 200, 100), "none": (80, 80, 80),
+        Gesture.SHAKA: (0, 200, 100), Gesture.OK: (0, 215, 255),
+        Gesture.RING: (255, 200, 0), Gesture.SIX: (100, 200, 200),
+        "none": (80, 80, 80),
     }
     color = colors.get(gesture, (80, 80, 80))
 
@@ -89,11 +97,15 @@ def _draw_hud(frame, gesture_result, spring, fps, config, frozen, dragging, scro
         badges.append(("DRAG", (255, 128, 0)))
     if scrolling:
         badges.append(("SCROLL", (255, 0, 255)))
+    if volume_mode:
+        badges.append(("VOL", (0, 200, 100)))
+    if brightness_mode:
+        badges.append(("BRIGHT", (255, 200, 0)))
     bx = 10
     for bt, bc in badges:
         cv2.putText(frame, bt, (bx, h - 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, bc, 2, cv2.LINE_AA)
-        bx += 110
+        bx += 100
 
     # Stats
     k = spring.current_stiffness
@@ -120,23 +132,25 @@ def _draw_hud(frame, gesture_result, spring, fps, config, frozen, dragging, scro
 
 def _show_quick_reference():
     """Print gesture reference to terminal."""
-    print("  ┌────────────────────────────────────────────────────┐")
-    print("  │              GESTURE QUICK REFERENCE                │")
-    print("  ├────────────────────────────────────────────────────┤")
+    print("  +------------------------------------------------------+")
+    print("  |              GESTURE QUICK REFERENCE                  |")
+    print("  +------------------------------------------------------+")
     for g in [Gesture.POINTING, Gesture.PINCH, Gesture.PEACE, Gesture.PALM,
               Gesture.FIST, Gesture.THUMBS_UP, Gesture.THREE, Gesture.PINKY,
-              Gesture.GUN, Gesture.ROCK, Gesture.SHAKA]:
+              Gesture.GUN, Gesture.ROCK, Gesture.SHAKA, Gesture.OK,
+              Gesture.RING, Gesture.SIX]:
         info = GESTURE_INFO[g]
-        print(f"  │  {info['emoji']}  {info['name']:<12} {info['desc']:<24} → {info['action']:<20}│")
-    print("  │  ↔  Swipe Left   Fast left motion              → Browser Back       │")
-    print("  │  ↔  Swipe Right  Fast right motion             → Browser Forward    │")
-    print("  └────────────────────────────────────────────────────┘")
+        row = f"  |  {info['emoji']:>2}  {info['name']:<10} {info['desc']:<28} -> {info['action']:<22}|"
+        print(row)
+    print("  |  <-  Swipe Left   Fast left motion              -> Browser Back       |")
+    print("  |  ->  Swipe Right  Fast right motion             -> Browser Forward    |")
+    print("  +------------------------------------------------------+")
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="airmouse",
-        description="AirMouse v2.0 — Iron Man Edition",
+        description="AirMouse v3.0 — Iron Man Next-Gen Edition",
     )
     parser.add_argument("--skip", action="store_true", help="Skip tutorial")
     parser.add_argument("--tutorial", action="store_true", help="Force tutorial")
@@ -195,6 +209,7 @@ def main():
     momentum = MomentumThrow(friction=config.throw_friction, min_speed=config.throw_min_speed)
     edge_grav = EdgeGravity(strength=config.edge_gravity_strength, edge_zone=config.edge_gravity_zone)
     swipe = SwipeDetector()
+    gsm = GestureStateMachine(confirm_frames=config.gesture_confirm_frames)
 
     # State
     center = np.array([screen_w / 2.0, screen_h / 2.0])
@@ -207,6 +222,7 @@ def main():
     dragging = False
     scrolling = False
     volume_mode = False
+    brightness_mode = False
     scroll_accum = 0.0
     prev_index_y = None
     prev_pos = None
@@ -214,13 +230,25 @@ def main():
     frame_times = []
     debug_mode = True
 
+    # Keyboard actions (lazy)
+    kb = None
+    def _kb():
+        nonlocal kb
+        if kb is None:
+            try:
+                from .keyboard import KeyboardActions
+                kb = KeyboardActions()
+            except Exception:
+                pass
+        return kb
+
     # Banner
     print()
-    print("  ╔════════════════════════════════════════════╗")
-    print(f"  ║       AirMouse v{_pkg.__version__} — Iron Man Edition    ║")
-    print("  ║   Finger-relative physics-driven mouse      ║")
-    print("  ╚════════════════════════════════════════════╝")
-    print(f"  Screen: {screen_w}x{screen_h}  |  Audio: {'ON' if config.audio_enabled else 'OFF'}")
+    print("  +==================================================+")
+    print(f"  |     AirMouse v{_pkg.__version__} — Iron Man Next-Gen Edition  |")
+    print("  |     14 gestures | Physics cursor | Finger-relative  |")
+    print("  +==================================================+")
+    print(f"  Screen: {screen_w}x{screen_h}  |  Audio: {'ON' if config.audio_enabled else 'OFF'}  |  Gestures: 14+2 swipe")
     _show_quick_reference()
     print("  [q] quit  [d] debug  [r] recalibrate  [s] sound  [t] tutorial")
     print()
@@ -236,7 +264,12 @@ def main():
             if hand_data["hand_found"] and hand_data["landmarks"] is not None:
                 gesture_result = recognize_gesture(hand_data["landmarks"],
                                                     pinch_threshold=config.pinch_threshold)
-                gesture = gesture_result["gesture"]
+                raw_gesture = gesture_result["gesture"]
+
+                # Gesture state machine — prevents accidental triggers
+                gesture = gsm.update(raw_gesture)
+                gesture_changed = (gesture != prev_gesture)
+
                 raw_pos = gesture_result["index_pos"]
 
                 # Jitter
@@ -261,54 +294,67 @@ def main():
                 prev_pos = filtered_pos.copy()
 
                 if swipe_gesture == Gesture.SWIPE_LEFT:
-                    try:
-                        from .keyboard import KeyboardActions
-                        KeyboardActions().browser_back()
+                    k = _kb()
+                    if k:
+                        k.browser_back()
                         audio.click()
-                    except Exception:
-                        pass
                 elif swipe_gesture == Gesture.SWIPE_RIGHT:
-                    try:
-                        from .keyboard import KeyboardActions
-                        KeyboardActions().browser_forward()
+                    k = _kb()
+                    if k:
+                        k.browser_forward()
                         audio.click()
-                    except Exception:
-                        pass
 
                 # === GESTURE ACTIONS ===
 
-                # PINCH → Left click
-                if gesture == Gesture.PINCH and prev_gesture != Gesture.PINCH:
+                # PINCH -> Left click
+                if gesture == Gesture.PINCH and gesture_changed:
                     if now - last_click_time > config.pinch_cooldown:
                         mouse.left_click()
                         audio.click()
                         last_click_time = now
 
-                # PEACE → Right click
-                elif gesture == Gesture.PEACE and prev_gesture != Gesture.PEACE:
+                # PEACE -> Right click
+                elif gesture == Gesture.PEACE and gesture_changed:
                     if now - last_click_time > config.pinch_cooldown:
                         mouse.right_click()
                         audio.right_click()
                         last_click_time = now
 
-                # THUMBS UP → Double click
-                elif gesture == Gesture.THUMBS_UP and prev_gesture != Gesture.THUMBS_UP:
+                # THUMBS_UP -> Double click
+                elif gesture == Gesture.THUMBS_UP and gesture_changed:
                     mouse.double_click()
                     audio.click()
                     last_click_time = now
 
-                # PINKY → Middle click
-                elif gesture == Gesture.PINKY and prev_gesture != Gesture.PINKY:
-                    mouse.mouse.click(mouse.mouse.Button.middle, 1)
+                # PINKY -> Middle click
+                elif gesture == Gesture.PINKY and gesture_changed:
+                    try:
+                        mouse.mouse.click(mouse.mouse.Button.middle, 1)
+                    except Exception:
+                        pass
                     audio.right_click()
                     last_click_time = now
 
-                # FIST → Toggle freeze
-                elif gesture == Gesture.FIST and prev_gesture != Gesture.FIST:
+                # FIST -> Toggle freeze
+                elif gesture == Gesture.FIST and gesture_changed:
                     cursor_frozen = not cursor_frozen
                     audio.freeze()
 
-                # PALM → Drag
+                # OK -> Close window (Alt+F4)
+                elif gesture == Gesture.OK and gesture_changed:
+                    k = _kb()
+                    if k:
+                        k.close_window()
+                        audio.click()
+
+                # SIX -> Task switcher (Alt+Tab)
+                elif gesture == Gesture.SIX and gesture_changed:
+                    k = _kb()
+                    if k:
+                        k.switch_window()
+                        audio.click()
+
+                # PALM -> Drag
                 if gesture == Gesture.PALM and not dragging:
                     mouse.start_drag()
                     dragging = True
@@ -317,10 +363,10 @@ def main():
                     mouse.stop_drag()
                     dragging = False
 
-                # THREE → Scroll mode
+                # THREE -> Scroll mode
                 if gesture == Gesture.THREE:
                     scrolling = True
-                    if prev_gesture != Gesture.THREE:
+                    if gesture_changed:
                         prev_index_y = filtered_pos[1]
                         scroll_accum = 0.0
                     if prev_index_y is not None:
@@ -334,45 +380,60 @@ def main():
                 else:
                     scrolling = False
 
-                # GUN → Snap to center
-                if gesture == Gesture.GUN and prev_gesture != Gesture.GUN:
+                # GUN -> Snap to center
+                if gesture == Gesture.GUN and gesture_changed:
                     spring.reset(center)
                     mouse.move_to(center[0], center[1])
                     home.reset()
                     audio.click()
 
-                # ROCK → Minimize
-                if gesture == Gesture.ROCK and prev_gesture != Gesture.ROCK:
-                    try:
-                        from .keyboard import KeyboardActions
-                        KeyboardActions().minimize_window()
+                # ROCK -> Minimize
+                if gesture == Gesture.ROCK and gesture_changed:
+                    k = _kb()
+                    if k:
+                        k.minimize_window()
                         audio.click()
-                    except Exception:
-                        pass
 
-                # SHAKA → Volume mode
+                # SHAKA -> Volume mode (move up/down to adjust)
                 if gesture == Gesture.SHAKA:
                     volume_mode = True
-                    if prev_gesture != Gesture.SHAKA:
+                    if gesture_changed:
                         prev_index_y = filtered_pos[1]
                     if prev_index_y is not None:
                         vd = filtered_pos[1] - prev_index_y
                         if abs(vd) > 0.02:
-                            try:
-                                from .keyboard import KeyboardActions
-                                kb = KeyboardActions()
+                            k = _kb()
+                            if k:
                                 if vd > 0:
-                                    kb.volume_down()
+                                    k.volume_down()
                                 else:
-                                    kb.volume_up()
-                            except Exception:
-                                pass
+                                    k.volume_up()
                             prev_index_y = filtered_pos[1]
                 else:
                     volume_mode = False
 
-                # POINTING → Move cursor
-                if gesture == Gesture.POINTING and not cursor_frozen:
+                # RING -> Brightness mode (move up/down to adjust)
+                if gesture == Gesture.RING:
+                    brightness_mode = True
+                    if gesture_changed:
+                        prev_index_y = filtered_pos[1]
+                    if prev_index_y is not None:
+                        bd = filtered_pos[1] - prev_index_y
+                        if abs(bd) > 0.03:
+                            k = _kb()
+                            if k:
+                                if bd > 0:
+                                    k.brightness_down()
+                                else:
+                                    k.brightness_up()
+                            prev_index_y = filtered_pos[1]
+                else:
+                    brightness_mode = False
+
+                # POINTING (or any non-special gesture) -> Move cursor
+                if gesture in (Gesture.POINTING, Gesture.PEACE,
+                               Gesture.THUMBS_UP, Gesture.PINKY,
+                               Gesture.GUN, Gesture.ROCK) and not cursor_frozen:
                     cursor_pos = spring.update(screen_target, dt)
                     cursor_pos += edge_grav.apply(cursor_pos, screen_w, screen_h)
                     cursor_pos += momentum.update(spring.velocity, True, dt)
@@ -403,6 +464,7 @@ def main():
                 jitter_x.reset()
                 jitter_y.reset()
                 home.reset()
+                gsm.reset()
                 prev_gesture = Gesture.NONE
                 prev_index_y = None
                 prev_pos = None
@@ -411,11 +473,13 @@ def main():
                     dragging = False
                 scrolling = False
                 volume_mode = False
+                brightness_mode = False
 
             # Debug display
             if config.show_camera and debug_mode and hand_data["frame"] is not None:
                 _draw_hud(hand_data["frame"], gesture_result, spring, fps,
-                          config, cursor_frozen, dragging, scrolling)
+                          config, cursor_frozen, dragging, scrolling,
+                          volume_mode, brightness_mode)
                 cv2.imshow("AirMouse", hand_data["frame"])
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):

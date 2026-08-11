@@ -28,6 +28,9 @@ TUTORIAL_GESTURES = [
     Gesture.GUN,
     Gesture.ROCK,
     Gesture.SHAKA,
+    Gesture.OK,
+    Gesture.RING,
+    Gesture.SIX,
 ]
 
 
@@ -41,6 +44,8 @@ ORANGE = (0, 165, 255)
 PURPLE = (255, 0, 255)
 DARK = (40, 40, 40)
 DARK_GREEN = (0, 120, 0)
+GOLD = (0, 215, 255)
+GRAY = (120, 120, 120)
 
 
 def _draw_centered_text(frame, text, y, font_scale=0.8, color=WHITE, thickness=2):
@@ -63,19 +68,86 @@ def _draw_progress_bar(frame, progress, y, h=8):
     cv2.rectangle(frame, (50, y), (50 + fill_w, y + h), CYAN, -1)
 
 
-def _draw_countdown(frame, count, y):
-    """Draw countdown circles."""
+def _draw_dots(frame, count, total, y, radius=10, spacing=40):
+    """Draw progress dots."""
     fh, fw = frame.shape[:2]
-    spacing = 50
-    start_x = (fw - (len(TUTORIAL_GESTURES) * spacing)) // 2
-    for i in range(len(TUTORIAL_GESTURES)):
+    start_x = (fw - (total * spacing)) // 2
+    for i in range(total):
         cx = start_x + i * spacing
         if i < count:
-            cv2.circle(frame, (cx, y), 12, GREEN, -1)
+            cv2.circle(frame, (cx, y), radius, GREEN, -1)
+            cv2.circle(frame, (cx, y), radius + 2, GREEN, 1)
         elif i == count:
-            cv2.circle(frame, (cx, y), 12, CYAN, 3)
+            cv2.circle(frame, (cx, y), radius, CYAN, 3)
         else:
-            cv2.circle(frame, (cx, y), 12, DARK, 2)
+            cv2.circle(frame, (cx, y), radius, DARK, 2)
+
+
+def _draw_gesture_silhouette(frame, gesture, cx, cy, size=60):
+    """Draw a simple visual hint for the gesture using basic shapes."""
+    s = size
+    # Draw a circle as palm base
+    palm_color = CYAN
+
+    if gesture == Gesture.POINTING:
+        # Index pointing up
+        cv2.circle(frame, (cx, cy), s // 3, palm_color, 2)
+        cv2.line(frame, (cx, cy - s // 3), (cx, cy - s), palm_color, 3)
+        cv2.circle(frame, (cx, cy - s), 6, palm_color, -1)
+    elif gesture == Gesture.PINCH:
+        # Thumb + index pinch
+        cv2.circle(frame, (cx, cy), s // 3, palm_color, 2)
+        cv2.line(frame, (cx - s // 3, cy), (cx - s // 2, cy - s // 2), palm_color, 3)
+        cv2.line(frame, (cx + s // 3, cy), (cx + s // 2, cy - s // 2), palm_color, 3)
+        cv2.circle(frame, (cx, cy - s // 3), 8, GREEN, -1)
+    elif gesture == Gesture.PEACE:
+        # V sign
+        cv2.circle(frame, (cx, cy), s // 3, palm_color, 2)
+        cv2.line(frame, (cx - 10, cy - s // 3), (cx - 15, cy - s), palm_color, 3)
+        cv2.line(frame, (cx + 10, cy - s // 3), (cx + 15, cy - s), palm_color, 3)
+    elif gesture == Gesture.FIST:
+        cv2.circle(frame, (cx, cy), s // 2, palm_color, 2)
+        cv2.line(frame, (cx - s // 3, cy), (cx + s // 3, cy), palm_color, 3)
+    elif gesture == Gesture.PALM:
+        for dx in [-20, -10, 0, 10, 20]:
+            cv2.line(frame, (cx + dx, cy + s // 3), (cx + dx, cy - s // 2), palm_color, 2)
+        cv2.line(frame, (cx - 25, cy + s // 3), (cx + 25, cy + s // 3), palm_color, 2)
+    elif gesture == Gesture.THUMBS_UP:
+        cv2.circle(frame, (cx, cy), s // 3, palm_color, 2)
+        cv2.line(frame, (cx, cy - s // 3), (cx, cy - s), palm_color, 3)
+        cv2.circle(frame, (cx, cy - s), 8, GREEN, -1)
+        cv2.line(frame, (cx - s // 3, cy + 5), (cx + s // 3, cy + 5), palm_color, 3)
+    elif gesture == Gesture.THREE:
+        cv2.circle(frame, (cx, cy), s // 3, palm_color, 2)
+        for dx in [-15, 0, 15]:
+            cv2.line(frame, (cx + dx, cy - s // 3), (cx + dx, cy - s), palm_color, 2)
+    elif gesture == Gesture.PINKY:
+        cv2.circle(frame, (cx, cy), s // 3, palm_color, 2)
+        cv2.line(frame, (cx + 20, cy - s // 3), (cx + 20, cy - s), palm_color, 3)
+    elif gesture == Gesture.GUN:
+        cv2.circle(frame, (cx, cy), s // 3, palm_color, 2)
+        cv2.line(frame, (cx, cy - s // 3), (cx, cy - s), palm_color, 3)
+        cv2.line(frame, (cx - s // 3, cy), (cx - s // 2, cy), palm_color, 3)
+    elif gesture == Gesture.ROCK:
+        cv2.circle(frame, (cx, cy), s // 3, palm_color, 2)
+        cv2.line(frame, (cx - 15, cy - s // 3), (cx - 15, cy - s), palm_color, 3)
+        cv2.line(frame, (cx + 20, cy - s // 3), (cx + 20, cy - s), palm_color, 3)
+    elif gesture == Gesture.SHAKA:
+        cv2.circle(frame, (cx, cy), s // 3, palm_color, 2)
+        cv2.line(frame, (cx - s // 3, cy), (cx - s // 2, cy), palm_color, 3)
+        cv2.line(frame, (cx + 20, cy - s // 3), (cx + 20, cy - s), palm_color, 3)
+    elif gesture == Gesture.OK:
+        cv2.circle(frame, (cx, cy), s // 3, palm_color, 2)
+        cv2.circle(frame, (cx, cy - s // 3), 12, GREEN, 2)
+    elif gesture == Gesture.RING:
+        cv2.circle(frame, (cx, cy), s // 3, palm_color, 2)
+        cv2.line(frame, (cx, cy - s // 3), (cx, cy - s), palm_color, 3)
+        cv2.circle(frame, (cx, cy - s), 8, GOLD, -1)
+    elif gesture == Gesture.SIX:
+        cv2.circle(frame, (cx, cy), s // 3, palm_color, 2)
+        cv2.line(frame, (cx - s // 3, cy), (cx - s // 2, cy), palm_color, 3)
+        cv2.line(frame, (cx - 10, cy - s // 3), (cx - 10, cy - s), palm_color, 3)
+        cv2.line(frame, (cx + 20, cy - s // 3), (cx + 20, cy - s), palm_color, 3)
 
 
 def run_tutorial(tracker):
@@ -84,11 +156,11 @@ def run_tutorial(tracker):
     Returns True if tutorial completed, False if skipped.
     """
     print()
-    print("  ╔════════════════════════════════════════════╗")
-    print("  ║       AirMouse Gesture Tutorial              ║")
-    print("  ╚════════════════════════════════════════════╝")
+    print("  +============================================+")
+    print("  |       AirMouse v3.0 Gesture Tutorial        |")
+    print("  |       Learn every gesture before you start   |")
+    print("  +============================================+")
     print()
-    print("  I'll teach you every gesture one by one.")
     print("  Hold each gesture for 1 second to pass.")
     print("  [SPACE] skip gesture  [ESC] skip tutorial")
     print()
@@ -97,9 +169,9 @@ def run_tutorial(tracker):
     gesture_hold_start = None
     HOLD_DURATION = 1.0  # Seconds to hold gesture
 
-    completed = False
+    total = len(TUTORIAL_GESTURES)
 
-    while current_idx < len(TUTORIAL_GESTURES):
+    while current_idx < total:
         target_gesture = TUTORIAL_GESTURES[current_idx]
         info = GESTURE_INFO[target_gesture]
 
@@ -135,64 +207,69 @@ def run_tutorial(tracker):
 
         # === Draw Tutorial UI ===
 
-        # Dark overlay at top
+        # Dark overlay at top and bottom
         overlay = frame.copy()
-        cv2.rectangle(overlay, (0, 0), (w, 200), (0, 0, 0), -1)
+        cv2.rectangle(overlay, (0, 0), (w, 280), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
 
-        # Title
-        _draw_centered_text(frame, "AIRMOUSE GESTURE TUTORIAL", 45,
-                            font_scale=1.0, color=CYAN, thickness=2)
+        # Step counter
+        step_text = f"STEP {current_idx + 1} / {total}"
+        _draw_centered_text(frame, step_text, 30,
+                            font_scale=0.5, color=GRAY, thickness=1)
 
-        # Gesture name + emoji
-        title = f'{info["emoji"]}  {info["name"].upper()}'
-        _draw_centered_text(frame, title, 90,
-                            font_scale=1.2, color=WHITE, thickness=3)
+        # Title
+        _draw_centered_text(frame, "AIRMOUSE GESTURE TUTORIAL", 55,
+                            font_scale=0.9, color=CYAN, thickness=2)
+
+        # Gesture name
+        title = f'{info["name"].upper()}'
+        _draw_centered_text(frame, title, 100,
+                            font_scale=1.4, color=WHITE, thickness=3)
+
+        # Gesture silhouette
+        _draw_gesture_silhouette(frame, target_gesture, w // 2, 180, size=50)
 
         # Description
-        _draw_centered_text(frame, info["desc"], 135,
-                            font_scale=0.7, color=YELLOW, thickness=1)
+        _draw_centered_text(frame, info["desc"], 245,
+                            font_scale=0.6, color=YELLOW, thickness=1)
 
         # Action
-        action_text = f'Action: {info["action"]}'
-        _draw_centered_text(frame, action_text, 170,
-                            font_scale=0.6, color=GREEN, thickness=1)
+        action_text = f'>> {info["action"]} <<'
+        _draw_centered_text(frame, action_text, 270,
+                            font_scale=0.55, color=GREEN, thickness=1)
 
         # Progress bar
-        progress = current_idx / len(TUTORIAL_GESTURES)
-        _draw_progress_bar(frame, progress, 200)
+        progress = current_idx / total
+        _draw_progress_bar(frame, progress, 290)
 
         # Gesture dots
-        _draw_countdown(frame, current_idx, 230)
+        _draw_dots(frame, current_idx, total, 310, radius=6, spacing=28)
 
         # Hold indicator
         if correct and gesture_hold_start is not None:
             hold_progress = hold_time / HOLD_DURATION
             bar_w = 300
             bx = (w - bar_w) // 2
-            by = 270
+            by = 340
             cv2.rectangle(frame, (bx, by), (bx + bar_w, by + 20), DARK, -1)
             fill = int(bar_w * hold_progress)
             cv2.rectangle(frame, (bx, by), (bx + fill, by + 20), GREEN, -1)
             cv2.rectangle(frame, (bx, by), (bx + bar_w, by + 20), GREEN, 2)
-            _draw_centered_text(frame, "HOLD...", by + 55,
+            _draw_centered_text(frame, "HOLD...", by + 50,
                                 font_scale=0.7, color=GREEN, thickness=2)
         else:
-            _draw_centered_text(frame, "Show this gesture now", 300,
+            _draw_centered_text(frame, "Show this gesture now", 370,
                                 font_scale=0.7, color=WHITE, thickness=1)
 
-        # Detected gesture indicator (bottom)
-        cv2.rectangle(frame, (0, h - 80), (w, h), (0, 0, 0), -1)
-        cv2.addWeighted(overlay, 0.0, frame, 1.0, 0, frame)
-
+        # Bottom bar — detected gesture
+        cv2.rectangle(frame, (0, h - 70), (w, h), (0, 0, 0), -1)
         det_color = GREEN if correct else RED
         det_text = f"Detected: {detected_gesture.upper()}"
-        _draw_centered_text(frame, det_text, h - 30,
-                            font_scale=0.6, color=det_color, thickness=1)
+        _draw_centered_text(frame, det_text, h - 25,
+                            font_scale=0.55, color=det_color, thickness=1)
 
-        # Instructions
         _draw_centered_text(frame, "[SPACE] Skip   [ESC] Exit Tutorial",
-                            h - 55, font_scale=0.5, color=(150, 150, 150), thickness=1)
+                            h - 50, font_scale=0.45, color=GRAY, thickness=1)
 
         # Show frame
         cv2.imshow("AirMouse Tutorial", frame)
@@ -206,9 +283,8 @@ def run_tutorial(tracker):
             current_idx += 1
             gesture_hold_start = None
 
-    # Tutorial complete!
-    # Show celebration screen
-    for _ in range(90):
+    # Tutorial complete! — Celebration
+    for frame_idx in range(90):
         hand_data = tracker.read()
         frame = hand_data["frame"]
         if frame is None:
@@ -219,12 +295,16 @@ def run_tutorial(tracker):
         cv2.rectangle(overlay, (0, 0), (w, h), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
 
-        _draw_centered_text(frame, "TUTORIAL COMPLETE!", h // 2 - 40,
-                            font_scale=1.2, color=GREEN, thickness=3)
-        _draw_centered_text(frame, "You're ready to use AirMouse!", h // 2 + 10,
-                            font_scale=0.7, color=WHITE, thickness=1)
-        _draw_centered_text(frame, "Starting in a moment...", h // 2 + 50,
-                            font_scale=0.5, color=CYAN, thickness=1)
+        # Animated celebration
+        pulse = abs(np.sin(frame_idx * 0.1)) * 0.3 + 0.7
+        c = tuple(int(v * pulse) for v in GREEN)
+
+        _draw_centered_text(frame, "TUTORIAL COMPLETE!", h // 2 - 50,
+                            font_scale=1.3, color=c, thickness=3)
+        _draw_centered_text(frame, "You mastered all 14 gestures!", h // 2,
+                            font_scale=0.65, color=WHITE, thickness=1)
+        _draw_centered_text(frame, "Starting AirMouse...", h // 2 + 40,
+                            font_scale=0.55, color=CYAN, thickness=1)
 
         cv2.imshow("AirMouse Tutorial", frame)
         cv2.waitKey(30)
