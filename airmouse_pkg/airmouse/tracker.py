@@ -6,6 +6,14 @@ import cv2
 import mediapipe as mp
 import numpy as np
 
+# MediaPipe 1.0.0+ removed mp.solutions — we need 0.10.x
+if not hasattr(mp, "solutions"):
+    raise ImportError(
+        "AirMouse requires mediapipe 0.10.x (not 1.0+). "
+        "Fix it now:\n"
+        "    pip install \"mediapipe>=0.10.9,<1.0.0\""
+    )
+
 
 class HandTracker:
     """Tracks index finger tip position using MediaPipe Hands."""
