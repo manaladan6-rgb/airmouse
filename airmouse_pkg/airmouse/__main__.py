@@ -20,6 +20,7 @@ import argparse
 
 import cv2
 import numpy as np
+import airmouse as _pkg
 
 from .physics import SpringDamper, JitterFilter, VelocityTracker
 from .tracker import HandTracker
@@ -167,14 +168,15 @@ def main():
     if args.no_cam:
         config.SHOW_CAMERA = False
 
+    screen_w, screen_h = _get_screen_size()
+
     tracker = HandTracker(
         camera_index=config.CAMERA_INDEX,
         detection_confidence=config.DETECTION_CONFIDENCE,
         tracking_confidence=config.TRACKING_CONFIDENCE,
     )
 
-    mouse = MouseController()
-    screen_w, screen_h = _get_screen_size()
+    mouse = MouseController(screen_w=screen_w, screen_h=screen_h)
 
     spring = SpringDamper(
         mass=config.MASS,
@@ -198,7 +200,7 @@ def main():
 
     print()
     print("  ╔══════════════════════════════════════╗")
-    print("  ║         AirMouse v1.0.0               ║")
+    print(f"  ║         AirMouse v{_pkg.__version__}             ║")
     print("  ║   Physics-driven finger mouse          ║")
     print("  ╚══════════════════════════════════════╝")
     print()
@@ -232,6 +234,10 @@ def main():
 
                 dt = 1.0 / max(fps, 1.0)
                 cursor_pos = spring.update(screen_target, dt)
+
+                # Clamp physics position to screen bounds
+                cursor_pos[0] = np.clip(cursor_pos[0], 0, screen_w)
+                cursor_pos[1] = np.clip(cursor_pos[1], 0, screen_h)
 
                 mouse.move_to(cursor_pos[0], cursor_pos[1])
 
