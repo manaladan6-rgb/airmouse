@@ -1,2 +1,2 @@
-"""AirMouse — Physics-driven webcam finger mouse."""
-__version__ = "1.0.4"
+"""AirMouse — Physics-driven webcam finger mouse. Iron Man edition."""
+__version__ = "2.0.0"

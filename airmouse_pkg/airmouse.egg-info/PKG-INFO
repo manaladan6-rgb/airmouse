@@ -1,39 +1,13 @@
 Metadata-Version: 2.4
 Name: airmouse
-Version: 1.0.4
-Summary: Physics-driven webcam finger mouse — control your cursor with hand gestures using pure spring-damper physics
+Version: 2.0.0
+Summary: AirMouse Iron Man Edition — physics-driven finger-relative mouse with gesture recognition, momentum throw, and adaptive spring-damper physics
 Author: AirMouse
-License: MIT
-Keywords: airmouse,hand-tracking,gesture,mouse,physics,mediapipe,webcam
+License-Expression: MIT
+Keywords: airmouse,hand-tracking,gesture,mouse,physics,mediapipe,iron-man
 Requires-Python: >=3.9
-Description-Content-Type: text/plain
 Requires-Dist: mediapipe>=0.10.9
 Requires-Dist: opencv-python>=4.8.0
 Requires-Dist: pynput>=1.7.6
 Requires-Dist: numpy>=1.24.0
-
-AirMouse v1.0.0
-===============
-Physics-driven webcam finger mouse.
-
-Control your cursor with hand gestures using pure spring-damper physics.
-Your cursor has MASS, is pulled by a SPRING toward your finger, and
-slowed by DAMPING — it accelerates naturally, overshoots slightly,
-then settles. Pure Newtonian mechanics. No hacks.
-
-Install:
-    pip install airmouse-1.0.0-py3-none-any.whl
-
-Run:
-    airmouse
-
-Controls:
-    Index finger up     Move cursor
-    Pinch (thumb+index) Left click
-    Middle finger up    Right click
-    q                   Quit
-    d                   Toggle debug overlay
-    r                   Recalibrate
-
-Tune physics:
-    airmouse --sensitivity 1.5 --mass 1.2 --stiffness 200 --damping 26
+Requires-Dist: simpleaudio>=1.0.4

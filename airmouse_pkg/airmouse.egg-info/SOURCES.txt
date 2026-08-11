@@ -2,6 +2,9 @@ README.txt
 pyproject.toml
 airmouse/__init__.py
 airmouse/__main__.py
+airmouse/audio.py
+airmouse/config.py
+airmouse/gestures.py
 airmouse/mouse_controller.py
 airmouse/physics.py
 airmouse/tracker.py
