@@ -23,7 +23,6 @@ import numpy as np
 
 from .physics import SpringDamper, JitterFilter, VelocityTracker
 from .tracker import HandTracker
-from .mouse_controller import MouseController
 
 
 class Config:
@@ -106,6 +105,9 @@ def main():
     parser.add_argument("--damping", type=float, default=24.0, help="Damping - more = less overshoot (default: 24)")
     parser.add_argument("--jitter", type=float, default=0.35, help="Jitter filter alpha 0-1 (default: 0.35)")
     args = parser.parse_args()
+
+    # Lazy import — pynput needs a display server, only import at runtime
+    from .mouse_controller import MouseController
 
     config = Config()
     config.CAMERA_INDEX = args.cam
