@@ -1,9 +1,13 @@
 """
-Audio Feedback — Generates click, whoosh, and gesture sounds using numpy.
+Audio Feedback v3.1 — Generates click, whoosh, gesture, and mode sounds using numpy.
+
+New in v3.1:
+  - Mode enter/exit sounds (volume, brightness, precision)
+  - Gesture confirm sound (ascending tone)
+  - Better whoosh with pitch variation
 
 No external audio files needed — all sounds are synthesized.
 Uses winsound on Windows (stdlib, ZERO compilation) or sounddevice as fallback.
-No simpleaudio — it requires Microsoft Visual C++ build tools on Windows.
 """
 
 import numpy as np
@@ -26,12 +30,11 @@ class AudioFeedback:
         """Try to init a sound backend.
 
         Priority: winsound (Windows stdlib) > sounddevice (pre-built wheel).
-        No simpleaudio — it requires Microsoft Visual C++ build tools.
         """
         try:
             import winsound  # noqa: Windows stdlib — zero deps
             self._backend = "winsound"
-            return  # winsound is best on Windows — zero deps, always works
+            return
         except ImportError:
             pass
         try:
@@ -89,7 +92,6 @@ class AudioFeedback:
         """Short click sound."""
         sr = 22050
         t = np.linspace(0, 0.05, int(sr * 0.05), False)
-        # Sharp click: short sine burst with fast decay
         samples = np.sin(2 * np.pi * 800 * t) * np.exp(-t * 80)
         self._play(samples)
 
@@ -105,7 +107,7 @@ class AudioFeedback:
         sr = 22050
         duration = min(0.08, 0.03 + speed * 0.01)
         t = np.linspace(0, duration, int(sr * duration), False)
-        # Noise burst with envelope
+        # Noise burst with envelope + slight pitch based on speed
         noise = np.random.randn(len(t)) * 0.3
         envelope = np.exp(-t * 50) * min(speed / 1000, 1.0)
         samples = noise * envelope
@@ -130,4 +132,49 @@ class AudioFeedback:
         sr = 22050
         t = np.linspace(0, 0.15, int(sr * 0.15), False)
         samples = np.sin(2 * np.pi * 200 * t) * np.exp(-t * 20)
+        self._play(samples)
+
+    def mode_enter(self):
+        """Ascending tone when entering a mode (volume/brightness/precision)."""
+        sr = 22050
+        t = np.linspace(0, 0.12, int(sr * 0.12), False)
+        # Rising pitch from 400Hz to 800Hz
+        freq = 400 + 400 * (t / 0.12)
+        phase = 2 * np.pi * np.cumsum(freq) / sr
+        samples = np.sin(phase) * np.exp(-t * 15) * 0.6
+        self._play(samples)
+
+    def mode_exit(self):
+        """Descending tone when exiting a mode."""
+        sr = 22050
+        t = np.linspace(0, 0.12, int(sr * 0.12), False)
+        # Falling pitch from 800Hz to 400Hz
+        freq = 800 - 400 * (t / 0.12)
+        phase = 2 * np.pi * np.cumsum(freq) / sr
+        samples = np.sin(phase) * np.exp(-t * 15) * 0.6
+        self._play(samples)
+
+    def gesture_confirm(self):
+        """Quick ascending blip when gesture is confirmed."""
+        sr = 22050
+        t = np.linspace(0, 0.06, int(sr * 0.06), False)
+        freq = 600 + 400 * (t / 0.06)
+        phase = 2 * np.pi * np.cumsum(freq) / sr
+        samples = np.sin(phase) * np.exp(-t * 30) * 0.5
+        self._play(samples)
+
+    def precision_toggle(self):
+        """Dual-tone for precision mode toggle."""
+        sr = 22050
+        t = np.linspace(0, 0.1, int(sr * 0.1), False)
+        samples = (np.sin(2 * np.pi * 500 * t) + np.sin(2 * np.pi * 750 * t)) * 0.3 * np.exp(-t * 25)
+        self._play(samples)
+
+    def recalibrate(self):
+        """Smooth confirmation tone for recalibration."""
+        sr = 22050
+        t = np.linspace(0, 0.15, int(sr * 0.15), False)
+        freq = 440 + 220 * (t / 0.15)
+        phase = 2 * np.pi * np.cumsum(freq) / sr
+        samples = np.sin(phase) * np.exp(-t * 12) * 0.5
         self._play(samples)

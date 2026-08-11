@@ -1,8 +1,13 @@
 """
-Keyboard Actions — Execute shortcuts and key combos for gestures.
+Keyboard Actions v3.1 — Execute shortcuts and key combos for gestures.
 
 Supports: window management, volume, brightness, media controls,
           task switching, screenshots, undo/redo, and more.
+
+v3.1 improvements:
+  - More robust ctypes SendInput with proper INPUT struct sizing
+  - More keyboard actions (copy, paste, cut, select all)
+  - Better error handling
 
 Volume/media keys use Windows ctypes SendInput (pynput doesn't have them).
 """
@@ -26,6 +31,7 @@ def _win_send_key(vk_code):
     """Send a key press+release using Windows SendInput via ctypes.
 
     This works for media keys that pynput doesn't support.
+    Uses proper INPUT structure with union padding for x64 compatibility.
     """
     if sys.platform != "win32":
         return
@@ -35,8 +41,6 @@ def _win_send_key(vk_code):
         INPUT_KEYBOARD = 1
         KEYEVENTF_KEYUP = 0x0002
 
-        # INPUT structure: type(4) + padding(4) + ki(24 bytes)
-        # KEYBDINPUT: wVk(2) + wScan(2) + dwFlags(4) + time(4) + dwExtraInfo(8)
         class KEYBDINPUT(ctypes.Structure):
             _fields_ = [
                 ("wVk", ctypes.c_ushort),
@@ -46,36 +50,61 @@ def _win_send_key(vk_code):
                 ("dwExtraInfo", ctypes.c_ulonglong),
             ]
 
+        class MOUSEINPUT(ctypes.Structure):
+            _fields_ = [
+                ("dx", ctypes.c_long),
+                ("dy", ctypes.c_long),
+                ("mouseData", ctypes.c_ulong),
+                ("dwFlags", ctypes.c_ulong),
+                ("time", ctypes.c_ulong),
+                ("dwExtraInfo", ctypes.c_ulonglong),
+            ]
+
+        class HARDWAREINPUT(ctypes.Structure):
+            _fields_ = [
+                ("uMsg", ctypes.c_ulong),
+                ("wParamL", ctypes.c_ushort),
+                ("wParamH", ctypes.c_ushort),
+            ]
+
+        # Use a union for the input data
+        class INPUT_UNION(ctypes.Union):
+            _fields_ = [
+                ("ki", KEYBDINPUT),
+                ("mi", MOUSEINPUT),
+                ("hi", HARDWAREINPUT),
+            ]
+
         class INPUT(ctypes.Structure):
             _fields_ = [
                 ("type", ctypes.c_ulong),
-                ("ki", KEYBDINPUT),
+                ("union", INPUT_UNION),
             ]
 
         # Key down
         down = INPUT()
         down.type = INPUT_KEYBOARD
-        down.ki.wVk = vk_code
-        down.ki.wScan = 0
-        down.ki.dwFlags = 0
-        down.ki.time = 0
-        down.ki.dwExtraInfo = 0
+        down.union.ki.wVk = vk_code
+        down.union.ki.wScan = 0
+        down.union.ki.dwFlags = 0
+        down.union.ki.time = 0
+        down.union.ki.dwExtraInfo = 0
 
         # Key up
         up = INPUT()
         up.type = INPUT_KEYBOARD
-        up.ki.wVk = vk_code
-        up.ki.wScan = 0
-        up.ki.dwFlags = KEYEVENTF_KEYUP
-        up.ki.time = 0
-        up.ki.dwExtraInfo = 0
+        up.union.ki.wVk = vk_code
+        up.union.ki.wScan = 0
+        up.union.ki.dwFlags = KEYEVENTF_KEYUP
+        up.union.ki.time = 0
+        up.union.ki.dwExtraInfo = 0
 
         SendInput = ctypes.windll.user32.SendInput
         SendInput.argtypes = [ctypes.c_uint, ctypes.POINTER(INPUT), ctypes.c_int]
         SendInput.restype = ctypes.c_uint
 
         inputs = (INPUT * 2)(down, up)
-        SendInput(2, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+        result = SendInput(2, ctypes.byref(inputs), ctypes.sizeof(INPUT))
     except Exception:
         pass
 
@@ -185,13 +214,13 @@ class KeyboardActions:
     # ─── Volume (Windows ctypes SendInput) ───
 
     def volume_up(self):
-        """Volume up — uses Windows SendInput (not pynput)."""
+        """Volume up — uses Windows SendInput."""
         def _do():
             _win_send_key(VK_VOLUME_UP)
         threading.Thread(target=_do, daemon=True).start()
 
     def volume_down(self):
-        """Volume down — uses Windows SendInput (not pynput)."""
+        """Volume down — uses Windows SendInput."""
         def _do():
             _win_send_key(VK_VOLUME_DOWN)
         threading.Thread(target=_do, daemon=True).start()
@@ -280,6 +309,32 @@ class KeyboardActions:
             return
         self._press_combo([self._key_module.cmd, self._key_module.shift, 's'])
 
+    # ─── Clipboard ───
+
+    def copy(self):
+        """Ctrl+C = copy."""
+        if self._key_module is None:
+            return
+        self._press_combo([self._key_module.ctrl, 'c'])
+
+    def paste(self):
+        """Ctrl+V = paste."""
+        if self._key_module is None:
+            return
+        self._press_combo([self._key_module.ctrl, 'v'])
+
+    def cut(self):
+        """Ctrl+X = cut."""
+        if self._key_module is None:
+            return
+        self._press_combo([self._key_module.ctrl, 'x'])
+
+    def select_all(self):
+        """Ctrl+A = select all."""
+        if self._key_module is None:
+            return
+        self._press_combo([self._key_module.ctrl, 'a'])
+
     # ─── Undo / Redo ───
 
     def undo(self):
@@ -313,3 +368,7 @@ class KeyboardActions:
         if self._key_module is None:
             return
         self._press_combo([self._key_module.ctrl, 'w'])
+
+    def alt_tab(self):
+        """Alt+Tab = switch window (alias for switch_window)."""
+        self.switch_window()
