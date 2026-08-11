@@ -1,5 +1,5 @@
 """
-AirMouse v3.0 — Iron Man Next-Gen Edition
+AirMouse v3.0.1 — Iron Man Next-Gen Edition
 
     airmouse              # Start with tutorial (first run)
     airmouse --skip       # Skip tutorial
@@ -79,7 +79,7 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
     }
     color = colors.get(gesture, (80, 80, 80))
 
-    # Gesture circle
+    # Gesture indicator (top-left)
     cx, cy = 50, 50
     cv2.circle(frame, (cx, cy), 28, color, 3)
     cv2.circle(frame, (cx, cy), 4, color, -1)
@@ -89,7 +89,7 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
     cv2.putText(frame, label.upper(), (cx + 38, cy + 8),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
 
-    # Badges
+    # Status badges (bottom)
     badges = []
     if frozen:
         badges.append(("FROZEN", (0, 0, 255)))
@@ -107,7 +107,7 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, bc, 2, cv2.LINE_AA)
         bx += 100
 
-    # Stats
+    # Physics stats (bottom-right)
     k = spring.current_stiffness
     speed = np.linalg.norm(spring.velocity)
     stats = [f"FPS:{fps:.0f}", f"k:{k:.0f}", f"v:{speed:.0f}"]
@@ -115,7 +115,7 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
         cv2.putText(frame, t, (w - 120, h - 55 + i * 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1, cv2.LINE_AA)
 
-    # Landmarks
+    # Draw tracked finger landmarks
     lm = gesture_result.get("landmarks")
     if lm is not None:
         from .gestures import INDEX_TIP, THUMB_TIP
@@ -147,10 +147,21 @@ def _show_quick_reference():
     print("  +------------------------------------------------------+")
 
 
+def _safe_kb_action(kb_instance, action_name):
+    """Safely call a keyboard action — never crash the main loop."""
+    if kb_instance is None:
+        return
+    try:
+        method = getattr(kb_instance, action_name)
+        method()
+    except Exception:
+        pass
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="airmouse",
-        description="AirMouse v3.0 — Iron Man Next-Gen Edition",
+        description="AirMouse v3.0.1 - Iron Man Next-Gen Edition",
     )
     parser.add_argument("--skip", action="store_true", help="Skip tutorial")
     parser.add_argument("--tutorial", action="store_true", help="Force tutorial")
@@ -196,7 +207,7 @@ def main():
             with open(tutorial_done_file, "w") as f:
                 f.write("done")
 
-    # Physics
+    # Physics stack
     spring = AdaptiveSpringDamper(
         mass=config.mass, stiffness_min=config.stiffness_min,
         stiffness_max=config.stiffness_max, damping_ratio=config.damping_ratio,
@@ -229,8 +240,9 @@ def main():
     fps = 0.0
     frame_times = []
     debug_mode = True
+    running = True
 
-    # Keyboard actions (lazy)
+    # Keyboard actions (lazy-init, never crash)
     kb = None
     def _kb():
         nonlocal kb
@@ -245,7 +257,7 @@ def main():
     # Banner
     print()
     print("  +==================================================+")
-    print(f"  |     AirMouse v{_pkg.__version__} — Iron Man Next-Gen Edition  |")
+    print(f"  |     AirMouse v{_pkg.__version__} - Iron Man Next-Gen Edition  |")
     print("  |     14 gestures | Physics cursor | Finger-relative  |")
     print("  +==================================================+")
     print(f"  Screen: {screen_w}x{screen_h}  |  Audio: {'ON' if config.audio_enabled else 'OFF'}  |  Gestures: 14+2 swipe")
@@ -254,9 +266,10 @@ def main():
     print()
 
     try:
-        while True:
+        while running:
             t0 = time.perf_counter()
             dt = 1.0 / max(fps, 1.0)
+            now = time.perf_counter()
 
             hand_data = tracker.read()
             gesture_result = {"gesture": Gesture.NONE, "landmarks": None}
@@ -272,13 +285,13 @@ def main():
 
                 raw_pos = gesture_result["index_pos"]
 
-                # Jitter
+                # Jitter filter
                 filtered_pos = np.array([
                     jitter_x.filter(np.array([raw_pos[0]]))[0],
                     jitter_y.filter(np.array([raw_pos[1]]))[0],
                 ])
 
-                # Iron Man: relative tracking
+                # Iron Man: finger-relative tracking
                 delta = home.get_delta(filtered_pos)
                 mapped = exp_curve.map_with_deadzone(delta, deadzone=config.deadzone)
                 screen_target = np.array([
@@ -289,20 +302,15 @@ def main():
                 screen_target[1] = np.clip(screen_target[1], 0, screen_h)
 
                 # Swipe detection
-                now = time.perf_counter()
                 swipe_gesture = swipe.update(filtered_pos, prev_pos, now)
                 prev_pos = filtered_pos.copy()
 
                 if swipe_gesture == Gesture.SWIPE_LEFT:
-                    k = _kb()
-                    if k:
-                        k.browser_back()
-                        audio.click()
+                    _safe_kb_action(_kb(), "browser_back")
+                    audio.click()
                 elif swipe_gesture == Gesture.SWIPE_RIGHT:
-                    k = _kb()
-                    if k:
-                        k.browser_forward()
-                        audio.click()
+                    _safe_kb_action(_kb(), "browser_forward")
+                    audio.click()
 
                 # === GESTURE ACTIONS ===
 
@@ -342,19 +350,15 @@ def main():
 
                 # OK -> Close window (Alt+F4)
                 elif gesture == Gesture.OK and gesture_changed:
-                    k = _kb()
-                    if k:
-                        k.close_window()
-                        audio.click()
+                    _safe_kb_action(_kb(), "close_window")
+                    audio.click()
 
                 # SIX -> Task switcher (Alt+Tab)
                 elif gesture == Gesture.SIX and gesture_changed:
-                    k = _kb()
-                    if k:
-                        k.switch_window()
-                        audio.click()
+                    _safe_kb_action(_kb(), "switch_window")
+                    audio.click()
 
-                # PALM -> Drag
+                # PALM -> Drag mode
                 if gesture == Gesture.PALM and not dragging:
                     mouse.start_drag()
                     dragging = True
@@ -389,10 +393,8 @@ def main():
 
                 # ROCK -> Minimize
                 if gesture == Gesture.ROCK and gesture_changed:
-                    k = _kb()
-                    if k:
-                        k.minimize_window()
-                        audio.click()
+                    _safe_kb_action(_kb(), "minimize_window")
+                    audio.click()
 
                 # SHAKA -> Volume mode (move up/down to adjust)
                 if gesture == Gesture.SHAKA:
@@ -405,9 +407,9 @@ def main():
                             k = _kb()
                             if k:
                                 if vd > 0:
-                                    k.volume_down()
+                                    _safe_kb_action(k, "volume_down")
                                 else:
-                                    k.volume_up()
+                                    _safe_kb_action(k, "volume_up")
                             prev_index_y = filtered_pos[1]
                 else:
                     volume_mode = False
@@ -423,14 +425,14 @@ def main():
                             k = _kb()
                             if k:
                                 if bd > 0:
-                                    k.brightness_down()
+                                    _safe_kb_action(k, "brightness_down")
                                 else:
-                                    k.brightness_up()
+                                    _safe_kb_action(k, "brightness_up")
                             prev_index_y = filtered_pos[1]
                 else:
                     brightness_mode = False
 
-                # POINTING (or any non-special gesture) -> Move cursor
+                # CURSOR MOVEMENT — Pointing and navigation gestures move cursor
                 if gesture in (Gesture.POINTING, Gesture.PEACE,
                                Gesture.THUMBS_UP, Gesture.PINKY,
                                Gesture.GUN, Gesture.ROCK) and not cursor_frozen:
@@ -452,7 +454,7 @@ def main():
                 prev_gesture = gesture
 
             else:
-                # No hand — momentum throw
+                # No hand detected — momentum throw keeps cursor gliding
                 throw = momentum.update(spring.velocity, False, dt)
                 if momentum.is_active:
                     cp = spring.position + throw
@@ -475,7 +477,7 @@ def main():
                 volume_mode = False
                 brightness_mode = False
 
-            # Debug display
+            # Display
             if config.show_camera and debug_mode and hand_data["frame"] is not None:
                 _draw_hud(hand_data["frame"], gesture_result, spring, fps,
                           config, cursor_frozen, dragging, scrolling,
@@ -483,7 +485,7 @@ def main():
                 cv2.imshow("AirMouse", hand_data["frame"])
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):
-                    break
+                    running = False
                 elif key == ord("d"):
                     debug_mode = not debug_mode
                 elif key == ord("r"):
@@ -497,6 +499,7 @@ def main():
                 elif key == ord("t"):
                     run_tutorial(tracker)
 
+            # FPS throttling
             elapsed = time.perf_counter() - t0
             frame_times.append(elapsed)
             if len(frame_times) > 30:
@@ -510,11 +513,18 @@ def main():
     except KeyboardInterrupt:
         print("\n  Shutting down...")
     finally:
+        running = False
         tracker.release()
         if dragging:
-            mouse.stop_drag()
-        if config.show_camera:
-            cv2.destroyAllWindows()
+            try:
+                mouse.stop_drag()
+            except Exception:
+                pass
+        try:
+            if config.show_camera:
+                cv2.destroyAllWindows()
+        except Exception:
+            pass
         print("  AirMouse stopped.")
 
 

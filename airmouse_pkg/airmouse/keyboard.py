@@ -3,11 +3,81 @@ Keyboard Actions — Execute shortcuts and key combos for gestures.
 
 Supports: window management, volume, brightness, media controls,
           task switching, screenshots, undo/redo, and more.
+
+Volume/media keys use Windows ctypes SendInput (pynput doesn't have them).
 """
 
 import threading
 import subprocess
 import sys
+import struct
+
+
+# ─── Windows Media Key Codes (Virtual Key Codes) ───
+VK_VOLUME_UP = 0xAF
+VK_VOLUME_DOWN = 0xAE
+VK_VOLUME_MUTE = 0xAD
+VK_MEDIA_PLAY_PAUSE = 0xB3
+VK_MEDIA_NEXT = 0xB0
+VK_MEDIA_PREV = 0xB1
+
+
+def _win_send_key(vk_code):
+    """Send a key press+release using Windows SendInput via ctypes.
+
+    This works for media keys that pynput doesn't support.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        INPUT_KEYBOARD = 1
+        KEYEVENTF_KEYUP = 0x0002
+
+        # INPUT structure: type(4) + padding(4) + ki(24 bytes)
+        # KEYBDINPUT: wVk(2) + wScan(2) + dwFlags(4) + time(4) + dwExtraInfo(8)
+        class KEYBDINPUT(ctypes.Structure):
+            _fields_ = [
+                ("wVk", ctypes.c_ushort),
+                ("wScan", ctypes.c_ushort),
+                ("dwFlags", ctypes.c_ulong),
+                ("time", ctypes.c_ulong),
+                ("dwExtraInfo", ctypes.c_ulonglong),
+            ]
+
+        class INPUT(ctypes.Structure):
+            _fields_ = [
+                ("type", ctypes.c_ulong),
+                ("ki", KEYBDINPUT),
+            ]
+
+        # Key down
+        down = INPUT()
+        down.type = INPUT_KEYBOARD
+        down.ki.wVk = vk_code
+        down.ki.wScan = 0
+        down.ki.dwFlags = 0
+        down.ki.time = 0
+        down.ki.dwExtraInfo = 0
+
+        # Key up
+        up = INPUT()
+        up.type = INPUT_KEYBOARD
+        up.ki.wVk = vk_code
+        up.ki.wScan = 0
+        up.ki.dwFlags = KEYEVENTF_KEYUP
+        up.ki.time = 0
+        up.ki.dwExtraInfo = 0
+
+        SendInput = ctypes.windll.user32.SendInput
+        SendInput.argtypes = [ctypes.c_uint, ctypes.POINTER(INPUT), ctypes.c_int]
+        SendInput.restype = ctypes.c_uint
+
+        inputs = (INPUT * 2)(down, up)
+        SendInput(2, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+    except Exception:
+        pass
 
 
 class KeyboardActions:
@@ -80,13 +150,11 @@ class KeyboardActions:
         """Alt+Tab = task switcher."""
         if self._key_module is None:
             return
-        # Press Alt+Tab (don't release Alt immediately so switcher stays open)
         def _do():
             try:
                 self._keyboard.press(self._key_module.alt)
                 self._keyboard.press(self._key_module.tab)
                 self._keyboard.release(self._key_module.tab)
-                # Release Alt after a short delay so switcher shows
                 import time
                 time.sleep(0.15)
                 self._keyboard.release(self._key_module.alt)
@@ -114,45 +182,44 @@ class KeyboardActions:
             return
         self._press_combo([self._key_module.alt, self._key_module.right])
 
-    # ─── Volume ───
+    # ─── Volume (Windows ctypes SendInput) ───
 
     def volume_up(self):
-        """Volume up key."""
-        if self._key_module is None:
-            return
-        self._press_key(self._key_module.volume_up)
+        """Volume up — uses Windows SendInput (not pynput)."""
+        def _do():
+            _win_send_key(VK_VOLUME_UP)
+        threading.Thread(target=_do, daemon=True).start()
 
     def volume_down(self):
-        """Volume down key."""
-        if self._key_module is None:
-            return
-        self._press_key(self._key_module.volume_down)
+        """Volume down — uses Windows SendInput (not pynput)."""
+        def _do():
+            _win_send_key(VK_VOLUME_DOWN)
+        threading.Thread(target=_do, daemon=True).start()
 
     def volume_mute(self):
-        """Mute toggle."""
-        if self._key_module is None:
-            return
-        self._press_key(self._key_module.volume_mute)
+        """Mute toggle — uses Windows SendInput."""
+        def _do():
+            _win_send_key(VK_VOLUME_MUTE)
+        threading.Thread(target=_do, daemon=True).start()
 
     # ─── Brightness (OS-specific) ───
 
     def brightness_up(self):
         """Increase screen brightness."""
         if sys.platform == "win32":
-            # On Windows, use PowerShell with WMI
             def _do():
                 try:
-                    # Try using wmi - increment brightness by 10%
-                    result = subprocess.run(
+                    subprocess.run(
                         ["powershell", "-Command",
-                         "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, [int]([math]::Min(100, (Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness + 10)))"],
+                         "$m = Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness; "
+                         "$c = Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods; "
+                         "if($m -and $c){$c.WmiSetBrightness(1, [int]([math]::Min(100, $m.CurrentBrightness + 10)))}"],
                         capture_output=True, timeout=3
                     )
                 except Exception:
                     pass
             threading.Thread(target=_do, daemon=True).start()
         else:
-            # Linux: use xdotool or brightnessctl
             def _do():
                 try:
                     subprocess.run(["brightnessctl", "set", "10%+"],
@@ -166,9 +233,11 @@ class KeyboardActions:
         if sys.platform == "win32":
             def _do():
                 try:
-                    result = subprocess.run(
+                    subprocess.run(
                         ["powershell", "-Command",
-                         "(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, [int]([math]::Max(0, (Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness).CurrentBrightness - 10)))"],
+                         "$m = Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness; "
+                         "$c = Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods; "
+                         "if($m -and $c){$c.WmiSetBrightness(1, [int]([math]::Max(0, $m.CurrentBrightness - 10)))}"],
                         capture_output=True, timeout=3
                     )
                 except Exception:
@@ -183,25 +252,25 @@ class KeyboardActions:
                     pass
             threading.Thread(target=_do, daemon=True).start()
 
-    # ─── Media Controls ───
+    # ─── Media Controls (Windows ctypes SendInput) ───
 
     def media_play_pause(self):
-        """Play/Pause media."""
-        if self._key_module is None:
-            return
-        self._press_key(self._key_module.media_play_pause)
+        """Play/Pause media — uses Windows SendInput."""
+        def _do():
+            _win_send_key(VK_MEDIA_PLAY_PAUSE)
+        threading.Thread(target=_do, daemon=True).start()
 
     def media_next(self):
-        """Next track."""
-        if self._key_module is None:
-            return
-        self._press_key(self._key_module.media_next)
+        """Next track — uses Windows SendInput."""
+        def _do():
+            _win_send_key(VK_MEDIA_NEXT)
+        threading.Thread(target=_do, daemon=True).start()
 
     def media_prev(self):
-        """Previous track."""
-        if self._key_module is None:
-            return
-        self._press_key(self._key_module.media_previous)
+        """Previous track — uses Windows SendInput."""
+        def _do():
+            _win_send_key(VK_MEDIA_PREV)
+        threading.Thread(target=_do, daemon=True).start()
 
     # ─── Screenshot ───
 
