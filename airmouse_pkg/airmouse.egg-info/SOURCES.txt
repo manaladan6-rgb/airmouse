@@ -5,9 +5,11 @@ airmouse/__main__.py
 airmouse/audio.py
 airmouse/config.py
 airmouse/gestures.py
+airmouse/keyboard.py
 airmouse/mouse_controller.py
 airmouse/physics.py
 airmouse/tracker.py
+airmouse/tutorial.py
 airmouse.egg-info/PKG-INFO
 airmouse.egg-info/SOURCES.txt
 airmouse.egg-info/dependency_links.txt

@@ -1,147 +1,193 @@
 """
-Gesture Recognition Engine — Classifies hand pose from MediaPipe landmarks.
+Gesture Recognition Engine v2 — 11 gestures + swipe detection.
 
-Gestures:
-    POINTING   — Index finger up only        → Move cursor
-    PEACE      — Index + middle up            → Right click
-    PALM       — All fingers extended         → Drag mode
-    FIST       — All fingers closed           → Freeze cursor
-    PINCH      — Thumb + index close together → Left click
-    SCROLL     — Peace sign + vertical motion → Scroll
-    NONE       — No hand detected
+Gestures (by finger count & shape):
+    POINTING    (☝️)  Index only              → Move cursor
+    PEACE       (✌️)  Index + middle          → Right click
+    THREE       (3️⃣)  Index + mid + ring     → Scroll mode
+    PALM        (🖐️)  All 5 open              → Drag mode
+    FIST        (✊)  All closed              → Freeze cursor
+    PINCH       (🤏)  Thumb + index close     → Left click
+    THUMBS_UP   (👍)  Thumb only              → Double click
+    PINKY       (🤙)  Pinky only              → Middle click
+    GUN         (👉)  Thumb up + index point  → Snap to center
+    ROCK        (🤘)  Index + pinky up        → Minimize window
+    SHAKA       (🤙)  Thumb + pinky out       → Volume mode
+
+Swipe gestures (motion-based):
+    SWIPE_LEFT  → Browser back
+    SWIPE_RIGHT → Browser forward
 """
 
 import numpy as np
+from collections import deque
 
 
 class Gesture:
     POINTING = "pointing"
     PEACE = "peace"
+    THREE = "three"
     PALM = "palm"
     FIST = "fist"
     PINCH = "pinch"
-    SCROLL = "scroll"
+    THUMBS_UP = "thumbs_up"
+    PINKY = "pinky"
+    GUN = "gun"
+    ROCK = "rock"
+    SHAKA = "shaka"
+    SWIPE_LEFT = "swipe_left"
+    SWIPE_RIGHT = "swipe_right"
     NONE = "none"
 
 
+# Gesture descriptions for tutorial
+GESTURE_INFO = {
+    Gesture.POINTING:   {"emoji": "☝️", "name": "Point",    "desc": "Index finger up, others down",         "action": "Move cursor"},
+    Gesture.PEACE:      {"emoji": "✌️", "name": "Peace",    "desc": "Index + middle fingers up",             "action": "Right click"},
+    Gesture.THREE:      {"emoji": "3️⃣",  "name": "Three",   "desc": "Index + middle + ring fingers up",     "action": "Scroll mode (move up/down)"},
+    Gesture.PALM:       {"emoji": "🖐️", "name": "Palm",     "desc": "All 5 fingers open",                    "action": "Drag mode (grab & move)"},
+    Gesture.FIST:       {"emoji": "✊", "name": "Fist",     "desc": "All fingers closed",                    "action": "Freeze cursor"},
+    Gesture.PINCH:      {"emoji": "🤏", "name": "Pinch",    "desc": "Touch thumb tip to index tip",          "action": "Left click"},
+    Gesture.THUMBS_UP:  {"emoji": "👍", "name": "Thumbs Up","desc": "Only thumb up, fingers closed",         "action": "Double click (open items)"},
+    Gesture.PINKY:      {"emoji": "🤙", "name": "Pinky",    "desc": "Only pinky finger up",                  "action": "Middle click (close tabs)"},
+    Gesture.GUN:        {"emoji": "👉", "name": "Gun",      "desc": "Thumb up + index pointing (L-shape)",   "action": "Snap cursor to screen center"},
+    Gesture.ROCK:       {"emoji": "🤘", "name": "Rock",     "desc": "Index + pinky up, others down",         "action": "Minimize window (Win+Down)"},
+    Gesture.SHAKA:      {"emoji": "🤙", "name": "Shaka",    "desc": "Thumb + pinky out (hang loose)",        "action": "Volume mode (up/down)"},
+}
+
 # MediaPipe landmark indices
 WRIST = 0
-THUMB_CMC = 1
-THUMB_MCP = 2
-THUMB_IP = 3
-THUMB_TIP = 4
-INDEX_MCP = 5
-INDEX_PIP = 6
-INDEX_DIP = 7
-INDEX_TIP = 8
-MIDDLE_MCP = 9
-MIDDLE_PIP = 10
-MIDDLE_DIP = 11
-MIDDLE_TIP = 12
-RING_MCP = 13
-RING_PIP = 14
-RING_DIP = 15
-RING_TIP = 16
-PINKY_MCP = 17
-PINKY_PIP = 18
-PINKY_DIP = 19
-PINKY_TIP = 20
+THUMB_CMC = 1; THUMB_MCP = 2; THUMB_IP = 3; THUMB_TIP = 4
+INDEX_MCP = 5; INDEX_PIP = 6; INDEX_DIP = 7; INDEX_TIP = 8
+MIDDLE_MCP = 9; MIDDLE_PIP = 10; MIDDLE_DIP = 11; MIDDLE_TIP = 12
+RING_MCP = 13; RING_PIP = 14; RING_DIP = 15; RING_TIP = 16
+PINKY_MCP = 17; PINKY_PIP = 18; PINKY_DIP = 19; PINKY_TIP = 20
 
 
-def _distance(a, b):
-    """Euclidean distance between two landmarks."""
-    return np.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2)
+def _dist(a, b):
+    return np.sqrt((a.x - b.x)**2 + (a.y - b.y)**2 + (a.z - b.z)**2)
 
 
-def _finger_extended(landmarks, tip, pip, mcp):
-    """Check if a finger is extended (tip above PIP joint)."""
-    # A finger is extended if tip is further from wrist than PIP
+def _finger_up(landmarks, tip, pip, mcp):
     wrist = landmarks[WRIST]
-    tip_dist = _distance(landmarks[tip], wrist)
-    pip_dist = _distance(landmarks[pip], wrist)
-    return tip_dist > pip_dist * 1.05  # Small margin for noise
+    return _dist(landmarks[tip], wrist) > _dist(landmarks[pip], wrist) * 1.05
 
 
-def _thumb_extended(landmarks):
-    """Check if thumb is extended (tip far from index MCP)."""
-    thumb_tip = landmarks[THUMB_TIP]
-    thumb_ip = landmarks[THUMB_IP]
-    index_mcp = landmarks[INDEX_MCP]
-    # Thumb is extended if tip is far from palm center
-    tip_dist = _distance(thumb_tip, index_mcp)
-    ip_dist = _distance(thumb_ip, index_mcp)
-    return tip_dist > ip_dist * 1.1
+def _thumb_up(landmarks):
+    return _dist(landmarks[THUMB_TIP], landmarks[INDEX_MCP]) > \
+           _dist(landmarks[THUMB_IP], landmarks[INDEX_MCP]) * 1.1
 
 
 def recognize_gesture(landmarks, pinch_threshold=0.06):
-    """Classify hand gesture from landmarks.
+    """Classify hand gesture from 21 landmarks."""
 
-    Args:
-        landmarks: List of 21 MediaPipe landmarks (each with .x, .y, .z)
-        pinch_threshold: Distance threshold for pinch detection
+    idx = _finger_up(landmarks, INDEX_TIP, INDEX_PIP, INDEX_MCP)
+    mid = _finger_up(landmarks, MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP)
+    ring = _finger_up(landmarks, RING_TIP, RING_PIP, RING_MCP)
+    pin = _finger_up(landmarks, PINKY_TIP, PINKY_PIP, PINKY_MCP)
+    thu = _thumb_up(landmarks)
 
-    Returns:
-        dict with:
-            gesture: str — one of Gesture constants
-            index_extended: bool
-            middle_extended: bool
-            ring_extended: bool
-            pinky_extended: bool
-            thumb_extended: bool
-            pinch_distance: float
-            index_pos: np.array [x, y] — normalized position of index tip
-            finger_spread: float — how open the hand is (0=fist, 1=fully open)
-    """
-    # Check each finger
-    index_up = _finger_extended(landmarks, INDEX_TIP, INDEX_PIP, INDEX_MCP)
-    middle_up = _finger_extended(landmarks, MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP)
-    ring_up = _finger_extended(landmarks, RING_TIP, RING_PIP, RING_MCP)
-    pinky_up = _finger_extended(landmarks, PINKY_TIP, PINKY_PIP, PINKY_MCP)
-    thumb_up = _thumb_extended(landmarks)
+    pinch_dist = _dist(landmarks[THUMB_TIP], landmarks[INDEX_TIP])
+    is_pinch = pinch_dist < pinch_threshold and not mid
 
-    # Pinch detection
-    pinch_dist = _distance(landmarks[THUMB_TIP], landmarks[INDEX_TIP])
-    is_pinch = pinch_dist < pinch_threshold
-
-    # Finger spread (0 = fist, 1 = fully open)
-    fingers_up = sum([index_up, middle_up, ring_up, pinky_up, thumb_up])
+    fingers_up = sum([idx, mid, ring, pin, thu])
     finger_spread = fingers_up / 5.0
 
-    # Index tip position
     index_tip = landmarks[INDEX_TIP]
     index_pos = np.array([index_tip.x, index_tip.y])
 
-    # --- Classify gesture ---
+    # --- Classification priority ---
 
-    # Pinch overrides everything (click action)
-    if is_pinch and not middle_up:
+    if is_pinch:
         gesture = Gesture.PINCH
-    # Fist — all fingers closed
-    elif fingers_up <= 1 and not index_up and not middle_up:
+    # Gun: thumb up + index pointing + others down
+    elif thu and idx and not mid and not ring and not pin:
+        gesture = Gesture.GUN
+    # Shaka: thumb + pinky out, others down
+    elif thu and pin and not idx and not mid and not ring:
+        gesture = Gesture.SHAKA
+    # Rock: index + pinky up, others down
+    elif idx and pin and not mid and not ring and not thu:
+        gesture = Gesture.ROCK
+    # Thumbs up: thumb only
+    elif thu and not idx and not mid and not ring and not pin:
+        gesture = Gesture.THUMBS_UP
+    # Pinky only
+    elif pin and not idx and not mid and not ring and not thu:
+        gesture = Gesture.PINKY
+    # Fist: nothing up
+    elif not idx and not mid and not ring and not pin:
         gesture = Gesture.FIST
-    # Peace sign — index + middle up, others down
-    elif index_up and middle_up and not ring_up and not pinky_up:
+    # Three fingers
+    elif idx and mid and ring and not pin:
+        gesture = Gesture.THREE
+    # Peace
+    elif idx and mid and not ring and not pin:
         gesture = Gesture.PEACE
-    # Open palm — most fingers extended
+    # Palm: 4+ fingers
     elif fingers_up >= 4:
         gesture = Gesture.PALM
-    # Pointing — only index up
-    elif index_up and not middle_up and not ring_up:
-        gesture = Gesture.POINTING
-    # Default to pointing if index is up
-    elif index_up:
+    # Pointing
+    elif idx and not mid:
         gesture = Gesture.POINTING
     else:
         gesture = Gesture.FIST
 
     return {
         "gesture": gesture,
-        "index_extended": index_up,
-        "middle_extended": middle_up,
-        "ring_extended": ring_up,
-        "pinky_extended": pinky_up,
-        "thumb_extended": thumb_up,
+        "index_extended": idx,
+        "middle_extended": mid,
+        "ring_extended": ring,
+        "pinky_extended": pin,
+        "thumb_extended": thu,
         "pinch_distance": pinch_dist,
         "index_pos": index_pos,
         "finger_spread": finger_spread,
+        "fingers_up": fingers_up,
+        "landmarks": landmarks,
     }
+
+
+class SwipeDetector:
+    """Detects horizontal swipe gestures from hand velocity history.
+
+    Swipe = fast horizontal movement (>threshold) over several frames.
+    """
+
+    def __init__(self, speed_threshold=0.4, min_frames=4, cooldown=0.5):
+        self.speed_threshold = speed_threshold
+        self.min_frames = min_frames
+        self.cooldown = cooldown
+        self.x_velocities = deque(maxlen=min_frames)
+        self.last_swipe_time = 0.0
+
+    def update(self, current_pos, prev_pos, now):
+        """Check for swipe. Call every frame.
+
+        Returns: Gesture.SWIPE_LEFT, SWIPE_RIGHT, or NONE
+        """
+        if prev_pos is None:
+            self.x_velocities.append(0.0)
+            return Gesture.NONE
+
+        vx = current_pos[0] - prev_pos[0]
+        self.x_velocities.append(vx)
+
+        if now - self.last_swipe_time < self.cooldown:
+            return Gesture.NONE
+
+        if len(self.x_velocities) >= self.min_frames:
+            avg_vx = np.mean(self.x_velocities)
+            if avg_vx > self.speed_threshold:
+                self.last_swipe_time = now
+                self.x_velocities.clear()
+                return Gesture.SWIPE_RIGHT
+            elif avg_vx < -self.speed_threshold:
+                self.last_swipe_time = now
+                self.x_velocities.clear()
+                return Gesture.SWIPE_LEFT
+
+        return Gesture.NONE
+
+    def reset(self):
+        self.x_velocities.clear()
