@@ -465,8 +465,9 @@ def main():
                     if not cursor_frozen:
                         mouse.move_to(cursor_pos[0], cursor_pos[1])
                     speed = np.linalg.norm(direct_tracker.velocity)
-                    # In direct mode, filtered_pos = raw_pos (no multi-stage filtering)
-                    filtered_pos = raw_pos
+                    # Use filtered normalized position for scroll/volume/brightness
+                    # This gives smooth, noise-free deltas instead of raw noisy input
+                    filtered_pos = direct_tracker.filtered_normalized
 
                     # Swipe detection (direct mode)
                     swipe_gesture = swipe.update(raw_pos, prev_pos, now)
@@ -564,17 +565,22 @@ def main():
                     dragging = False
 
                 # THREE -> Scroll mode
+                # Scale factor 80 = sensitive enough for far-distance scrolling
+                # Accum threshold 0.5 = responsive, no lag
+                # Scroll delta is smoothed via filtered_pos (not raw)
                 if gesture == Gesture.THREE:
                     scrolling = True
                     if gesture_changed:
                         prev_index_y = filtered_pos[1]
                         scroll_accum = 0.0
                     if prev_index_y is not None:
-                        sd = (filtered_pos[1] - prev_index_y) * 40
+                        sd = (filtered_pos[1] - prev_index_y) * 80
                         scroll_accum += sd
-                        if abs(scroll_accum) > 1.0:
-                            mouse.scroll(int(scroll_accum))
-                            audio.scroll_tick()
+                        if abs(scroll_accum) > 0.5:
+                            scroll_amount = int(scroll_accum)
+                            if scroll_amount != 0:
+                                mouse.scroll(scroll_amount)
+                                audio.scroll_tick()
                             scroll_accum = 0.0
                         prev_index_y = filtered_pos[1]
                 else:
@@ -757,12 +763,12 @@ def main():
                     if is_direct:
                         # In direct mode, precision makes it even smoother and steadier
                         if precision_mode:
-                            direct_tracker.jitter_x = LightJitterFilter(alpha=0.20)
-                            direct_tracker.jitter_y = LightJitterFilter(alpha=0.20)
-                            direct_tracker.spring_alpha = 0.18  # Very slow, very smooth
-                            direct_tracker.smoother = PositionSmoother(alpha=0.50)
-                            direct_tracker.movement_threshold = 0.015  # Larger noise gate
-                            direct_tracker.pixel_deadzone = 3.0  # Larger pixel deadzone
+                            direct_tracker.jitter_x = LightJitterFilter(alpha=0.15)
+                            direct_tracker.jitter_y = LightJitterFilter(alpha=0.15)
+                            direct_tracker.spring_alpha = 0.12  # Ultra slow, very smooth
+                            direct_tracker.smoother = PositionSmoother(alpha=0.40)
+                            direct_tracker.movement_threshold = 0.018  # Larger noise gate
+                            direct_tracker.pixel_deadzone = 4.0  # Larger pixel deadzone
                         else:
                             direct_tracker.jitter_x = LightJitterFilter(alpha=config.direct_jitter_alpha)
                             direct_tracker.jitter_y = LightJitterFilter(alpha=config.direct_jitter_alpha)

@@ -488,11 +488,11 @@ class DirectTracker:
     """
 
     def __init__(self, screen_w, screen_h,
-                 jitter_alpha=0.35,
-                 spring_alpha=0.30,
-                 smooth_alpha=0.70,
-                 movement_threshold=0.008,
-                 pixel_deadzone=2.0,
+                 jitter_alpha=0.28,
+                 spring_alpha=0.25,
+                 smooth_alpha=0.65,
+                 movement_threshold=0.010,
+                 pixel_deadzone=3.0,
                  mirror_x=False):
         self.screen_w = screen_w
         self.screen_h = screen_h
@@ -528,6 +528,10 @@ class DirectTracker:
         self._prev_pos = None
         self.velocity = np.zeros(2)
 
+        # Store normalized filtered position for scroll/volume/brightness
+        # This is the position AFTER jitter filter + noise gate, BEFORE screen mapping
+        self._filtered_normalized = None
+
     def update(self, finger_pos, dt):
         """Map finger position to screen cursor position.
 
@@ -558,6 +562,10 @@ class DirectTracker:
                 self._last_accepted_pos = filtered.copy()
         else:
             self._last_accepted_pos = filtered.copy()
+
+        # Save normalized filtered position for scroll/volume/brightness modes
+        # This is the clean, jitter-free, noise-gated position in [0..1] space
+        self._filtered_normalized = filtered.copy()
 
         # Map to screen coordinates
         if self.mirror_x:
@@ -607,6 +615,7 @@ class DirectTracker:
         self._last_accepted_pos = None
         self._last_output_pos = None
         self._prev_pos = None
+        self._filtered_normalized = None
         self.velocity = np.zeros(2)
         if center is not None:
             self.smoother.reset(center)
@@ -616,3 +625,12 @@ class DirectTracker:
     @property
     def position(self):
         return self._spring_pos if self._spring_pos is not None else np.array([self.screen_w / 2, self.screen_h / 2])
+
+    @property
+    def filtered_normalized(self):
+        """Normalized filtered position (0-1 range) after jitter + noise gate.
+
+        Use this for scroll/volume/brightness delta calculations instead of raw_pos.
+        This gives smooth, noise-free deltas for continuous gestures.
+        """
+        return self._filtered_normalized if self._filtered_normalized is not None else np.array([0.5, 0.5])
