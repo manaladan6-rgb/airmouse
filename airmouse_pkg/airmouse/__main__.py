@@ -1,5 +1,5 @@
 """
-AirMouse v3.1.0 — Iron Man Next-Gen Edition
+AirMouse v3.2.0 — Iron Man Next-Gen Edition
 
     airmouse              # Start with tutorial (first run)
     airmouse --skip       # Skip tutorial
@@ -41,6 +41,7 @@ from .mouse_controller import MouseController
 from .audio import AudioFeedback
 from .config import Config, CONFIG_PATH
 from .tutorial import run_tutorial
+from .display import enumerate_displays, get_primary_display
 
 
 def _get_screen_size():
@@ -204,7 +205,40 @@ def main():
     parser.add_argument("--power", type=float, default=None, help="Exp curve power")
     parser.add_argument("--scale", type=float, default=None, help="Sensitivity scale")
     parser.add_argument("--precision", action="store_true", help="Start in precision mode")
+    parser.add_argument("--monitor", type=int, default=None, help="Monitor index (0=primary)")
+    parser.add_argument("--list-monitors", action="store_true", help="List monitors and exit")
+    parser.add_argument("--autostart", type=str, choices=["on", "off"], default=None, help="Enable/disable auto-start")
+    parser.add_argument("--settings", action="store_true", help="Open settings GUI")
     args = parser.parse_args()
+
+    # Handle --settings
+    if args.settings:
+        from .settings_gui import show_settings
+        show_settings()
+        return
+
+    # Handle --list-monitors
+    if args.list_monitors:
+        displays = enumerate_displays()
+        print("  Connected displays:")
+        for d in displays:
+            print(f"    [{d.index}] {d.width}x{d.height} at ({d.x},{d.y}) {'[PRIMARY]' if d.is_primary else ''} — {d.name}")
+        return
+
+    # Handle --autostart
+    if args.autostart is not None:
+        from .autostart import enable_auto_start, disable_auto_start, is_auto_start_enabled
+        if args.autostart == "on":
+            if enable_auto_start():
+                print("  Auto-start ENABLED — AirMouse will start on boot.")
+            else:
+                print("  Failed to enable auto-start.")
+        else:
+            if disable_auto_start():
+                print("  Auto-start DISABLED.")
+            else:
+                print("  Failed to disable auto-start.")
+        return
 
     config = Config()
     config.load()
@@ -217,7 +251,15 @@ def main():
     if args.power is not None: config.exp_power = args.power
     if args.scale is not None: config.exp_scale = args.scale
 
-    screen_w, screen_h = _get_screen_size()
+    # Multi-monitor support
+    displays = enumerate_displays()
+    selected_display = None
+    if args.monitor is not None and args.monitor < len(displays):
+        selected_display = displays[args.monitor]
+    else:
+        selected_display = get_primary_display()
+    screen_w = selected_display.width
+    screen_h = selected_display.height
 
     tracker = HandTracker(
         camera_index=config.camera_index,
@@ -308,6 +350,7 @@ def main():
     running = True
     gesture_confidence = 0.0
     hand_absent_frames = 0  # Track how long hand has been absent
+    hand_was_lost = False    # Track hand-loss for sound feedback
 
     # Volume/brightness mode debounce
     last_volume_time = 0.0
@@ -350,6 +393,9 @@ def main():
 
             if hand_data["hand_found"] and hand_data["landmarks"] is not None:
                 hand_absent_frames = 0  # Reset absent counter
+                if hand_was_lost:
+                    audio.hand_found()
+                    hand_was_lost = False
                 gesture_result = recognize_gesture(hand_data["landmarks"],
                                                     pinch_threshold=config.pinch_threshold)
                 raw_gesture = gesture_result["gesture"]
@@ -425,7 +471,7 @@ def main():
                 # PINKY -> Middle click
                 elif gesture == Gesture.PINKY and gesture_changed:
                     try:
-                        mouse.mouse.click(mouse.mouse.Button.middle, 1)
+                        mouse.mouse.click(mouse._button.middle, 1)
                     except Exception:
                         pass
                     audio.right_click()
@@ -579,6 +625,9 @@ def main():
                 # Only reset after hand has been absent for a few frames
                 # This prevents jitter from momentary detection loss
                 if hand_absent_frames > 5:
+                    if not hand_was_lost:
+                        audio.hand_lost()
+                        hand_was_lost = True
                     jitter_x.reset()
                     jitter_y.reset()
                     home.reset()

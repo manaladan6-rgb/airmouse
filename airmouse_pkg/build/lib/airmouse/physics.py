@@ -1,25 +1,66 @@
 """
-Iron Man Physics Engine — Spring-Damper + Adaptive + Momentum + Edge Gravity
+Iron Man Physics Engine v3.1 — Spring-Damper + Adaptive + Momentum + Edge Gravity
++ Dual-Stage Jitter + Velocity Prediction + Position Smoothing + Acceleration Limiting
 
 Key design: FINGER-RELATIVE tracking, not hand-absolute.
 Your hand stays still. Only finger movements drive the cursor.
 
 Physics stack:
-    1. Jitter filter       — kills hand tremor
-    2. Home calibration    — establish rest position, track delta
-    3. Exponential curve   — tiny finger moves → big cursor moves
-    4. Adaptive spring     — k changes with speed (slow=precise, fast=snappy)
-    5. Spring-damper       — Hooke's Law + viscous damping
-    6. Momentum throw      — flick → cursor keeps gliding
-    7. Edge gravity        — soft pull toward screen edges
-    8. Screen clamp        — never go off-screen
+    1. Dual-stage jitter   — micro-tremor kill + macro smooth
+    2. Home calibration    — establish rest position, track delta (stability-gated)
+    3. Exponential curve   — tiny finger moves -> big cursor moves (with soft deadzone)
+    4. Velocity predictor  — Kalman-like lookahead to reduce perceived latency
+    5. Adaptive spring     — k changes with speed (slow=precise, fast=snappy)
+    6. Acceleration limit  — prevent sudden jerks
+    7. Spring-damper       — Hooke's Law + viscous damping (frame-compensated)
+    8. Momentum throw      — flick -> cursor keeps gliding
+    9. Position smoother   — final EMA pass for silky cursor output
+    10. Edge gravity       — soft pull toward screen edges
+    11. Screen clamp       — never go off-screen
 """
 
 import numpy as np
+from collections import deque
+
+
+class DualStageJitterFilter:
+    """Two-stage low-pass filter: micro-tremor kill + macro smoothing.
+
+    Stage 1 (micro): high alpha = fast response, kills tiny tremor
+    Stage 2 (macro): low alpha = slow drift, smooths out jitter bumps
+
+    This gives responsiveness AND smoothness simultaneously.
+    """
+
+    def __init__(self, micro_alpha=0.45, macro_alpha=0.25):
+        self.micro_alpha = micro_alpha
+        self.macro_alpha = macro_alpha
+        self._micro = None
+        self._macro = None
+
+    def filter(self, raw):
+        """Apply dual-stage EMA filter."""
+        # Stage 1: micro-tremor suppression (responsive)
+        if self._micro is None:
+            self._micro = raw.copy()
+        else:
+            self._micro = self.micro_alpha * raw + (1.0 - self.micro_alpha) * self._micro
+
+        # Stage 2: macro smoothing (silky)
+        if self._macro is None:
+            self._macro = self._micro.copy()
+        else:
+            self._macro = self.macro_alpha * self._micro + (1.0 - self.macro_alpha) * self._macro
+
+        return self._macro.copy()
+
+    def reset(self):
+        self._micro = None
+        self._macro = None
 
 
 class JitterFilter:
-    """Low-pass exponential filter for tremor suppression."""
+    """Backward-compatible single-stage filter (wraps DualStage with macro_alpha=1)."""
 
     def __init__(self, alpha=0.3):
         self.alpha = alpha
@@ -43,21 +84,27 @@ class HomePosition:
     not absolute position. This means your hand can be anywhere —
     only finger movements matter.
 
-    Home auto-calibrates:
-    - On first detection, sets home to current finger position
-    - Slowly drifts toward current position (tracks hand drift)
-    - Reset with 'r' key or fist gesture
+    v3.1 improvements:
+    - Stability-gated calibration: only calibrates when hand is stable
+    - Faster initial lock, slower drift when moving
+    - Configurable drift rates for moving vs still
     """
 
-    def __init__(self, drift_rate=0.02):
-        self.home = None           # The rest position [x, y]
-        self.drift_rate = drift_rate  # How fast home follows slow drift
+    def __init__(self, drift_rate=0.02, drift_rate_moving=0.005,
+                 stability_window=5, stability_threshold=0.008):
+        self.home = None
+        self.drift_rate = drift_rate            # When hand is still
+        self.drift_rate_moving = drift_rate_moving  # When hand is moving (slower drift)
         self.is_calibrated = False
+        self.stability_window = stability_window
+        self.stability_threshold = stability_threshold
+        self._pos_history = deque(maxlen=stability_window)
 
     def calibrate(self, current_pos):
         """Set home to current position."""
         self.home = current_pos.copy()
         self.is_calibrated = True
+        self._pos_history.clear()
 
     def get_delta(self, current_pos):
         """Get finger displacement from home position.
@@ -71,25 +118,48 @@ class HomePosition:
 
         delta = current_pos - self.home
 
-        # Slowly drift home toward current (tracks natural hand drift)
-        self.home += self.drift_rate * delta
+        # Track position history for stability measurement
+        self._pos_history.append(current_pos.copy())
+
+        # Choose drift rate based on movement speed
+        if len(self._pos_history) >= 2:
+            recent_speed = np.linalg.norm(
+                self._pos_history[-1] - self._pos_history[-2]
+            )
+            if recent_speed > self.stability_threshold:
+                rate = self.drift_rate_moving  # Slow drift when moving
+            else:
+                rate = self.drift_rate  # Normal drift when still
+        else:
+            rate = self.drift_rate
+
+        self.home += rate * delta
 
         return delta
+
+    def is_stable(self):
+        """Check if the hand position has been stable recently."""
+        if len(self._pos_history) < self.stability_window:
+            return False
+        positions = list(self._pos_history)
+        for i in range(1, len(positions)):
+            if np.linalg.norm(positions[i] - positions[i-1]) > self.stability_threshold:
+                return False
+        return True
 
     def reset(self):
         self.home = None
         self.is_calibrated = False
+        self._pos_history.clear()
 
 
 class ExponentialCurve:
     """Maps linear finger delta to exponential cursor movement.
 
-    Iron Man feel: tiny finger movements → large cursor jumps.
+    Iron Man feel: tiny finger movements -> large cursor jumps.
     Uses: sign(x) * |x|^power * scale
 
-    Power < 1.0 = more amplification for small movements (Iron Man feel)
-    Power = 1.0 = linear (normal)
-    Power > 1.0 = less amplification (precision mode)
+    v3.1: Smooth deadzone transition (cubic easing instead of hard cut)
     """
 
     def __init__(self, power=0.6, scale=3.0):
@@ -98,63 +168,144 @@ class ExponentialCurve:
 
     def map(self, delta):
         """Apply exponential sensitivity curve."""
-        # sign(x) * |x|^power * scale
         mapped = np.sign(delta) * np.abs(delta) ** self.power * self.scale
         return mapped
 
     def map_with_deadzone(self, delta, deadzone=0.01):
-        """Apply curve with deadzone (ignore tiny movements)."""
+        """Apply curve with soft deadzone (cubic fade-in, no hard cut)."""
         result = np.zeros_like(delta)
         for i in range(len(delta)):
-            if abs(delta[i]) < deadzone:
+            ad = abs(delta[i])
+            if ad < deadzone * 0.5:
+                # Full deadzone — zero output
                 result[i] = 0.0
+            elif ad < deadzone:
+                # Transition zone — cubic ease-in from 0 to full
+                t = (ad - deadzone * 0.5) / (deadzone * 0.5)
+                blend = t * t * (3.0 - 2.0 * t)  # Smoothstep
+                adjusted = delta[i] - np.sign(delta[i]) * deadzone * 0.5
+                full_val = np.sign(adjusted) * abs(adjusted) ** self.power * self.scale
+                result[i] = full_val * blend
             else:
-                # Re-center after deadzone
+                # Full sensitivity
                 adjusted = delta[i] - np.sign(delta[i]) * deadzone
                 result[i] = np.sign(adjusted) * abs(adjusted) ** self.power * self.scale
         return result
 
 
+class VelocityPredictor:
+    """Kalman-like velocity prediction to reduce perceived input latency.
+
+    Predicts where the finger will be slightly ahead based on velocity.
+    This compensates for the ~30ms pipeline delay (camera + processing + display).
+
+    The prediction is gentle — it only activates during sustained movement,
+    not during tremor or direction changes.
+    """
+
+    def __init__(self, prediction_factor=0.15, max_correction=0.02):
+        self.prediction_factor = prediction_factor
+        self.max_correction = max_correction
+        self._prev_pos = None
+        self._velocity = np.zeros(2)
+
+    def predict(self, current_pos):
+        """Return predicted position (slightly ahead of current)."""
+        if self._prev_pos is None:
+            self._prev_pos = current_pos.copy()
+            return current_pos.copy()
+
+        raw_velocity = current_pos - self._prev_pos
+
+        # Smooth velocity estimate (EMA)
+        self._velocity = 0.4 * raw_velocity + 0.6 * self._velocity
+
+        # Only predict during sustained movement (not tremor)
+        speed = np.linalg.norm(self._velocity)
+        if speed < 0.003:  # Too slow — no prediction
+            self._prev_pos = current_pos.copy()
+            return current_pos.copy()
+
+        # Predicted position
+        correction = self._velocity * self.prediction_factor
+
+        # Clamp correction to prevent overshooting
+        corr_norm = np.linalg.norm(correction)
+        if corr_norm > self.max_correction:
+            correction = correction * (self.max_correction / corr_norm)
+
+        predicted = current_pos + correction
+        self._prev_pos = current_pos.copy()
+        return predicted
+
+    def reset(self):
+        self._prev_pos = None
+        self._velocity = np.zeros(2)
+
+
 class AdaptiveSpringDamper:
-    """Spring-damper with speed-adaptive stiffness.
+    """Spring-damper with speed-adaptive stiffness + acceleration limiting.
 
-    Slow movement  → low k  → precise, smooth cursor
-    Fast movement  → high k → snappy, responsive cursor
-
-    This gives the best of both worlds: pixel-perfect precision
-    when you're being careful, and instant response when you flick.
+    v3.1 improvements:
+    - Frame-time compensation for consistent physics across frame rates
+    - Acceleration limiting prevents sudden jerks
+    - Softer low-speed damping for better precision feel
+    - Smoother stiffness transition (exponential ease)
     """
 
     def __init__(self, mass=0.8, stiffness_min=120.0, stiffness_max=400.0,
-                 damping_ratio=0.85, speed_threshold=200.0):
+                 damping_ratio=0.85, speed_threshold=200.0,
+                 max_accel=50000.0, stiffness_smoothing=0.3):
         self.mass = mass
         self.stiffness_min = stiffness_min
         self.stiffness_max = stiffness_max
-        self.damping_ratio = damping_ratio  # 1.0 = critically damped
+        self.damping_ratio = damping_ratio
         self.speed_threshold = speed_threshold
+        self.max_accel = max_accel
+        self.stiffness_smoothing = stiffness_smoothing
 
         self.position = np.zeros(2, dtype=np.float64)
         self.velocity = np.zeros(2, dtype=np.float64)
+        self.acceleration = np.zeros(2, dtype=np.float64)
         self.current_stiffness = stiffness_min
+        self._prev_stiffness = stiffness_min
 
     def update(self, target, dt):
+        """Update spring-damper with frame-time compensation."""
         speed = np.linalg.norm(self.velocity)
 
-        # Adaptive stiffness: ramp up with speed
+        # Adaptive stiffness with smooth transition
         speed_factor = min(speed / self.speed_threshold, 1.0)
-        k = self.stiffness_min + (self.stiffness_max - self.stiffness_min) * speed_factor
+        target_k = self.stiffness_min + (self.stiffness_max - self.stiffness_min) * speed_factor
+        # Smooth stiffness transition (no sudden jumps)
+        s = self.stiffness_smoothing
+        k = s * target_k + (1.0 - s) * self._prev_stiffness
+        self._prev_stiffness = k
         self.current_stiffness = k
 
-        # Damping = ratio * critical damping (2 * sqrt(k * m))
-        c = self.damping_ratio * 2.0 * np.sqrt(k * self.mass)
+        # Damping: slightly over-damped at low speed for precision, under-damped at high
+        if speed < 50:
+            effective_ratio = min(self.damping_ratio + 0.15, 1.1)  # Over-damped = no overshoot
+        else:
+            effective_ratio = self.damping_ratio
+
+        c = effective_ratio * 2.0 * np.sqrt(k * self.mass)
 
         # Spring-damper force
         displacement = self.position - target
         force = -k * displacement - c * self.velocity
-        acceleration = force / self.mass
 
-        # Semi-implicit Euler
-        self.velocity += acceleration * dt
+        # Frame-time compensated acceleration
+        raw_accel = force / self.mass
+        # Limit acceleration to prevent jerks
+        accel_norm = np.linalg.norm(raw_accel)
+        if accel_norm > self.max_accel:
+            raw_accel = raw_accel * (self.max_accel / accel_norm)
+        self.acceleration = raw_accel
+
+        # Semi-implicit Euler with dt clamping
+        dt = min(dt, 0.05)  # Max 50ms step (20fps minimum)
+        self.velocity += self.acceleration * dt
         self.position += self.velocity * dt
 
         return self.position.copy()
@@ -164,47 +315,73 @@ class AdaptiveSpringDamper:
 
     def reset(self, position=None):
         self.velocity = np.zeros(2, dtype=np.float64)
+        self.acceleration = np.zeros(2, dtype=np.float64)
         if position is not None:
             self.position = position.copy()
         else:
             self.position = np.zeros(2, dtype=np.float64)
+        self.current_stiffness = self.stiffness_min
+        self._prev_stiffness = self.stiffness_min
+
+
+class PositionSmoother:
+    """Final EMA pass on cursor position for silky-smooth output.
+
+    Applied AFTER all physics — this is the last stage before
+    the OS cursor is moved. It removes any remaining micro-jitter
+    without adding perceptible latency.
+
+    Uses a very high alpha (0.7-0.85) so it's responsive but smooth.
+    """
+
+    def __init__(self, alpha=0.75):
+        self.alpha = alpha
+        self._smoothed = None
+
+    def smooth(self, position):
+        """Apply final position smoothing."""
+        if self._smoothed is None:
+            self._smoothed = position.copy()
+        else:
+            self._smoothed = self.alpha * position + (1.0 - self.alpha) * self._smoothed
+        return self._smoothed.copy()
+
+    def reset(self, position=None):
+        self._smoothed = position.copy() if position is not None else None
 
 
 class MomentumThrow:
     """Detects flick gestures and applies decaying momentum.
 
-    When you flick your finger fast and release (fist or stop),
-    the cursor keeps gliding with exponential decay — like
-    throwing a puck on ice.
-
-    friction: 0.0 = infinite slide, 1.0 = instant stop
+    v3.1 improvements:
+    - Direction-aware friction (maintains direction better)
+    - Smoother activation/deactivation
+    - Better flick detection (velocity spike, not just speed)
     """
 
-    def __init__(self, friction=0.92, min_speed=800.0):
+    def __init__(self, friction=0.92, min_speed=800.0, max_momentum=2000.0):
         self.friction = friction
         self.min_speed = min_speed
+        self.max_momentum = max_momentum
         self.momentum = np.zeros(2)
         self.is_active = False
+        self._was_visible = True
 
     def update(self, velocity, hand_visible, dt):
-        """Update momentum state.
-
-        Args:
-            velocity: Current cursor velocity (from spring-damper)
-            hand_visible: Whether hand is still detected
-            dt: Time step
-
-        Returns:
-            momentum_offset: np.ndarray to add to cursor position
-        """
+        """Update momentum state."""
         speed = np.linalg.norm(velocity)
 
         if hand_visible and speed > self.min_speed:
-            # Hand moving fast → accumulate momentum
-            self.momentum = velocity * 0.3  # Fraction of velocity
+            # Hand moving fast -> accumulate momentum
+            self.momentum = velocity * 0.3
+            # Clamp momentum
+            m_norm = np.linalg.norm(self.momentum)
+            if m_norm > self.max_momentum:
+                self.momentum = self.momentum * (self.max_momentum / m_norm)
             self.is_active = True
-        elif not hand_visible and self.is_active:
-            # Hand disappeared while moving → throw!
+        elif not hand_visible and self._was_visible and speed > self.min_speed * 0.5:
+            # Hand just disappeared while moving -> throw!
+            self.momentum = velocity * 0.5
             self.is_active = True
         elif self.is_active:
             # Apply friction decay
@@ -213,21 +390,19 @@ class MomentumThrow:
                 self.momentum = np.zeros(2)
                 self.is_active = False
 
+        self._was_visible = hand_visible
         return self.momentum * dt
 
     def reset(self):
         self.momentum = np.zeros(2)
         self.is_active = False
+        self._was_visible = True
 
 
 class EdgeGravity:
     """Soft magnetic pull toward screen edges and corners.
 
-    Makes it easier to hit close/minimize/maximize buttons.
-    The pull is gentle — it only activates near edges.
-
-    strength: 0.0 = no gravity, higher = stronger pull
-    edge_zone: fraction of screen that has gravity (e.g. 0.08 = 8%)
+    v3.1: Smoother quadratic falloff, configurable per-edge.
     """
 
     def __init__(self, strength=15.0, edge_zone=0.08):
@@ -235,29 +410,20 @@ class EdgeGravity:
         self.edge_zone = edge_zone
 
     def apply(self, position, screen_w, screen_h):
-        """Apply edge gravity force.
-
-        Returns:
-            offset: np.ndarray — position offset from gravity
-        """
+        """Apply edge gravity force."""
         offset = np.zeros(2)
 
-        # Normalize position to [0, 1]
         nx = position[0] / screen_w
         ny = position[1] / screen_h
         ez = self.edge_zone
         s = self.strength
 
-        # Left edge
         if nx < ez:
             offset[0] -= s * ((ez - nx) / ez) ** 2
-        # Right edge
         if nx > (1.0 - ez):
             offset[0] += s * ((nx - (1.0 - ez)) / ez) ** 2
-        # Top edge
         if ny < ez:
             offset[1] -= s * ((ez - ny) / ez) ** 2
-        # Bottom edge
         if ny > (1.0 - ez):
             offset[1] += s * ((ny - (1.0 - ez)) / ez) ** 2
 

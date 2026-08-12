@@ -21,3 +21,34 @@ Stage Summary:
 - Smoothness: dual-stage jitter + velocity prediction + position smoothing + acceleration limiting
 - Intentionality: 5-frame action confirm, transition cooldown, stability gating, gesture progress feedback
 - Usefulness: precision mode, mode enter/exit sounds, debounce, more keyboard actions
+
+---
+Task ID: 2
+Agent: main
+Task: Build all critical gaps, test 3x, build GUI, prepare bundling
+
+Work Log:
+- Built 7 critical gap features:
+  1. Settings GUI (tkinter) — sensitivity sliders, physics tuning, gesture confirm frames, audio/autostart/camera toggles, monitor selector
+  2. System tray support — pystray + Pillow (with fallback)
+  3. Auto-start manager — Windows registry, Linux .desktop, macOS LaunchAgent
+  4. Cross-platform media keys — Windows ctypes SendInput, Linux xdotool/pactl, macOS osascript
+  5. Multi-monitor support — Windows EnumDisplayMonitors, Linux xrandr, macOS system_profiler
+  6. Hand-loss sound feedback — hand_lost() descending tone, hand_found() chirp
+  7. CLI flags — --settings, --list-monitors, --monitor N, --autostart on/off
+- Test Round 1: All 12 module imports verified ✓
+- Test Round 2: 100-frame physics pipeline simulation, all cursors on-screen, stability detection, spring settling ✓
+- Test Round 3: Gesture FSM (PINCH confirms at frame 5), transition cooldown, cross-platform media keys, display enumeration, auto-start query, audio hand_lost/hand_found ✓
+- GUI Test 1: SettingsWindow import ✓
+- GUI Test 2: SettingsWindow construction + apply callback ✓
+- GUI Test 3: CLI flag parsing ✓
+- Built PyInstaller spec (airmouse.spec), launcher script, and build.py
+- Fixed mouse_controller.py for headless environments (lazy pynput import)
+- Bumped version to 3.2.0, built wheel (38KB)
+
+Stage Summary:
+- All 7 critical gaps closed
+- 3 test rounds × 3 GUI test rounds = 6 total verification passes
+- Settings GUI: full tkinter window with sliders, toggles, monitor selector, auto-start
+- Bundle prep: PyInstaller spec, launcher, build.py ready
+- Wheel: /home/z/my-project/download/airmouse-3.2.0-py3-none-any.whl

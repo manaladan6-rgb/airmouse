@@ -1,7 +1,7 @@
 Metadata-Version: 2.4
 Name: airmouse
-Version: 3.1.0
-Summary: AirMouse v3.1 Iron Man Edition — 14-gesture physics-driven finger mouse with dual-stage jitter, velocity prediction, position smoothing, precision mode, and interactive tutorial
+Version: 3.2.0
+Summary: AirMouse v3.2 Iron Man Edition — 14-gesture physics-driven finger mouse with dual-stage jitter, velocity prediction, position smoothing, precision mode, multi-monitor, auto-start, cross-platform media keys, and interactive tutorial
 Author: AirMouse
 License-Expression: MIT
 Keywords: airmouse,hand-tracking,gesture,mouse,physics,mediapipe,iron-man

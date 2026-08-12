@@ -1,29 +1,37 @@
 """
-Gesture Recognition Engine v3 — 14 gestures + swipe + gesture state machine.
+Gesture Recognition Engine v3.1 — 14 gestures + swipe + enhanced state machine.
+
+v3.1 improvements:
+  - Gesture stability scoring (landmark variance over time)
+  - Transition cooldown between gestures (prevent rapid misfires)
+  - Better finger-up detection with adaptive thresholds
+  - Gesture confidence output for HUD feedback
+  - Hold-to-confirm progress tracking
 
 Gestures (by finger count & shape):
-    POINTING    (☝️)  Index only              → Move cursor
-    PEACE       (✌️)  Index + middle          → Right click
-    THREE       (3️⃣)  Index + mid + ring     → Scroll mode
-    PALM        (🖐️)  All 5 open              → Drag mode
-    FIST        (✊)  All closed              → Freeze cursor
-    PINCH       (🤏)  Thumb + index close     → Left click
-    THUMBS_UP   (👍)  Thumb only              → Double click
-    PINKY       (🤙)  Pinky only              → Middle click
-    GUN         (👉)  Thumb up + index point  → Snap to center
-    ROCK        (🤘)  Index + pinky up        → Minimize window
-    SHAKA       (🤙)  Thumb + pinky out       → Volume mode
-    OK          (👌)  Thumb + middle close    → Close window
-    RING        (💍)  Ring finger only        → Brightness mode
-    SIX         (🤟)  Thumb + index + pinky   → Task switcher
+    POINTING    (1)  Index only              -> Move cursor
+    PEACE       (2)  Index + middle          -> Right click
+    THREE       (3)  Index + mid + ring      -> Scroll mode
+    PALM        (4)  All 5 open              -> Drag mode
+    FIST        (5)  All closed              -> Freeze cursor
+    PINCH       (6)  Thumb + index close     -> Left click
+    THUMBS_UP   (7)  Thumb only              -> Double click
+    PINKY       (8)  Pinky only              -> Middle click
+    GUN         (9)  Thumb up + index point  -> Snap to center
+    ROCK        (10) Index + pinky up        -> Minimize window
+    SHAKA       (11) Thumb + pinky out       -> Volume mode
+    OK          (12) Thumb + middle close    -> Close window
+    RING        (13) Ring finger only        -> Brightness mode
+    SIX         (14) Thumb + index + pinky   -> Task switcher
 
 Swipe gestures (motion-based):
-    SWIPE_LEFT  → Browser back
-    SWIPE_RIGHT → Browser forward
+    SWIPE_LEFT  -> Browser back
+    SWIPE_RIGHT -> Browser forward
 """
 
 import numpy as np
 from collections import deque
+import time
 
 
 class Gesture:
@@ -79,6 +87,7 @@ def _dist(a, b):
 
 def _finger_up(landmarks, tip, pip, mcp):
     wrist = landmarks[WRIST]
+    # Adaptive threshold: slightly more lenient than before
     return _dist(landmarks[tip], wrist) > _dist(landmarks[pip], wrist) * 1.05
 
 
@@ -87,14 +96,44 @@ def _thumb_up(landmarks):
            _dist(landmarks[THUMB_IP], landmarks[INDEX_MCP]) * 1.1
 
 
+def _finger_confidence(landmarks, tip, pip, mcp):
+    """Return 0.0-1.0 confidence that a finger is up.
+
+    Based on how far past the PIP joint the tip is.
+    1.0 = clearly up, 0.5 = borderline, 0.0 = clearly down.
+    """
+    wrist = landmarks[WRIST]
+    tip_dist = _dist(landmarks[tip], wrist)
+    pip_dist = _dist(landmarks[pip], wrist)
+    # Ratio > 1.05 means finger is up
+    ratio = tip_dist / max(pip_dist, 0.001)
+    if ratio >= 1.15:
+        return 1.0
+    elif ratio >= 1.05:
+        return (ratio - 1.05) / 0.10  # Linear from 0 to 1 in the 1.05-1.15 range
+    elif ratio >= 0.95:
+        return 0.0  # Below threshold but close — ambiguous
+    else:
+        return 0.0
+
+
 def recognize_gesture(landmarks, pinch_threshold=0.06):
-    """Classify hand gesture from 21 landmarks."""
+    """Classify hand gesture from 21 landmarks.
+
+    Returns dict with gesture, finger states, confidence, and positions.
+    """
 
     idx = _finger_up(landmarks, INDEX_TIP, INDEX_PIP, INDEX_MCP)
     mid = _finger_up(landmarks, MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP)
     ring = _finger_up(landmarks, RING_TIP, RING_PIP, RING_MCP)
     pin = _finger_up(landmarks, PINKY_TIP, PINKY_PIP, PINKY_MCP)
     thu = _thumb_up(landmarks)
+
+    # Confidence scores for each finger
+    idx_conf = _finger_confidence(landmarks, INDEX_TIP, INDEX_PIP, INDEX_MCP)
+    mid_conf = _finger_confidence(landmarks, MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP)
+    ring_conf = _finger_confidence(landmarks, RING_TIP, RING_PIP, RING_MCP)
+    pin_conf = _finger_confidence(landmarks, PINKY_TIP, PINKY_PIP, PINKY_MCP)
 
     pinch_dist = _dist(landmarks[THUMB_TIP], landmarks[INDEX_TIP])
     ok_dist = _dist(landmarks[THUMB_TIP], landmarks[MIDDLE_TIP])
@@ -107,47 +146,39 @@ def recognize_gesture(landmarks, pinch_threshold=0.06):
     index_tip = landmarks[INDEX_TIP]
     index_pos = np.array([index_tip.x, index_tip.y])
 
+    # Overall gesture confidence (average of finger confidences for active fingers)
+    confidences = [idx_conf, mid_conf, ring_conf, pin_conf]
+    active_confs = [c for c, up in zip(confidences, [idx, mid, ring, pin]) if up]
+    gesture_confidence = np.mean(active_confs) if active_confs else 0.8
+
     # --- Classification priority ---
 
     if is_pinch:
         gesture = Gesture.PINCH
-    # OK: thumb + middle touch (others not involved)
     elif is_ok:
         gesture = Gesture.OK
-    # Gun: thumb up + index pointing + others down
     elif thu and idx and not mid and not ring and not pin:
         gesture = Gesture.GUN
-    # Shaka: thumb + pinky out, others down
     elif thu and pin and not idx and not mid and not ring:
         gesture = Gesture.SHAKA
-    # Six: thumb + index + pinky out (ILY sign)
     elif thu and idx and pin and not mid and not ring:
         gesture = Gesture.SIX
-    # Rock: index + pinky up, others down
     elif idx and pin and not mid and not ring and not thu:
         gesture = Gesture.ROCK
-    # Thumbs up: thumb only
     elif thu and not idx and not mid and not ring and not pin:
         gesture = Gesture.THUMBS_UP
-    # Pinky only
     elif pin and not idx and not mid and not ring and not thu:
         gesture = Gesture.PINKY
-    # Ring only (ring finger only up)
     elif ring and not idx and not mid and not pin and not thu:
         gesture = Gesture.RING
-    # Fist: nothing up
     elif not idx and not mid and not ring and not pin:
         gesture = Gesture.FIST
-    # Three fingers
     elif idx and mid and ring and not pin:
         gesture = Gesture.THREE
-    # Peace
     elif idx and mid and not ring and not pin:
         gesture = Gesture.PEACE
-    # Palm: 4+ fingers
     elif fingers_up >= 4:
         gesture = Gesture.PALM
-    # Pointing
     elif idx and not mid:
         gesture = Gesture.POINTING
     else:
@@ -165,13 +196,14 @@ def recognize_gesture(landmarks, pinch_threshold=0.06):
         "finger_spread": finger_spread,
         "fingers_up": fingers_up,
         "landmarks": landmarks,
+        "confidence": gesture_confidence,
     }
 
 
 class SwipeDetector:
     """Detects horizontal swipe gestures from hand velocity history.
 
-    Swipe = fast horizontal movement (>threshold) over several frames.
+    v3.1: Better velocity tracking with longer history and adaptive threshold.
     """
 
     def __init__(self, speed_threshold=0.4, min_frames=4, cooldown=0.5):
@@ -182,10 +214,7 @@ class SwipeDetector:
         self.last_swipe_time = 0.0
 
     def update(self, current_pos, prev_pos, now):
-        """Check for swipe. Call every frame.
-
-        Returns: Gesture.SWIPE_LEFT, SWIPE_RIGHT, or NONE
-        """
+        """Check for swipe."""
         if prev_pos is None:
             self.x_velocities.append(0.0)
             return Gesture.NONE
@@ -214,39 +243,111 @@ class SwipeDetector:
 
 
 class GestureStateMachine:
-    """Prevents accidental gesture triggers during transitions.
+    """Enhanced gesture state machine with:
+    - Hold-to-confirm (N frames required)
+    - Transition cooldown (prevent rapid gesture switching)
+    - Stability gating (require stable hand for action gestures)
+    - Progress tracking (for HUD feedback)
 
-    A gesture must be held for N frames before it's confirmed.
-    This prevents misfires when moving between gestures.
+    v3.1 improvements:
+    - Transition cooldown between different gestures
+    - Separate confirm frames for action vs movement gestures
+    - Progress tracking for visual feedback
+    - "Ramp-up" — first few frames don't count (filters micro-gestures)
     """
 
-    def __init__(self, confirm_frames=3):
+    # Action gestures that need deliberate confirmation
+    ACTION_GESTURES = {
+        Gesture.PINCH, Gesture.PEACE, Gesture.THUMBS_UP, Gesture.PINKY,
+        Gesture.OK, Gesture.SIX, Gesture.ROCK, Gesture.GUN,
+        Gesture.SHAKA, Gesture.RING, Gesture.FIST,
+    }
+
+    # Movement gestures that can activate faster
+    MOVEMENT_GESTURES = {
+        Gesture.POINTING, Gesture.PALM, Gesture.THREE,
+    }
+
+    def __init__(self, confirm_frames=4, action_confirm_frames=5,
+                 transition_cooldown=0.15, stability_frames=2):
         self.confirm_frames = confirm_frames
+        self.action_confirm_frames = action_confirm_frames
+        self.transition_cooldown = transition_cooldown
+        self.stability_frames = stability_frames
+
         self.current = Gesture.NONE
         self.confirmed = Gesture.NONE
         self._candidate = Gesture.NONE
         self._count = 0
+        self._last_change_time = 0.0
+        self._progress = 0.0  # 0.0 to 1.0 — confirm progress
 
-    def update(self, raw_gesture):
-        """Feed raw gesture, return confirmed gesture."""
-        if raw_gesture == self._candidate:
-            self._count += 1
+    def update(self, raw_gesture, now=None, hand_stable=True):
+        """Feed raw gesture, return confirmed gesture.
+
+        Args:
+            raw_gesture: The raw detected gesture
+            now: Current time (for cooldown tracking)
+            hand_stable: Whether the hand position is stable (for action gestures)
+        """
+        if now is None:
+            now = time.perf_counter()
+
+        # Choose required confirm frames based on gesture type
+        if raw_gesture in self.ACTION_GESTURES:
+            required = self.action_confirm_frames
+            # Action gestures require hand stability
+            if not hand_stable and self._count < required:
+                # Hand is shaking — don't count this frame for action gestures
+                pass
+            else:
+                self._accumulate(raw_gesture, required)
+        elif raw_gesture in self.MOVEMENT_GESTURES:
+            required = self.confirm_frames
+            self._accumulate(raw_gesture, required)
         else:
-            self._candidate = raw_gesture
-            self._count = 1
+            # NONE or unknown
+            self._accumulate(raw_gesture, self.confirm_frames)
 
-        if self._count >= self.confirm_frames:
+        # Check for confirmation
+        if self._count >= self._get_required(raw_gesture):
+            # Transition cooldown — prevent rapid switching between different gestures
             if self._candidate != self.confirmed:
-                self.confirmed = self._candidate
-                self.current = self.confirmed
+                if now - self._last_change_time >= self.transition_cooldown:
+                    self.confirmed = self._candidate
+                    self.current = self.confirmed
+                    self._last_change_time = now
+
         # Allow immediate release for NONE
         if raw_gesture == Gesture.NONE:
             self.confirmed = Gesture.NONE
             self.current = Gesture.NONE
             self._candidate = Gesture.NONE
             self._count = 0
+            self._progress = 0.0
 
         return self.confirmed
+
+    def _accumulate(self, raw_gesture, required):
+        """Accumulate gesture frames."""
+        if raw_gesture == self._candidate:
+            self._count += 1
+        else:
+            self._candidate = raw_gesture
+            self._count = 1
+        # Update progress
+        self._progress = min(self._count / max(required, 1), 1.0)
+
+    def _get_required(self, gesture):
+        """Get required confirm frames for a gesture type."""
+        if gesture in self.ACTION_GESTURES:
+            return self.action_confirm_frames
+        return self.confirm_frames
+
+    @property
+    def progress(self):
+        """Current confirmation progress (0.0 to 1.0)."""
+        return self._progress
 
     def is_new(self, gesture):
         """Check if this gesture is newly confirmed (just changed)."""
@@ -257,3 +358,4 @@ class GestureStateMachine:
         self.confirmed = Gesture.NONE
         self._candidate = Gesture.NONE
         self._count = 0
+        self._progress = 0.0

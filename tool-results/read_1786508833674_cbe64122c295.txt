@@ -1,0 +1,668 @@
+     1→"""
+     2→AirMouse v3.1.0 — Iron Man Next-Gen Edition
+     3→
+     4→    airmouse              # Start with tutorial (first run)
+     5→    airmouse --skip       # Skip tutorial
+     6→    airmouse --tutorial   # Force tutorial
+     7→
+     8→14 Gestures:
+     9→    Point   (1)  -> Move cursor          Pinch  (2)  -> Left click
+    10→    Peace   (3)  -> Right click          Palm   (4)  -> Drag mode
+    11→    Fist    (5)  -> Freeze cursor        Thumb  (6)  -> Double click
+    12→    Three   (7)  -> Scroll mode          Pinky  (8)  -> Middle click
+    13→    Gun     (9)  -> Snap to center       Rock   (10) -> Minimize
+    14→    Shaka   (11) -> Volume mode          OK     (12) -> Close window
+    15→    Ring    (13) -> Brightness mode      Six    (14) -> Task switcher
+    16→
+    17→Swipe:
+    18→    Left  -> Browser back    Right -> Browser forward
+    19→
+    20→Keyboard shortcuts (in camera window):
+    21→    [q] quit   [d] debug   [r] recalibrate   [s] sound toggle
+    22→    [p] precision mode   [t] tutorial   [h] help
+    23→"""
+    24→
+    25→import os
+    26→import sys
+    27→import time
+    28→import argparse
+    29→
+    30→import cv2
+    31→import numpy as np
+    32→import airmouse as _pkg
+    33→
+    34→from .physics import (DualStageJitterFilter, HomePosition, ExponentialCurve,
+    35→                       AdaptiveSpringDamper, MomentumThrow, EdgeGravity,
+    36→                       VelocityPredictor, PositionSmoother)
+    37→from .tracker import HandTracker
+    38→from .gestures import (recognize_gesture, SwipeDetector, GestureStateMachine,
+    39→                        Gesture, GESTURE_INFO)
+    40→from .mouse_controller import MouseController
+    41→from .audio import AudioFeedback
+    42→from .config import Config, CONFIG_PATH
+    43→from .tutorial import run_tutorial
+    44→
+    45→
+    46→def _get_screen_size():
+    47→    try:
+    48→        import ctypes
+    49→        user32 = ctypes.windll.user32
+    50→        w, h = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+    51→        if w > 0 and h > 0:
+    52→            return w, h
+    53→    except Exception:
+    54→        pass
+    55→    try:
+    56→        import tkinter as tk
+    57→        root = tk.Tk()
+    58→        w, h = root.winfo_screenwidth(), root.winfo_screenheight()
+    59→        root.destroy()
+    60→        if w > 0 and h > 0:
+    61→            return w, h
+    62→    except Exception:
+    63→        pass
+    64→    return 1920, 1080
+    65→
+    66→
+    67→def _draw_hud(frame, gesture_result, spring, fps, config,
+    68→              frozen, dragging, scrolling, volume_mode, brightness_mode,
+    69→              precision_mode, gsm_progress, gesture_confidence):
+    70→    """Draw Iron Man HUD overlay with v3.1 enhancements."""
+    71→    if frame is None:
+    72→        return
+    73→    h, w = frame.shape[:2]
+    74→    gesture = gesture_result.get("gesture", "none")
+    75→
+    76→    colors = {
+    77→        Gesture.POINTING: (0, 255, 255), Gesture.PINCH: (0, 255, 0),
+    78→        Gesture.PEACE: (0, 255, 200), Gesture.PALM: (255, 128, 0),
+    79→        Gesture.FIST: (0, 0, 255), Gesture.THUMBS_UP: (0, 200, 0),
+    80→        Gesture.THREE: (255, 0, 255), Gesture.PINKY: (200, 200, 0),
+    81→        Gesture.GUN: (0, 200, 200), Gesture.ROCK: (200, 0, 200),
+    82→        Gesture.SHAKA: (0, 200, 100), Gesture.OK: (0, 215, 255),
+    83→        Gesture.RING: (255, 200, 0), Gesture.SIX: (100, 200, 200),
+    84→        "none": (80, 80, 80),
+    85→    }
+    86→    color = colors.get(gesture, (80, 80, 80))
+    87→
+    88→    # Gesture indicator (top-left) with confirm progress ring
+    89→    cx, cy = 50, 50
+    90→    # Outer ring — progress indicator
+    91→    if gsm_progress > 0 and gsm_progress < 1.0:
+    92→        # Draw progress arc
+    93→        end_angle = int(360 * gsm_progress)
+    94→        cv2.ellipse(frame, (cx, cy), (30, 30), -90, 0, end_angle, (0, 255, 255), 3)
+    95→        cv2.circle(frame, (cx, cy), 30, (40, 40, 40), 1)
+    96→    else:
+    97→        cv2.circle(frame, (cx, cy), 28, color, 3)
+    98→    cv2.circle(frame, (cx, cy), 4, color, -1)
+    99→
+   100→    info = GESTURE_INFO.get(gesture)
+   101→    label = info["name"] if info else gesture
+   102→    cv2.putText(frame, label.upper(), (cx + 38, cy + 8),
+   103→                cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
+   104→
+   105→    # Confidence bar (next to gesture name)
+   106→    if gesture_confidence > 0:
+   107→        bar_x = cx + 38 + len(label) * 12 + 10
+   108→        bar_w = 40
+   109→        cv2.rectangle(frame, (bar_x, cy - 6), (bar_x + bar_w, cy + 6), (40, 40, 40), -1)
+   110→        fill_w = int(bar_w * gesture_confidence)
+   111→        conf_color = (0, 255, 0) if gesture_confidence > 0.7 else (0, 200, 255)
+   112→        cv2.rectangle(frame, (bar_x, cy - 6), (bar_x + fill_w, cy + 6), conf_color, -1)
+   113→
+   114→    # Status badges (bottom)
+   115→    badges = []
+   116→    if frozen:
+   117→        badges.append(("FROZEN", (0, 0, 255)))
+   118→    if dragging:
+   119→        badges.append(("DRAG", (255, 128, 0)))
+   120→    if scrolling:
+   121→        badges.append(("SCROLL", (255, 0, 255)))
+   122→    if volume_mode:
+   123→        badges.append(("VOL", (0, 200, 100)))
+   124→    if brightness_mode:
+   125→        badges.append(("BRIGHT", (255, 200, 0)))
+   126→    if precision_mode:
+   127→        badges.append(("PRECISE", (200, 200, 255)))
+   128→    bx = 10
+   129→    for bt, bc in badges:
+   130→        # Badge background
+   131→        (tw, _), _ = cv2.getTextSize(bt, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+   132→        cv2.rectangle(frame, (bx - 3, h - 38), (bx + tw + 5, h - 12), (20, 20, 20), -1)
+   133→        cv2.putText(frame, bt, (bx, h - 20),
+   134→                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, bc, 2, cv2.LINE_AA)
+   135→        bx += tw + 18
+   136→
+   137→    # Physics stats (bottom-right)
+   138→    k = spring.current_stiffness
+   139→    speed = np.linalg.norm(spring.velocity)
+   140→    stats = [f"FPS:{fps:.0f}", f"k:{k:.0f}", f"v:{speed:.0f}"]
+   141→    for i, t in enumerate(stats):
+   142→        cv2.putText(frame, t, (w - 120, h - 55 + i * 20),
+   143→                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1, cv2.LINE_AA)
+   144→
+   145→    # Draw tracked finger landmarks
+   146→    lm = gesture_result.get("landmarks")
+   147→    if lm is not None:
+   148→        from .gestures import INDEX_TIP, THUMB_TIP
+   149→        tip = lm[INDEX_TIP]
+   150→        tx, ty = int(tip.x * w), int(tip.y * h)
+   151→
+   152→        # Cursor crosshair with glow
+   153→        glow_color = (0, 80, 80) if not precision_mode else (80, 80, 0)
+   154→        cv2.circle(frame, (tx, ty), 11, glow_color, -1)  # Glow
+   155→        cv2.circle(frame, (tx, ty), 7, (0, 255, 255) if not precision_mode else (255, 255, 0), -1)
+   156→        cv2.circle(frame, (tx, ty), 13, (0, 255, 255) if not precision_mode else (255, 255, 0), 2)
+   157→
+   158→        thumb = lm[THUMB_TIP]
+   159→        thx, thy = int(thumb.x * w), int(thumb.y * h)
+   160→        cv2.circle(frame, (thx, thy), 4, (255, 200, 0), -1)
+   161→        if gesture == Gesture.PINCH:
+   162→            cv2.line(frame, (tx, ty), (thx, thy), (0, 255, 0), 2)
+   163→
+   164→
+   165→def _show_quick_reference():
+   166→    """Print gesture reference to terminal."""
+   167→    print("  +------------------------------------------------------+")
+   168→    print("  |              GESTURE QUICK REFERENCE                  |")
+   169→    print("  +------------------------------------------------------+")
+   170→    for g in [Gesture.POINTING, Gesture.PINCH, Gesture.PEACE, Gesture.PALM,
+   171→              Gesture.FIST, Gesture.THUMBS_UP, Gesture.THREE, Gesture.PINKY,
+   172→              Gesture.GUN, Gesture.ROCK, Gesture.SHAKA, Gesture.OK,
+   173→              Gesture.RING, Gesture.SIX]:
+   174→        info = GESTURE_INFO[g]
+   175→        row = f"  |  {info['emoji']:>2}  {info['name']:<10} {info['desc']:<28} -> {info['action']:<22}|"
+   176→        print(row)
+   177→    print("  |  <-  Swipe Left   Fast left motion              -> Browser Back       |")
+   178→    print("  |  ->  Swipe Right  Fast right motion             -> Browser Forward    |")
+   179→    print("  +------------------------------------------------------+")
+   180→    print("  Keyboard: [q]uit [d]ebug [r]ecalibrate [s]ound [p]recision [t]utorial")
+   181→
+   182→
+   183→def _safe_kb_action(kb_instance, action_name):
+   184→    """Safely call a keyboard action — never crash the main loop."""
+   185→    if kb_instance is None:
+   186→        return
+   187→    try:
+   188→        method = getattr(kb_instance, action_name)
+   189→        method()
+   190→    except Exception:
+   191→        pass
+   192→
+   193→
+   194→def main():
+   195→    parser = argparse.ArgumentParser(
+   196→        prog="airmouse",
+   197→        description="AirMouse v3.1.0 - Iron Man Next-Gen Edition",
+   198→    )
+   199→    parser.add_argument("--skip", action="store_true", help="Skip tutorial")
+   200→    parser.add_argument("--tutorial", action="store_true", help="Force tutorial")
+   201→    parser.add_argument("--no-cam", action="store_true", help="Hide camera window")
+   202→    parser.add_argument("--no-sound", action="store_true", help="Disable audio")
+   203→    parser.add_argument("--cam", type=int, default=None, help="Camera index")
+   204→    parser.add_argument("--power", type=float, default=None, help="Exp curve power")
+   205→    parser.add_argument("--scale", type=float, default=None, help="Sensitivity scale")
+   206→    parser.add_argument("--precision", action="store_true", help="Start in precision mode")
+   207→    args = parser.parse_args()
+   208→
+   209→    config = Config()
+   210→    config.load()
+   211→    if not os.path.exists(CONFIG_PATH):
+   212→        config.save_defaults()
+   213→
+   214→    if args.no_cam: config.show_camera = False
+   215→    if args.no_sound: config.audio_enabled = False
+   216→    if args.cam is not None: config.camera_index = args.cam
+   217→    if args.power is not None: config.exp_power = args.power
+   218→    if args.scale is not None: config.exp_scale = args.scale
+   219→
+   220→    screen_w, screen_h = _get_screen_size()
+   221→
+   222→    tracker = HandTracker(
+   223→        camera_index=config.camera_index,
+   224→        detection_confidence=config.detection_confidence,
+   225→        tracking_confidence=config.tracking_confidence,
+   226→    )
+   227→
+   228→    mouse = MouseController(screen_w=screen_w, screen_h=screen_h)
+   229→    audio = AudioFeedback(enabled=config.audio_enabled)
+   230→
+   231→    # Tutorial check
+   232→    tutorial_done_file = os.path.join(os.path.expanduser("~"), ".airmouse", "tutorial_done")
+   233→    should_tutorial = args.tutorial or (not args.skip and not os.path.exists(tutorial_done_file))
+   234→
+   235→    if should_tutorial:
+   236→        completed = run_tutorial(tracker)
+   237→        if completed:
+   238→            os.makedirs(os.path.dirname(tutorial_done_file), exist_ok=True)
+   239→            with open(tutorial_done_file, "w") as f:
+   240→                f.write("done")
+   241→
+   242→    # ═══ Physics stack v3.1 ═══
+   243→    spring = AdaptiveSpringDamper(
+   244→        mass=config.mass, stiffness_min=config.stiffness_min,
+   245→        stiffness_max=config.stiffness_max, damping_ratio=config.damping_ratio,
+   246→        speed_threshold=config.speed_threshold,
+   247→        max_accel=config.max_accel,
+   248→        stiffness_smoothing=config.stiffness_smoothing,
+   249→    )
+   250→    # Dual-stage jitter filter (micro-tremor + macro smooth)
+   251→    jitter_x = DualStageJitterFilter(
+   252→        micro_alpha=config.jitter_micro_alpha,
+   253→        macro_alpha=config.jitter_macro_alpha,
+   254→    )
+   255→    jitter_y = DualStageJitterFilter(
+   256→        micro_alpha=config.jitter_micro_alpha,
+   257→        macro_alpha=config.jitter_macro_alpha,
+   258→    )
+   259→    home = HomePosition(
+   260→        drift_rate=config.home_drift_rate,
+   261→        drift_rate_moving=config.home_drift_rate_moving,
+   262→    )
+   263→    exp_curve = ExponentialCurve(power=config.exp_power, scale=config.exp_scale)
+   264→    precision_curve = ExponentialCurve(power=config.precision_power, scale=config.precision_scale)
+   265→    momentum = MomentumThrow(
+   266→        friction=config.throw_friction,
+   267→        min_speed=config.throw_min_speed,
+   268→        max_momentum=config.throw_max_momentum,
+   269→    )
+   270→    edge_grav = EdgeGravity(
+   271→        strength=config.edge_gravity_strength,
+   272→        edge_zone=config.edge_gravity_zone,
+   273→    )
+   274→    # v3.1 new physics components
+   275→    velocity_predictor = VelocityPredictor(
+   276→        prediction_factor=config.prediction_factor,
+   277→        max_correction=config.prediction_max_correction,
+   278→    )
+   279→    position_smoother = PositionSmoother(alpha=config.position_smooth_alpha)
+   280→
+   281→    swipe = SwipeDetector()
+   282→    gsm = GestureStateMachine(
+   283→        confirm_frames=config.gesture_confirm_frames,
+   284→        action_confirm_frames=config.gesture_action_confirm_frames,
+   285→        transition_cooldown=config.gesture_transition_cooldown,
+   286→    )
+   287→
+   288→    # State
+   289→    center = np.array([screen_w / 2.0, screen_h / 2.0])
+   290→    spring.reset(center)
+   291→    position_smoother.reset(center)
+   292→    mouse.move_to(center[0], center[1])
+   293→
+   294→    last_click_time = 0.0
+   295→    prev_gesture = Gesture.NONE
+   296→    cursor_frozen = False
+   297→    dragging = False
+   298→    scrolling = False
+   299→    volume_mode = False
+   300→    brightness_mode = False
+   301→    precision_mode = args.precision or config.precision_mode
+   302→    scroll_accum = 0.0
+   303→    prev_index_y = None
+   304→    prev_pos = None
+   305→    fps = 0.0
+   306→    frame_times = []
+   307→    debug_mode = True
+   308→    running = True
+   309→    gesture_confidence = 0.0
+   310→    hand_absent_frames = 0  # Track how long hand has been absent
+   311→
+   312→    # Volume/brightness mode debounce
+   313→    last_volume_time = 0.0
+   314→    last_brightness_time = 0.0
+   315→    VOLUME_COOLDOWN = 0.15   # Seconds between volume adjustments
+   316→    BRIGHTNESS_COOLDOWN = 0.3  # Brightness changes are slower
+   317→
+   318→    # Keyboard actions (lazy-init, never crash)
+   319→    kb = None
+   320→    def _kb():
+   321→        nonlocal kb
+   322→        if kb is None:
+   323→            try:
+   324→                from .keyboard import KeyboardActions
+   325→                kb = KeyboardActions()
+   326→            except Exception:
+   327→                pass
+   328→        return kb
+   329→
+   330→    # Banner
+   331→    print()
+   332→    print("  +==================================================+")
+   333→    print(f"  |     AirMouse v{_pkg.__version__} - Iron Man Next-Gen Edition  |")
+   334→    print("  |     14 gestures | Physics cursor | Finger-relative  |")
+   335→    print("  +==================================================+")
+   336→    print(f"  Screen: {screen_w}x{screen_h}  |  Audio: {'ON' if config.audio_enabled else 'OFF'}  |  Gestures: 14+2 swipe")
+   337→    if precision_mode:
+   338→        print(f"  Mode: PRECISION (power={config.precision_power}, scale={config.precision_scale})")
+   339→    _show_quick_reference()
+   340→    print()
+   341→
+   342→    try:
+   343→        while running:
+   344→            t0 = time.perf_counter()
+   345→            dt = 1.0 / max(fps, 1.0)
+   346→            now = time.perf_counter()
+   347→
+   348→            hand_data = tracker.read()
+   349→            gesture_result = {"gesture": Gesture.NONE, "landmarks": None, "confidence": 0.0}
+   350→
+   351→            if hand_data["hand_found"] and hand_data["landmarks"] is not None:
+   352→                hand_absent_frames = 0  # Reset absent counter
+   353→                gesture_result = recognize_gesture(hand_data["landmarks"],
+   354→                                                    pinch_threshold=config.pinch_threshold)
+   355→                raw_gesture = gesture_result["gesture"]
+   356→                gesture_confidence = gesture_result.get("confidence", 0.0)
+   357→
+   358→                # Gesture state machine — with stability and time
+   359→                hand_stable = home.is_stable() if home.is_calibrated else False
+   360→                gesture = gsm.update(raw_gesture, now=now, hand_stable=hand_stable)
+   361→                gesture_changed = (gesture != prev_gesture)
+   362→
+   363→                # Sound feedback on gesture confirmation
+   364→                if gesture_changed and gesture != Gesture.NONE:
+   365→                    if prev_gesture == Gesture.NONE or gsm.progress >= 1.0:
+   366→                        audio.gesture_confirm()
+   367→
+   368→                raw_pos = gesture_result["index_pos"]
+   369→
+   370→                # Dual-stage jitter filter
+   371→                filtered_pos = np.array([
+   372→                    jitter_x.filter(np.array([raw_pos[0]]))[0],
+   373→                    jitter_y.filter(np.array([raw_pos[1]]))[0],
+   374→                ])
+   375→
+   376→                # Velocity prediction (reduce perceived latency)
+   377→                predicted_pos = velocity_predictor.predict(filtered_pos)
+   378→
+   379→                # Iron Man: finger-relative tracking
+   380→                delta = home.get_delta(predicted_pos)
+   381→
+   382→                # Choose sensitivity curve based on precision mode
+   383→                active_curve = precision_curve if precision_mode else exp_curve
+   384→                mapped = active_curve.map_with_deadzone(delta, deadzone=config.deadzone)
+   385→                screen_target = np.array([
+   386→                    screen_w / 2 + mapped[0] * screen_w,
+   387→                    screen_h / 2 + mapped[1] * screen_h,
+   388→                ])
+   389→                screen_target[0] = np.clip(screen_target[0], 0, screen_w)
+   390→                screen_target[1] = np.clip(screen_target[1], 0, screen_h)
+   391→
+   392→                # Swipe detection
+   393→                swipe_gesture = swipe.update(filtered_pos, prev_pos, now)
+   394→                prev_pos = filtered_pos.copy()
+   395→
+   396→                if swipe_gesture == Gesture.SWIPE_LEFT:
+   397→                    _safe_kb_action(_kb(), "browser_back")
+   398→                    audio.click()
+   399→                elif swipe_gesture == Gesture.SWIPE_RIGHT:
+   400→                    _safe_kb_action(_kb(), "browser_forward")
+   401→                    audio.click()
+   402→
+   403→                # ═══ GESTURE ACTIONS ═══
+   404→
+   405→                # PINCH -> Left click
+   406→                if gesture == Gesture.PINCH and gesture_changed:
+   407→                    if now - last_click_time > config.pinch_cooldown:
+   408→                        mouse.left_click()
+   409→                        audio.click()
+   410→                        last_click_time = now
+   411→
+   412→                # PEACE -> Right click
+   413→                elif gesture == Gesture.PEACE and gesture_changed:
+   414→                    if now - last_click_time > config.pinch_cooldown:
+   415→                        mouse.right_click()
+   416→                        audio.right_click()
+   417→                        last_click_time = now
+   418→
+   419→                # THUMBS_UP -> Double click
+   420→                elif gesture == Gesture.THUMBS_UP and gesture_changed:
+   421→                    mouse.double_click()
+   422→                    audio.click()
+   423→                    last_click_time = now
+   424→
+   425→                # PINKY -> Middle click
+   426→                elif gesture == Gesture.PINKY and gesture_changed:
+   427→                    try:
+   428→                        mouse.mouse.click(mouse.mouse.Button.middle, 1)
+   429→                    except Exception:
+   430→                        pass
+   431→                    audio.right_click()
+   432→                    last_click_time = now
+   433→
+   434→                # FIST -> Toggle freeze
+   435→                elif gesture == Gesture.FIST and gesture_changed:
+   436→                    cursor_frozen = not cursor_frozen
+   437→                    audio.freeze()
+   438→
+   439→                # OK -> Close window (Alt+F4)
+   440→                elif gesture == Gesture.OK and gesture_changed:
+   441→                    _safe_kb_action(_kb(), "close_window")
+   442→                    audio.click()
+   443→
+   444→                # SIX -> Task switcher (Alt+Tab)
+   445→                elif gesture == Gesture.SIX and gesture_changed:
+   446→                    _safe_kb_action(_kb(), "switch_window")
+   447→                    audio.click()
+   448→
+   449→                # PALM -> Drag mode
+   450→                if gesture == Gesture.PALM and not dragging:
+   451→                    mouse.start_drag()
+   452→                    dragging = True
+   453→                    audio.drag_start()
+   454→                elif gesture != Gesture.PALM and dragging:
+   455→                    mouse.stop_drag()
+   456→                    dragging = False
+   457→
+   458→                # THREE -> Scroll mode
+   459→                if gesture == Gesture.THREE:
+   460→                    scrolling = True
+   461→                    if gesture_changed:
+   462→                        prev_index_y = filtered_pos[1]
+   463→                        scroll_accum = 0.0
+   464→                    if prev_index_y is not None:
+   465→                        sd = (filtered_pos[1] - prev_index_y) * 40
+   466→                        scroll_accum += sd
+   467→                        if abs(scroll_accum) > 1.0:
+   468→                            mouse.scroll(int(scroll_accum))
+   469→                            audio.scroll_tick()
+   470→                            scroll_accum = 0.0
+   471→                        prev_index_y = filtered_pos[1]
+   472→                else:
+   473→                    scrolling = False
+   474→
+   475→                # GUN -> Snap to center
+   476→                if gesture == Gesture.GUN and gesture_changed:
+   477→                    spring.reset(center)
+   478→                    position_smoother.reset(center)
+   479→                    mouse.move_to(center[0], center[1])
+   480→                    home.reset()
+   481→                    audio.click()
+   482→
+   483→                # ROCK -> Minimize
+   484→                if gesture == Gesture.ROCK and gesture_changed:
+   485→                    _safe_kb_action(_kb(), "minimize_window")
+   486→                    audio.click()
+   487→
+   488→                # SHAKA -> Volume mode (move up/down to adjust)
+   489→                #   With debounce — don't spam volume changes
+   490→                if gesture == Gesture.SHAKA:
+   491→                    if not volume_mode and gesture_changed:
+   492→                        volume_mode = True
+   493→                        audio.mode_enter()
+   494→                    if gesture_changed:
+   495→                        prev_index_y = filtered_pos[1]
+   496→                    if prev_index_y is not None:
+   497→                        vd = filtered_pos[1] - prev_index_y
+   498→                        if abs(vd) > 0.02 and (now - last_volume_time > VOLUME_COOLDOWN):
+   499→                            k = _kb()
+   500→                            if k:
+   501→                                if vd > 0:
+   502→                                    _safe_kb_action(k, "volume_down")
+   503→                                else:
+   504→                                    _safe_kb_action(k, "volume_up")
+   505→                            prev_index_y = filtered_pos[1]
+   506→                            last_volume_time = now
+   507→                else:
+   508→                    if volume_mode:
+   509→                        volume_mode = False
+   510→                        audio.mode_exit()
+   511→
+   512→                # RING -> Brightness mode (move up/down to adjust)
+   513→                #   With debounce — brightness changes are slower
+   514→                if gesture == Gesture.RING:
+   515→                    if not brightness_mode and gesture_changed:
+   516→                        brightness_mode = True
+   517→                        audio.mode_enter()
+   518→                    if gesture_changed:
+   519→                        prev_index_y = filtered_pos[1]
+   520→                    if prev_index_y is not None:
+   521→                        bd = filtered_pos[1] - prev_index_y
+   522→                        if abs(bd) > 0.03 and (now - last_brightness_time > BRIGHTNESS_COOLDOWN):
+   523→                            k = _kb()
+   524→                            if k:
+   525→                                if bd > 0:
+   526→                                    _safe_kb_action(k, "brightness_down")
+   527→                                else:
+   528→                                    _safe_kb_action(k, "brightness_up")
+   529→                            prev_index_y = filtered_pos[1]
+   530→                            last_brightness_time = now
+   531→                else:
+   532→                    if brightness_mode:
+   533→                        brightness_mode = False
+   534→                        audio.mode_exit()
+   535→
+   536→                # ═══ CURSOR MOVEMENT ═══
+   537→                # Pointing and navigation gestures move cursor
+   538→                if gesture in (Gesture.POINTING, Gesture.PEACE,
+   539→                               Gesture.THUMBS_UP, Gesture.PINKY,
+   540→                               Gesture.GUN, Gesture.ROCK) and not cursor_frozen:
+   541→                    # Spring-damper physics
+   542→                    cursor_pos = spring.update(screen_target, dt)
+   543→                    # Edge gravity
+   544→                    cursor_pos += edge_grav.apply(cursor_pos, screen_w, screen_h)
+   545→                    # Momentum throw
+   546→                    cursor_pos += momentum.update(spring.velocity, True, dt)
+   547→                    # Clamp to screen
+   548→                    cursor_pos[0] = np.clip(cursor_pos[0], 0, screen_w)
+   549→                    cursor_pos[1] = np.clip(cursor_pos[1], 0, screen_h)
+   550→                    # Final position smoothing for silky output
+   551→                    smoothed_pos = position_smoother.smooth(cursor_pos)
+   552→                    mouse.move_to(smoothed_pos[0], smoothed_pos[1])
+   553→
+   554→                    speed = np.linalg.norm(spring.velocity)
+   555→                    if speed > 500:
+   556→                        audio.whoosh(speed)
+   557→
+   558→                elif cursor_frozen:
+   559→                    spring.update(spring.position, dt)
+   560→                    momentum.reset()
+   561→
+   562→                prev_gesture = gesture
+   563→
+   564→            else:
+   565→                # No hand detected
+   566→                hand_absent_frames += 1
+   567→
+   568→                # Momentum throw keeps cursor gliding
+   569→                throw = momentum.update(spring.velocity, False, dt)
+   570→                if momentum.is_active:
+   571→                    cp = spring.position + throw
+   572→                    cp[0] = np.clip(cp[0], 0, screen_w)
+   573→                    cp[1] = np.clip(cp[1], 0, screen_h)
+   574→                    smoothed = position_smoother.smooth(cp)
+   575→                    mouse.move_to(smoothed[0], smoothed[1])
+   576→
+   577→                spring.update(spring.position, dt)
+   578→
+   579→                # Only reset after hand has been absent for a few frames
+   580→                # This prevents jitter from momentary detection loss
+   581→                if hand_absent_frames > 5:
+   582→                    jitter_x.reset()
+   583→                    jitter_y.reset()
+   584→                    home.reset()
+   585→                    velocity_predictor.reset()
+   586→                    gsm.reset()
+   587→                    prev_gesture = Gesture.NONE
+   588→                    prev_index_y = None
+   589→                    prev_pos = None
+   590→                    if dragging:
+   591→                        mouse.stop_drag()
+   592→                        dragging = False
+   593→                    scrolling = False
+   594→                    if volume_mode:
+   595→                        volume_mode = False
+   596→                    if brightness_mode:
+   597→                        brightness_mode = False
+   598→
+   599→            # Display
+   600→            if config.show_camera and debug_mode and hand_data["frame"] is not None:
+   601→                _draw_hud(hand_data["frame"], gesture_result, spring, fps,
+   602→                          config, cursor_frozen, dragging, scrolling,
+   603→                          volume_mode, brightness_mode, precision_mode,
+   604→                          gsm.progress, gesture_confidence)
+   605→                cv2.imshow("AirMouse", hand_data["frame"])
+   606→                key = cv2.waitKey(1) & 0xFF
+   607→                if key == ord("q"):
+   608→                    running = False
+   609→                elif key == ord("d"):
+   610→                    debug_mode = not debug_mode
+   611→                elif key == ord("r"):
+   612→                    home.reset()
+   613→                    spring.reset(center)
+   614→                    position_smoother.reset(center)
+   615→                    velocity_predictor.reset()
+   616→                    audio.recalibrate()
+   617→                    print("  -> Recalibrated")
+   618→                elif key == ord("s"):
+   619→                    config.audio_enabled = not config.audio_enabled
+   620→                    audio.enabled = config.audio_enabled
+   621→                    print(f"  -> Audio {'ON' if config.audio_enabled else 'OFF'}")
+   622→                elif key == ord("p"):
+   623→                    precision_mode = not precision_mode
+   624→                    audio.precision_toggle()
+   625→                    if precision_mode:
+   626→                        position_smoother = PositionSmoother(alpha=0.6)  # Smoother in precision mode
+   627→                    else:
+   628→                        position_smoother = PositionSmoother(alpha=config.position_smooth_alpha)
+   629→                    print(f"  -> Precision mode {'ON' if precision_mode else 'OFF'}"
+   630→                          f" (power={'1.0' if precision_mode else config.exp_power},"
+   631→                          f" scale={'1.0' if precision_mode else config.exp_scale})")
+   632→                elif key == ord("t"):
+   633→                    run_tutorial(tracker)
+   634→                elif key == ord("h"):
+   635→                    _show_quick_reference()
+   636→
+   637→            # FPS throttling
+   638→            elapsed = time.perf_counter() - t0
+   639→            frame_times.append(elapsed)
+   640→            if len(frame_times) > 30:
+   641→                frame_times.pop(0)
+   642→            avg = sum(frame_times) / len(frame_times)
+   643→            fps = 1.0 / max(avg, 1e-6)
+   644→            min_frame = 1.0 / config.target_fps
+   645→            if elapsed < min_frame:
+   646→                time.sleep(min_frame - elapsed)
+   647→
+   648→    except KeyboardInterrupt:
+   649→        print("\n  Shutting down...")
+   650→    finally:
+   651→        running = False
+   652→        tracker.release()
+   653→        if dragging:
+   654→            try:
+   655→                mouse.stop_drag()
+   656→            except Exception:
+   657→                pass
+   658→        try:
+   659→            if config.show_camera:
+   660→                cv2.destroyAllWindows()
+   661→        except Exception:
+   662→            pass
+   663→        print("  AirMouse stopped.")
+   664→
+   665→
+   666→if __name__ == "__main__":
+   667→    main()
+   668→

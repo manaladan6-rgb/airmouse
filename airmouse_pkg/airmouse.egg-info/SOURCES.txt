@@ -3,11 +3,14 @@ pyproject.toml
 airmouse/__init__.py
 airmouse/__main__.py
 airmouse/audio.py
+airmouse/autostart.py
 airmouse/config.py
+airmouse/display.py
 airmouse/gestures.py
 airmouse/keyboard.py
 airmouse/mouse_controller.py
 airmouse/physics.py
+airmouse/settings_gui.py
 airmouse/tracker.py
 airmouse/tutorial.py
 airmouse.egg-info/PKG-INFO

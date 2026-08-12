@@ -178,3 +178,19 @@ class AudioFeedback:
         phase = 2 * np.pi * np.cumsum(freq) / sr
         samples = np.sin(phase) * np.exp(-t * 12) * 0.5
         self._play(samples)
+
+    def hand_lost(self):
+        """Gentle descending tone when hand is lost — not alarming, just informative."""
+        sr = 22050
+        t = np.linspace(0, 0.2, int(sr * 0.2), False)
+        freq = 500 - 200 * (t / 0.2)
+        phase = 2 * np.pi * np.cumsum(freq) / sr
+        samples = np.sin(phase) * np.exp(-t * 18) * 0.35
+        self._play(samples)
+
+    def hand_found(self):
+        """Quick chirp when hand is re-detected after loss."""
+        sr = 22050
+        t = np.linspace(0, 0.06, int(sr * 0.06), False)
+        samples = np.sin(2 * np.pi * 700 * t) * np.exp(-t * 50) * 0.5
+        self._play(samples)

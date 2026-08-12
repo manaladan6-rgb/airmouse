@@ -1,16 +1,18 @@
 """
-Keyboard Actions — Execute shortcuts and key combos for gestures.
+Keyboard Actions v3.2 — Execute shortcuts and key combos for gestures.
 
 Supports: window management, volume, brightness, media controls,
           task switching, screenshots, undo/redo, and more.
 
-Volume/media keys use Windows ctypes SendInput (pynput doesn't have them).
+v3.2: Full cross-platform media key support:
+  - Windows: ctypes SendInput (VK codes)
+  - Linux:   xdotool or dbus-send (PulseAudio)
+  - macOS:   osascript (AppleScript)
 """
 
 import threading
 import subprocess
 import sys
-import struct
 
 
 # ─── Windows Media Key Codes (Virtual Key Codes) ───
@@ -23,10 +25,7 @@ VK_MEDIA_PREV = 0xB1
 
 
 def _win_send_key(vk_code):
-    """Send a key press+release using Windows SendInput via ctypes.
-
-    This works for media keys that pynput doesn't support.
-    """
+    """Send a key press+release using Windows SendInput via ctypes."""
     if sys.platform != "win32":
         return
     try:
@@ -35,40 +34,34 @@ def _win_send_key(vk_code):
         INPUT_KEYBOARD = 1
         KEYEVENTF_KEYUP = 0x0002
 
-        # INPUT structure: type(4) + padding(4) + ki(24 bytes)
-        # KEYBDINPUT: wVk(2) + wScan(2) + dwFlags(4) + time(4) + dwExtraInfo(8)
         class KEYBDINPUT(ctypes.Structure):
             _fields_ = [
-                ("wVk", ctypes.c_ushort),
-                ("wScan", ctypes.c_ushort),
-                ("dwFlags", ctypes.c_ulong),
-                ("time", ctypes.c_ulong),
+                ("wVk", ctypes.c_ushort), ("wScan", ctypes.c_ushort),
+                ("dwFlags", ctypes.c_ulong), ("time", ctypes.c_ulong),
                 ("dwExtraInfo", ctypes.c_ulonglong),
             ]
 
-        class INPUT(ctypes.Structure):
+        class MOUSEINPUT(ctypes.Structure):
             _fields_ = [
-                ("type", ctypes.c_ulong),
-                ("ki", KEYBDINPUT),
+                ("dx", ctypes.c_long), ("dy", ctypes.c_long),
+                ("mouseData", ctypes.c_ulong), ("dwFlags", ctypes.c_ulong),
+                ("time", ctypes.c_ulong), ("dwExtraInfo", ctypes.c_ulonglong),
             ]
 
-        # Key down
+        class INPUT_UNION(ctypes.Union):
+            _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT)]
+
+        class INPUT(ctypes.Structure):
+            _fields_ = [("type", ctypes.c_ulong), ("union", INPUT_UNION)]
+
         down = INPUT()
         down.type = INPUT_KEYBOARD
-        down.ki.wVk = vk_code
-        down.ki.wScan = 0
-        down.ki.dwFlags = 0
-        down.ki.time = 0
-        down.ki.dwExtraInfo = 0
+        down.union.ki.wVk = vk_code
 
-        # Key up
         up = INPUT()
         up.type = INPUT_KEYBOARD
-        up.ki.wVk = vk_code
-        up.ki.wScan = 0
-        up.ki.dwFlags = KEYEVENTF_KEYUP
-        up.ki.time = 0
-        up.ki.dwExtraInfo = 0
+        up.union.ki.wVk = vk_code
+        up.union.ki.dwFlags = KEYEVENTF_KEYUP
 
         SendInput = ctypes.windll.user32.SendInput
         SendInput.argtypes = [ctypes.c_uint, ctypes.POINTER(INPUT), ctypes.c_int]
@@ -78,6 +71,113 @@ def _win_send_key(vk_code):
         SendInput(2, ctypes.byref(inputs), ctypes.sizeof(INPUT))
     except Exception:
         pass
+
+
+def _linux_media_key(key_name):
+    """Send media key on Linux using xdotool or dbus."""
+    # Try xdotool first (most common)
+    xdotool_keys = {
+        "volume_up": "XF86AudioRaiseVolume",
+        "volume_down": "XF86AudioLowerVolume",
+        "volume_mute": "XF86AudioMute",
+        "play_pause": "XF86AudioPlay",
+        "next": "XF86AudioNext",
+        "prev": "XF86AudioPrev",
+    }
+    xk = xdotool_keys.get(key_name)
+    if xk:
+        try:
+            subprocess.run(
+                ["xdotool", "key", xk],
+                capture_output=True, timeout=2,
+            )
+            return
+        except Exception:
+            pass
+
+    # Fallback: dbus-send to PulseAudio
+    dbus_actions = {
+        "volume_up": "org.PulseAudio.Server.Lookup1 volume-up",
+        "volume_down": "org.PulseAudio.Server.Lookup1 volume-down",
+        "volume_mute": "org.PulseAudio.Server.Lookup1 mute",
+    }
+    # Fallback: pactl for volume
+    pactl_actions = {
+        "volume_up": ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "+5%"],
+        "volume_down": ["pactl", "set-sink-volume", "@DEFAULT_SINK@", "-5%"],
+        "volume_mute": ["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"],
+    }
+    cmd = pactl_actions.get(key_name)
+    if cmd:
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=2)
+        except Exception:
+            pass
+
+
+def _macos_media_key(key_name):
+    """Send media key on macOS using osascript or shortcut."""
+    # Use osascript for volume
+    if key_name == "volume_up":
+        try:
+            subprocess.run(
+                ["osascript", "-e", "set volume output volume (output volume of (get volume settings) + 10)"],
+                capture_output=True, timeout=2,
+            )
+        except Exception:
+            pass
+    elif key_name == "volume_down":
+        try:
+            subprocess.run(
+                ["osascript", "-e", "set volume output volume (output volume of (get volume settings) - 10)"],
+                capture_output=True, timeout=2,
+            )
+        except Exception:
+            pass
+    elif key_name == "volume_mute":
+        try:
+            subprocess.run(
+                ["osascript", "-e", "set volume output muted true"],
+                capture_output=True, timeout=2,
+            )
+        except Exception:
+            pass
+    else:
+        # For play_pause, next, prev — use shortcut CLI or Hammerspoon
+        key_map = {
+            "play_pause": "play",
+            "next": "fastforward",
+            "prev": "rewind",
+        }
+        apple_key = key_map.get(key_name)
+        if apple_key:
+            try:
+                subprocess.run(
+                    ["osascript", "-e", f'tell application "System Events" to key code {{"{apple_key}"}}'],
+                    capture_output=True, timeout=2,
+                )
+            except Exception:
+                pass
+
+
+def _send_media_key(key_name):
+    """Cross-platform media key dispatch."""
+    if sys.platform == "win32":
+        vk_map = {
+            "volume_up": VK_VOLUME_UP,
+            "volume_down": VK_VOLUME_DOWN,
+            "volume_mute": VK_VOLUME_MUTE,
+            "play_pause": VK_MEDIA_PLAY_PAUSE,
+            "next": VK_MEDIA_NEXT,
+            "prev": VK_MEDIA_PREV,
+        }
+        vk = vk_map.get(key_name)
+        if vk:
+            _win_send_key(vk)
+    elif sys.platform == "linux":
+        _linux_media_key(key_name)
+    elif sys.platform == "darwin":
+        _macos_media_key(key_name)
 
 
 class KeyboardActions:
@@ -100,7 +200,6 @@ class KeyboardActions:
         """Press and release a key combination in a thread."""
         if self._keyboard is None:
             return
-
         def _do():
             try:
                 for k in keys:
@@ -109,103 +208,78 @@ class KeyboardActions:
                     self._keyboard.release(k)
             except Exception:
                 pass
-
         threading.Thread(target=_do, daemon=True).start()
 
     def _press_key(self, key):
         """Press and release a single key."""
         if self._keyboard is None:
             return
-
         def _do():
             try:
                 self._keyboard.press(key)
                 self._keyboard.release(key)
             except Exception:
                 pass
-
         threading.Thread(target=_do, daemon=True).start()
 
     # ─── Window Management ───
 
     def minimize_window(self):
-        """Win+Down = minimize window."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         self._press_combo([self._key_module.cmd, self._key_module.down])
 
     def maximize_window(self):
-        """Win+Up = maximize/restore window."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         self._press_combo([self._key_module.cmd, self._key_module.up])
 
     def close_window(self):
-        """Alt+F4 = close window."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         self._press_combo([self._key_module.alt, self._key_module.f4])
 
     def switch_window(self):
-        """Alt+Tab = task switcher."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         def _do():
             try:
                 self._keyboard.press(self._key_module.alt)
                 self._keyboard.press(self._key_module.tab)
                 self._keyboard.release(self._key_module.tab)
-                import time
-                time.sleep(0.15)
+                import time; time.sleep(0.15)
                 self._keyboard.release(self._key_module.alt)
             except Exception:
                 pass
         threading.Thread(target=_do, daemon=True).start()
 
     def show_desktop(self):
-        """Win+D = toggle show desktop."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         self._press_combo([self._key_module.cmd, 'd'])
 
     # ─── Browser / Navigation ───
 
     def browser_back(self):
-        """Alt+Left = browser back."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         self._press_combo([self._key_module.alt, self._key_module.left])
 
     def browser_forward(self):
-        """Alt+Right = browser forward."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         self._press_combo([self._key_module.alt, self._key_module.right])
 
-    # ─── Volume (Windows ctypes SendInput) ───
+    # ─── Volume (Cross-Platform) ───
 
     def volume_up(self):
-        """Volume up — uses Windows SendInput (not pynput)."""
-        def _do():
-            _win_send_key(VK_VOLUME_UP)
+        def _do(): _send_media_key("volume_up")
         threading.Thread(target=_do, daemon=True).start()
 
     def volume_down(self):
-        """Volume down — uses Windows SendInput (not pynput)."""
-        def _do():
-            _win_send_key(VK_VOLUME_DOWN)
+        def _do(): _send_media_key("volume_down")
         threading.Thread(target=_do, daemon=True).start()
 
     def volume_mute(self):
-        """Mute toggle — uses Windows SendInput."""
-        def _do():
-            _win_send_key(VK_VOLUME_MUTE)
+        def _do(): _send_media_key("volume_mute")
         threading.Thread(target=_do, daemon=True).start()
 
     # ─── Brightness (OS-specific) ───
 
     def brightness_up(self):
-        """Increase screen brightness."""
         if sys.platform == "win32":
             def _do():
                 try:
@@ -214,22 +288,24 @@ class KeyboardActions:
                          "$m = Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness; "
                          "$c = Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods; "
                          "if($m -and $c){$c.WmiSetBrightness(1, [int]([math]::Min(100, $m.CurrentBrightness + 10)))}"],
-                        capture_output=True, timeout=3
-                    )
-                except Exception:
-                    pass
+                        capture_output=True, timeout=3)
+                except Exception: pass
             threading.Thread(target=_do, daemon=True).start()
-        else:
+        elif sys.platform == "linux":
             def _do():
                 try:
-                    subprocess.run(["brightnessctl", "set", "10%+"],
+                    subprocess.run(["brightnessctl", "set", "10%+"], capture_output=True, timeout=2)
+                except Exception: pass
+            threading.Thread(target=_do, daemon=True).start()
+        elif sys.platform == "darwin":
+            def _do():
+                try:
+                    subprocess.run(["osascript", "-e", "tell application \"System Events\" to key code 144"],
                                    capture_output=True, timeout=2)
-                except Exception:
-                    pass
+                except Exception: pass
             threading.Thread(target=_do, daemon=True).start()
 
     def brightness_down(self):
-        """Decrease screen brightness."""
         if sys.platform == "win32":
             def _do():
                 try:
@@ -238,78 +314,84 @@ class KeyboardActions:
                          "$m = Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightness; "
                          "$c = Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods; "
                          "if($m -and $c){$c.WmiSetBrightness(1, [int]([math]::Max(0, $m.CurrentBrightness - 10)))}"],
-                        capture_output=True, timeout=3
-                    )
-                except Exception:
-                    pass
+                        capture_output=True, timeout=3)
+                except Exception: pass
             threading.Thread(target=_do, daemon=True).start()
-        else:
+        elif sys.platform == "linux":
             def _do():
                 try:
-                    subprocess.run(["brightnessctl", "set", "10%-"],
+                    subprocess.run(["brightnessctl", "set", "10%-"], capture_output=True, timeout=2)
+                except Exception: pass
+            threading.Thread(target=_do, daemon=True).start()
+        elif sys.platform == "darwin":
+            def _do():
+                try:
+                    subprocess.run(["osascript", "-e", "tell application \"System Events\" to key code 145"],
                                    capture_output=True, timeout=2)
-                except Exception:
-                    pass
+                except Exception: pass
             threading.Thread(target=_do, daemon=True).start()
 
-    # ─── Media Controls (Windows ctypes SendInput) ───
+    # ─── Media Controls (Cross-Platform) ───
 
     def media_play_pause(self):
-        """Play/Pause media — uses Windows SendInput."""
-        def _do():
-            _win_send_key(VK_MEDIA_PLAY_PAUSE)
+        def _do(): _send_media_key("play_pause")
         threading.Thread(target=_do, daemon=True).start()
 
     def media_next(self):
-        """Next track — uses Windows SendInput."""
-        def _do():
-            _win_send_key(VK_MEDIA_NEXT)
+        def _do(): _send_media_key("next")
         threading.Thread(target=_do, daemon=True).start()
 
     def media_prev(self):
-        """Previous track — uses Windows SendInput."""
-        def _do():
-            _win_send_key(VK_MEDIA_PREV)
+        def _do(): _send_media_key("prev")
         threading.Thread(target=_do, daemon=True).start()
 
     # ─── Screenshot ───
 
     def screenshot(self):
-        """Win+Shift+S = screenshot snip (Windows)."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         self._press_combo([self._key_module.cmd, self._key_module.shift, 's'])
+
+    # ─── Clipboard ───
+
+    def copy(self):
+        if self._key_module is None: return
+        self._press_combo([self._key_module.ctrl, 'c'])
+
+    def paste(self):
+        if self._key_module is None: return
+        self._press_combo([self._key_module.ctrl, 'v'])
+
+    def cut(self):
+        if self._key_module is None: return
+        self._press_combo([self._key_module.ctrl, 'x'])
+
+    def select_all(self):
+        if self._key_module is None: return
+        self._press_combo([self._key_module.ctrl, 'a'])
 
     # ─── Undo / Redo ───
 
     def undo(self):
-        """Ctrl+Z = undo."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         self._press_combo([self._key_module.ctrl, 'z'])
 
     def redo(self):
-        """Ctrl+Y = redo."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         self._press_combo([self._key_module.ctrl, 'y'])
 
     # ─── Misc ───
 
     def refresh_page(self):
-        """F5 = refresh."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         self._press_key(self._key_module.f5)
 
     def new_tab(self):
-        """Ctrl+T = new tab."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         self._press_combo([self._key_module.ctrl, 't'])
 
     def close_tab(self):
-        """Ctrl+W = close tab."""
-        if self._key_module is None:
-            return
+        if self._key_module is None: return
         self._press_combo([self._key_module.ctrl, 'w'])
+
+    def alt_tab(self):
+        self.switch_window()
