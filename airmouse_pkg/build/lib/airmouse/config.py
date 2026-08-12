@@ -1,5 +1,11 @@
 """
-Configuration v3.1 — loads from ~/.airmouse/config.toml or uses defaults.
+Configuration v3.2 — loads from ~/.airmouse/config.toml or uses defaults.
+
+New in v3.2:
+  - DIRECT tracking mode (default) — cursor follows finger 1:1
+  - IRONMAN mode (legacy) — exponential finger-relative tracking
+  - Light jitter filter for direct mode
+  - Stiffer spring defaults for direct mode
 
 New in v3.1:
   - Dual-stage jitter filter params
@@ -25,9 +31,12 @@ CONFIG_PATH = os.path.join(CONFIG_DIR, "config.toml")
 
 
 class Config:
-    """AirMouse configuration with v3.1 Iron Man defaults."""
+    """AirMouse configuration with v3.2 Direct Tracking defaults."""
 
-    # Physics
+    # Tracking mode: "direct" (1:1 finger-to-screen) or "ironman" (exponential delta)
+    tracking_mode = "direct"
+
+    # Physics (Ironman mode)
     mass = 0.8
     stiffness_min = 120.0
     stiffness_max = 400.0
@@ -35,6 +44,12 @@ class Config:
     speed_threshold = 200.0
     max_accel = 50000.0         # Acceleration limiter (prevents jerks)
     stiffness_smoothing = 0.3   # Smooth stiffness transition
+
+    # Direct tracking mode physics
+    direct_jitter_alpha = 0.75      # Light jitter filter (high = responsive)
+    direct_spring_alpha = 0.55     # Stiff EMA spring (high = fast tracking, low = smooth)
+    direct_smooth_alpha = 0.85     # Light final smoothing
+    direct_mirror_x = True         # Mirror X so cursor follows hand naturally
 
     # Iron Man finger tracking
     exp_power = 0.6             # Exponential curve power (<1 = amplified small moves)
@@ -78,6 +93,9 @@ class Config:
     precision_power = 1.0           # Linear curve = precise
     precision_scale = 1.0           # Reduced sensitivity
 
+    # Mirror X for direct mode (camera is mirrored)
+    mirror_x = True
+
     # Camera
     camera_index = 0
     detection_confidence = 0.7
@@ -99,10 +117,18 @@ class Config:
             return
         os.makedirs(CONFIG_DIR, exist_ok=True)
         lines = [
-            "# AirMouse v3.1 Configuration — Iron Man Next-Gen Edition",
+            "# AirMouse v3.2 Configuration — Direct Tracking Edition",
             "# Edit this file to customize your airmouse feel.",
             "",
-            "[physics]",
+            f"tracking_mode = \"{self.tracking_mode}\"   # \"direct\" (1:1) or \"ironman\" (exponential)",
+            "",
+            "[direct]",
+            f"jitter_alpha = {self.direct_jitter_alpha}     # Light jitter filter (high = responsive)",
+            f"spring_alpha = {self.direct_spring_alpha}      # Stiff EMA spring (high = fast, low = smooth)",
+            f"smooth_alpha = {self.direct_smooth_alpha}       # Light final smoothing",
+            f"mirror_x = {str(self.direct_mirror_x).lower()}            # Mirror X for natural cursor direction",
+            "",
+            "[physics]  # Ironman mode physics",
             f"mass = {self.mass}",
             f"stiffness_min = {self.stiffness_min}",
             f"stiffness_max = {self.stiffness_max}",
@@ -170,6 +196,16 @@ class Config:
         try:
             with open(CONFIG_PATH, "rb") as f:
                 data = tomllib.load(f)
+
+            # Top-level tracking_mode
+            self.tracking_mode = data.get("tracking_mode", self.tracking_mode)
+
+            if "direct" in data:
+                d = data["direct"]
+                self.direct_jitter_alpha = d.get("jitter_alpha", self.direct_jitter_alpha)
+                self.direct_spring_alpha = d.get("spring_alpha", self.direct_spring_alpha)
+                self.direct_smooth_alpha = d.get("smooth_alpha", self.direct_smooth_alpha)
+                self.direct_mirror_x = d.get("mirror_x", self.direct_mirror_x)
 
             if "physics" in data:
                 p = data["physics"]

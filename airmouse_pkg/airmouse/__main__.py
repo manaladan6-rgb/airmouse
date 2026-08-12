@@ -1,9 +1,11 @@
 """
-AirMouse v3.2.0 — Iron Man Next-Gen Edition
+AirMouse v3.2.0 — Direct Tracking Edition
 
     airmouse              # Start with tutorial (first run)
     airmouse --skip       # Skip tutorial
     airmouse --tutorial   # Force tutorial
+    airmouse --mode direct   # 1:1 finger-to-screen (default, accurate)
+    airmouse --mode ironman  # Exponential finger-relative (legacy, stylized)
 
 14 Gestures:
     Point   (1)  -> Move cursor          Pinch  (2)  -> Left click
@@ -33,7 +35,8 @@ import airmouse as _pkg
 
 from .physics import (DualStageJitterFilter, HomePosition, ExponentialCurve,
                        AdaptiveSpringDamper, MomentumThrow, EdgeGravity,
-                       VelocityPredictor, PositionSmoother)
+                       VelocityPredictor, PositionSmoother, DirectTracker,
+                       LightJitterFilter)
 from .tracker import HandTracker
 from .gestures import (recognize_gesture, SwipeDetector, GestureStateMachine,
                         Gesture, GESTURE_INFO)
@@ -126,6 +129,8 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
         badges.append(("BRIGHT", (255, 200, 0)))
     if precision_mode:
         badges.append(("PRECISE", (200, 200, 255)))
+    if spring is None:
+        badges.append(("DIRECT", (0, 255, 255)))
     bx = 10
     for bt, bc in badges:
         # Badge background
@@ -136,12 +141,16 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
         bx += tw + 18
 
     # Physics stats (bottom-right)
-    k = spring.current_stiffness
-    speed = np.linalg.norm(spring.velocity)
-    stats = [f"FPS:{fps:.0f}", f"k:{k:.0f}", f"v:{speed:.0f}"]
+    if spring is not None:
+        k = spring.current_stiffness
+        speed = np.linalg.norm(spring.velocity)
+        stats = [f"FPS:{fps:.0f}", f"k:{k:.0f}", f"v:{speed:.0f}"]
+    else:
+        stats = [f"FPS:{fps:.0f}", "DIRECT", ""]
     for i, t in enumerate(stats):
-        cv2.putText(frame, t, (w - 120, h - 55 + i * 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1, cv2.LINE_AA)
+        if t:
+            cv2.putText(frame, t, (w - 120, h - 55 + i * 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1, cv2.LINE_AA)
 
     # Draw tracked finger landmarks
     lm = gesture_result.get("landmarks")
@@ -205,6 +214,8 @@ def main():
     parser.add_argument("--power", type=float, default=None, help="Exp curve power")
     parser.add_argument("--scale", type=float, default=None, help="Sensitivity scale")
     parser.add_argument("--precision", action="store_true", help="Start in precision mode")
+    parser.add_argument("--mode", type=str, choices=["direct", "ironman"], default=None,
+                        help="Tracking mode: direct (1:1) or ironman (exponential)")
     parser.add_argument("--monitor", type=int, default=None, help="Monitor index (0=primary)")
     parser.add_argument("--list-monitors", action="store_true", help="List monitors and exit")
     parser.add_argument("--autostart", type=str, choices=["on", "off"], default=None, help="Enable/disable auto-start")
@@ -250,6 +261,7 @@ def main():
     if args.cam is not None: config.camera_index = args.cam
     if args.power is not None: config.exp_power = args.power
     if args.scale is not None: config.exp_scale = args.scale
+    if args.mode is not None: config.tracking_mode = args.mode
 
     # Multi-monitor support
     displays = enumerate_displays()
@@ -281,44 +293,68 @@ def main():
             with open(tutorial_done_file, "w") as f:
                 f.write("done")
 
-    # ═══ Physics stack v3.1 ═══
-    spring = AdaptiveSpringDamper(
-        mass=config.mass, stiffness_min=config.stiffness_min,
-        stiffness_max=config.stiffness_max, damping_ratio=config.damping_ratio,
-        speed_threshold=config.speed_threshold,
-        max_accel=config.max_accel,
-        stiffness_smoothing=config.stiffness_smoothing,
-    )
-    # Dual-stage jitter filter (micro-tremor + macro smooth)
-    jitter_x = DualStageJitterFilter(
-        micro_alpha=config.jitter_micro_alpha,
-        macro_alpha=config.jitter_macro_alpha,
-    )
-    jitter_y = DualStageJitterFilter(
-        micro_alpha=config.jitter_micro_alpha,
-        macro_alpha=config.jitter_macro_alpha,
-    )
-    home = HomePosition(
-        drift_rate=config.home_drift_rate,
-        drift_rate_moving=config.home_drift_rate_moving,
-    )
-    exp_curve = ExponentialCurve(power=config.exp_power, scale=config.exp_scale)
-    precision_curve = ExponentialCurve(power=config.precision_power, scale=config.precision_scale)
-    momentum = MomentumThrow(
-        friction=config.throw_friction,
-        min_speed=config.throw_min_speed,
-        max_momentum=config.throw_max_momentum,
-    )
-    edge_grav = EdgeGravity(
-        strength=config.edge_gravity_strength,
-        edge_zone=config.edge_gravity_zone,
-    )
-    # v3.1 new physics components
-    velocity_predictor = VelocityPredictor(
-        prediction_factor=config.prediction_factor,
-        max_correction=config.prediction_max_correction,
-    )
-    position_smoother = PositionSmoother(alpha=config.position_smooth_alpha)
+    # ═══ Physics stack v3.2 ═══
+    is_direct = (config.tracking_mode == "direct")
+
+    # Direct tracker (v3.2 default) — 1:1 finger-to-screen
+    direct_tracker = None
+    # Ironman components (legacy)
+    spring = None
+    jitter_x = jitter_y = None
+    home = None
+    exp_curve = precision_curve = None
+    momentum = None
+    edge_grav = None
+    velocity_predictor = None
+    position_smoother = None
+
+    if is_direct:
+        direct_tracker = DirectTracker(
+            screen_w=screen_w, screen_h=screen_h,
+            jitter_alpha=config.direct_jitter_alpha,
+            spring_alpha=config.direct_spring_alpha,
+            smooth_alpha=config.direct_smooth_alpha,
+            mirror_x=config.direct_mirror_x,
+        )
+    else:
+        # Ironman mode physics (legacy v3.1)
+        spring = AdaptiveSpringDamper(
+            mass=config.mass, stiffness_min=config.stiffness_min,
+            stiffness_max=config.stiffness_max, damping_ratio=config.damping_ratio,
+            speed_threshold=config.speed_threshold,
+            max_accel=config.max_accel,
+            stiffness_smoothing=config.stiffness_smoothing,
+        )
+        # Dual-stage jitter filter (micro-tremor + macro smooth)
+        jitter_x = DualStageJitterFilter(
+            micro_alpha=config.jitter_micro_alpha,
+            macro_alpha=config.jitter_macro_alpha,
+        )
+        jitter_y = DualStageJitterFilter(
+            micro_alpha=config.jitter_micro_alpha,
+            macro_alpha=config.jitter_macro_alpha,
+        )
+        home = HomePosition(
+            drift_rate=config.home_drift_rate,
+            drift_rate_moving=config.home_drift_rate_moving,
+        )
+        exp_curve = ExponentialCurve(power=config.exp_power, scale=config.exp_scale)
+        precision_curve = ExponentialCurve(power=config.precision_power, scale=config.precision_scale)
+        momentum = MomentumThrow(
+            friction=config.throw_friction,
+            min_speed=config.throw_min_speed,
+            max_momentum=config.throw_max_momentum,
+        )
+        edge_grav = EdgeGravity(
+            strength=config.edge_gravity_strength,
+            edge_zone=config.edge_gravity_zone,
+        )
+        # v3.1 new physics components
+        velocity_predictor = VelocityPredictor(
+            prediction_factor=config.prediction_factor,
+            max_correction=config.prediction_max_correction,
+        )
+        position_smoother = PositionSmoother(alpha=config.position_smooth_alpha)
 
     swipe = SwipeDetector()
     gsm = GestureStateMachine(
@@ -329,8 +365,11 @@ def main():
 
     # State
     center = np.array([screen_w / 2.0, screen_h / 2.0])
-    spring.reset(center)
-    position_smoother.reset(center)
+    if is_direct:
+        direct_tracker.reset(center)
+    else:
+        spring.reset(center)
+        position_smoother.reset(center)
     mouse.move_to(center[0], center[1])
 
     last_click_time = 0.0
@@ -377,6 +416,7 @@ def main():
     print("  |     14 gestures | Physics cursor | Finger-relative  |")
     print("  +==================================================+")
     print(f"  Screen: {screen_w}x{screen_h}  |  Audio: {'ON' if config.audio_enabled else 'OFF'}  |  Gestures: 14+2 swipe")
+    print(f"  Tracking: {'DIRECT (1:1 finger-to-screen)' if is_direct else 'IRONMAN (exponential finger-relative)'}")
     if precision_mode:
         print(f"  Mode: PRECISION (power={config.precision_power}, scale={config.precision_scale})")
     _show_quick_reference()
@@ -413,31 +453,45 @@ def main():
 
                 raw_pos = gesture_result["index_pos"]
 
-                # Dual-stage jitter filter
-                filtered_pos = np.array([
-                    jitter_x.filter(np.array([raw_pos[0]]))[0],
-                    jitter_y.filter(np.array([raw_pos[1]]))[0],
-                ])
+                if is_direct:
+                    # ═══ DIRECT TRACKING (v3.2) ═══
+                    # 1:1 finger-to-screen — no home, no delta, no drift
+                    cursor_pos = direct_tracker.update(raw_pos, dt)
+                    if not cursor_frozen:
+                        mouse.move_to(cursor_pos[0], cursor_pos[1])
+                    speed = np.linalg.norm(direct_tracker.velocity)
 
-                # Velocity prediction (reduce perceived latency)
-                predicted_pos = velocity_predictor.predict(filtered_pos)
+                    # Swipe detection (direct mode)
+                    swipe_gesture = swipe.update(raw_pos, prev_pos, now)
+                    prev_pos = raw_pos.copy()
 
-                # Iron Man: finger-relative tracking
-                delta = home.get_delta(predicted_pos)
+                else:
+                    # ═══ IRONMAN TRACKING (legacy v3.1) ═══
+                    # Dual-stage jitter filter
+                    filtered_pos = np.array([
+                        jitter_x.filter(np.array([raw_pos[0]]))[0],
+                        jitter_y.filter(np.array([raw_pos[1]]))[0],
+                    ])
 
-                # Choose sensitivity curve based on precision mode
-                active_curve = precision_curve if precision_mode else exp_curve
-                mapped = active_curve.map_with_deadzone(delta, deadzone=config.deadzone)
-                screen_target = np.array([
-                    screen_w / 2 + mapped[0] * screen_w,
-                    screen_h / 2 + mapped[1] * screen_h,
-                ])
-                screen_target[0] = np.clip(screen_target[0], 0, screen_w)
-                screen_target[1] = np.clip(screen_target[1], 0, screen_h)
+                    # Velocity prediction (reduce perceived latency)
+                    predicted_pos = velocity_predictor.predict(filtered_pos)
 
-                # Swipe detection
-                swipe_gesture = swipe.update(filtered_pos, prev_pos, now)
-                prev_pos = filtered_pos.copy()
+                    # Iron Man: finger-relative tracking
+                    delta = home.get_delta(predicted_pos)
+
+                    # Choose sensitivity curve based on precision mode
+                    active_curve = precision_curve if precision_mode else exp_curve
+                    mapped = active_curve.map_with_deadzone(delta, deadzone=config.deadzone)
+                    screen_target = np.array([
+                        screen_w / 2 + mapped[0] * screen_w,
+                        screen_h / 2 + mapped[1] * screen_h,
+                    ])
+                    screen_target[0] = np.clip(screen_target[0], 0, screen_w)
+                    screen_target[1] = np.clip(screen_target[1], 0, screen_h)
+
+                    # Swipe detection
+                    swipe_gesture = swipe.update(filtered_pos, prev_pos, now)
+                    prev_pos = filtered_pos.copy()
 
                 if swipe_gesture == Gesture.SWIPE_LEFT:
                     _safe_kb_action(_kb(), "browser_back")
@@ -447,6 +501,7 @@ def main():
                     audio.click()
 
                 # ═══ GESTURE ACTIONS ═══
+                # (works for both direct and ironman modes)
 
                 # PINCH -> Left click
                 if gesture == Gesture.PINCH and gesture_changed:
@@ -580,8 +635,15 @@ def main():
                         audio.mode_exit()
 
                 # ═══ CURSOR MOVEMENT ═══
-                # Pointing and navigation gestures move cursor
-                if gesture in (Gesture.POINTING, Gesture.PEACE,
+                if is_direct:
+                    # Direct mode — cursor already moved above in the direct block
+                    # Just handle audio feedback
+                    if not cursor_frozen:
+                        speed = np.linalg.norm(direct_tracker.velocity)
+                        if speed > 500:
+                            audio.whoosh(speed)
+
+                elif gesture in (Gesture.POINTING, Gesture.PEACE,
                                Gesture.THUMBS_UP, Gesture.PINKY,
                                Gesture.GUN, Gesture.ROCK) and not cursor_frozen:
                     # Spring-damper physics
@@ -602,8 +664,9 @@ def main():
                         audio.whoosh(speed)
 
                 elif cursor_frozen:
-                    spring.update(spring.position, dt)
-                    momentum.reset()
+                    if not is_direct:
+                        spring.update(spring.position, dt)
+                        momentum.reset()
 
                 prev_gesture = gesture
 
@@ -611,16 +674,20 @@ def main():
                 # No hand detected
                 hand_absent_frames += 1
 
-                # Momentum throw keeps cursor gliding
-                throw = momentum.update(spring.velocity, False, dt)
-                if momentum.is_active:
-                    cp = spring.position + throw
-                    cp[0] = np.clip(cp[0], 0, screen_w)
-                    cp[1] = np.clip(cp[1], 0, screen_h)
-                    smoothed = position_smoother.smooth(cp)
-                    mouse.move_to(smoothed[0], smoothed[1])
+                if is_direct:
+                    # Direct mode — just let the spring EMA decay
+                    pass  # No momentum, cursor holds position
+                else:
+                    # Ironman mode — momentum throw keeps cursor gliding
+                    throw = momentum.update(spring.velocity, False, dt)
+                    if momentum.is_active:
+                        cp = spring.position + throw
+                        cp[0] = np.clip(cp[0], 0, screen_w)
+                        cp[1] = np.clip(cp[1], 0, screen_h)
+                        smoothed = position_smoother.smooth(cp)
+                        mouse.move_to(smoothed[0], smoothed[1])
 
-                spring.update(spring.position, dt)
+                    spring.update(spring.position, dt)
 
                 # Only reset after hand has been absent for a few frames
                 # This prevents jitter from momentary detection loss
@@ -628,10 +695,13 @@ def main():
                     if not hand_was_lost:
                         audio.hand_lost()
                         hand_was_lost = True
-                    jitter_x.reset()
-                    jitter_y.reset()
-                    home.reset()
-                    velocity_predictor.reset()
+                    if is_direct:
+                        direct_tracker.reset()
+                    else:
+                        jitter_x.reset()
+                        jitter_y.reset()
+                        home.reset()
+                        velocity_predictor.reset()
                     gsm.reset()
                     prev_gesture = Gesture.NONE
                     prev_index_y = None
@@ -658,10 +728,13 @@ def main():
                 elif key == ord("d"):
                     debug_mode = not debug_mode
                 elif key == ord("r"):
-                    home.reset()
-                    spring.reset(center)
-                    position_smoother.reset(center)
-                    velocity_predictor.reset()
+                    if is_direct:
+                        direct_tracker.reset(center)
+                    else:
+                        home.reset()
+                        spring.reset(center)
+                        position_smoother.reset(center)
+                        velocity_predictor.reset()
                     audio.recalibrate()
                     print("  -> Recalibrated")
                 elif key == ord("s"):
@@ -671,10 +744,23 @@ def main():
                 elif key == ord("p"):
                     precision_mode = not precision_mode
                     audio.precision_toggle()
-                    if precision_mode:
-                        position_smoother = PositionSmoother(alpha=0.6)  # Smoother in precision mode
+                    if is_direct:
+                        # In direct mode, precision slows the filters for steadier cursor
+                        if precision_mode:
+                            direct_tracker.jitter_x = LightJitterFilter(alpha=0.55)
+                            direct_tracker.jitter_y = LightJitterFilter(alpha=0.55)
+                            direct_tracker.spring_alpha = 0.35  # Slower spring
+                            direct_tracker.smoother = PositionSmoother(alpha=0.65)
+                        else:
+                            direct_tracker.jitter_x = LightJitterFilter(alpha=config.direct_jitter_alpha)
+                            direct_tracker.jitter_y = LightJitterFilter(alpha=config.direct_jitter_alpha)
+                            direct_tracker.spring_alpha = config.direct_spring_alpha
+                            direct_tracker.smoother = PositionSmoother(alpha=config.direct_smooth_alpha)
                     else:
-                        position_smoother = PositionSmoother(alpha=config.position_smooth_alpha)
+                        if precision_mode:
+                            position_smoother = PositionSmoother(alpha=0.6)  # Smoother in precision mode
+                        else:
+                            position_smoother = PositionSmoother(alpha=config.position_smooth_alpha)
                     print(f"  -> Precision mode {'ON' if precision_mode else 'OFF'}"
                           f" (power={'1.0' if precision_mode else config.exp_power},"
                           f" scale={'1.0' if precision_mode else config.exp_scale})")

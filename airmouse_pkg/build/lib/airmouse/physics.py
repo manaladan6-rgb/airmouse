@@ -1,11 +1,28 @@
 """
-Iron Man Physics Engine v3.1 — Spring-Damper + Adaptive + Momentum + Edge Gravity
+Physics Engine v3.2 — Direct Tracking + Spring-Damper + Adaptive + Momentum + Edge Gravity
 + Dual-Stage Jitter + Velocity Prediction + Position Smoothing + Acceleration Limiting
 
-Key design: FINGER-RELATIVE tracking, not hand-absolute.
-Your hand stays still. Only finger movements drive the cursor.
+Two tracking modes:
 
-Physics stack:
+  DIRECT (default v3.2):
+    Finger position maps 1:1 to screen position.
+    Cursor follows your finger exactly — what you see is what you get.
+    Light jitter suppression + stiff spring = accurate + smooth.
+
+  IRONMAN (legacy v3.1):
+    FINGER-RELATIVE tracking — cursor driven by delta from home position.
+    Tiny finger moves -> large cursor jumps (exponential curve).
+    Cursor drifts toward center when hand is still.
+
+Physics stack (DIRECT mode):
+    1. Light jitter filter  — micro-tremor kill only (no heavy macro smoothing)
+    2. Direct map           — finger [0..1] -> screen [0..W, 0..H]
+    3. Adaptive spring      — very stiff (k=600-1200) for near-instant tracking
+    4. Acceleration limit   — prevent sudden jerks
+    5. Position smoother    — light final EMA (alpha=0.85)
+    6. Screen clamp         — never go off-screen
+
+Physics stack (IRONMAN mode):
     1. Dual-stage jitter   — micro-tremor kill + macro smooth
     2. Home calibration    — establish rest position, track delta (stability-gated)
     3. Exponential curve   — tiny finger moves -> big cursor moves (with soft deadzone)
@@ -428,3 +445,134 @@ class EdgeGravity:
             offset[1] += s * ((ny - (1.0 - ez)) / ez) ** 2
 
         return offset
+
+
+class LightJitterFilter:
+    """Single-stage light EMA filter for direct tracking mode.
+
+    Only kills micro-tremor — does NOT add heavy smoothing.
+    High alpha (0.7-0.85) = very responsive, just removes camera noise.
+    This is the right amount of filtering for 1:1 tracking.
+    """
+
+    def __init__(self, alpha=0.75):
+        self.alpha = alpha
+        self._smoothed = None
+
+    def filter(self, raw):
+        """Apply light EMA filter."""
+        if self._smoothed is None:
+            self._smoothed = raw.copy()
+        else:
+            self._smoothed = self.alpha * raw + (1.0 - self.alpha) * self._smoothed
+        return self._smoothed.copy()
+
+    def reset(self):
+        self._smoothed = None
+
+
+class DirectTracker:
+    """Direct 1:1 finger-to-screen mapping.
+
+    Maps the finger's normalized position (0..1) directly to screen pixels.
+    No home position, no delta, no drift toward center.
+    The cursor stays exactly where your finger is.
+
+    Uses:
+    - Light jitter filter (kills camera noise, not your movement)
+    - Stiff EMA for spring-like response without oscillation
+    - Light position smoother (removes final pixel jitter)
+
+    The finger position from MediaPipe is in normalized coords [0..1].
+    We mirror X (1 - x) so cursor follows your natural hand direction,
+    then map to screen coordinates.
+    """
+
+    def __init__(self, screen_w, screen_h,
+                 jitter_alpha=0.75,
+                 spring_alpha=0.55,
+                 smooth_alpha=0.85,
+                 mirror_x=True):
+        self.screen_w = screen_w
+        self.screen_h = screen_h
+        self.mirror_x = mirror_x
+
+        # Light jitter filter — just kills camera noise
+        self.jitter_x = LightJitterFilter(alpha=jitter_alpha)
+        self.jitter_y = LightJitterFilter(alpha=jitter_alpha)
+
+        # Stiff EMA spring — tracks finger instantly without oscillation
+        # alpha=0.55 means: 55% new target + 45% old position per frame
+        # At 30fps, this converges within 3-4 frames (~100ms)
+        # No mass, no oscillation, no overshoot — just fast following
+        self.spring_alpha = spring_alpha
+        self._spring_pos = None
+
+        # Light position smoother — final anti-jitter pass
+        self.smoother = PositionSmoother(alpha=smooth_alpha)
+
+        # Velocity tracking (for audio whoosh)
+        self._prev_pos = None
+        self.velocity = np.zeros(2)
+
+    def update(self, finger_pos, dt):
+        """Map finger position to screen cursor position.
+
+        Args:
+            finger_pos: np.array([x, y]) in normalized coords [0..1]
+            dt: frame time in seconds
+
+        Returns:
+            cursor_pos: np.array([x, y]) in screen pixels
+        """
+        # Apply light jitter filter
+        fx = self.jitter_x.filter(np.array([finger_pos[0]]))[0]
+        fy = self.jitter_y.filter(np.array([finger_pos[1]]))[0]
+        filtered = np.array([fx, fy])
+
+        # Mirror X so cursor follows natural hand direction
+        if self.mirror_x:
+            screen_x = (1.0 - filtered[0]) * self.screen_w
+        else:
+            screen_x = filtered[0] * self.screen_w
+        screen_y = filtered[1] * self.screen_h
+
+        target = np.array([screen_x, screen_y])
+
+        # Stiff EMA spring — fast tracking, zero oscillation
+        if self._spring_pos is None:
+            self._spring_pos = target.copy()
+        else:
+            self._spring_pos = (self.spring_alpha * target +
+                                (1.0 - self.spring_alpha) * self._spring_pos)
+
+        # Clamp to screen
+        cursor_pos = self._spring_pos.copy()
+        cursor_pos[0] = np.clip(cursor_pos[0], 0, self.screen_w)
+        cursor_pos[1] = np.clip(cursor_pos[1], 0, self.screen_h)
+
+        # Light final smooth
+        smoothed = self.smoother.smooth(cursor_pos)
+
+        # Track velocity for audio feedback
+        if self._prev_pos is not None and dt > 0:
+            self.velocity = (smoothed - self._prev_pos) / dt
+        self._prev_pos = smoothed.copy()
+
+        return smoothed
+
+    def reset(self, center=None):
+        """Reset tracker state."""
+        self.jitter_x.reset()
+        self.jitter_y.reset()
+        self._spring_pos = None
+        self._prev_pos = None
+        self.velocity = np.zeros(2)
+        if center is not None:
+            self.smoother.reset(center)
+        else:
+            self.smoother.reset()
+
+    @property
+    def position(self):
+        return self._spring_pos if self._spring_pos is not None else np.array([self.screen_w / 2, self.screen_h / 2])
