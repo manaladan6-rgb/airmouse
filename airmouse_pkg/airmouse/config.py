@@ -49,7 +49,7 @@ class Config:
     direct_jitter_alpha = 0.75      # Light jitter filter (high = responsive)
     direct_spring_alpha = 0.55     # Stiff EMA spring (high = fast tracking, low = smooth)
     direct_smooth_alpha = 0.85     # Light final smoothing
-    direct_mirror_x = True         # Mirror X so cursor follows hand naturally
+    direct_mirror_x = False        # NO mirror — tracker.py already flips the camera frame
 
     # Iron Man finger tracking
     exp_power = 0.6             # Exponential curve power (<1 = amplified small moves)

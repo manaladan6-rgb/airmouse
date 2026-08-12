@@ -442,7 +442,10 @@ def main():
                 gesture_confidence = gesture_result.get("confidence", 0.0)
 
                 # Gesture state machine — with stability and time
-                hand_stable = home.is_stable() if home.is_calibrated else False
+                if is_direct:
+                    hand_stable = True  # Direct mode doesn't need stability gating
+                else:
+                    hand_stable = home.is_stable() if home.is_calibrated else False
                 gesture = gsm.update(raw_gesture, now=now, hand_stable=hand_stable)
                 gesture_changed = (gesture != prev_gesture)
 
@@ -460,6 +463,8 @@ def main():
                     if not cursor_frozen:
                         mouse.move_to(cursor_pos[0], cursor_pos[1])
                     speed = np.linalg.norm(direct_tracker.velocity)
+                    # In direct mode, filtered_pos = raw_pos (no multi-stage filtering)
+                    filtered_pos = raw_pos
 
                     # Swipe detection (direct mode)
                     swipe_gesture = swipe.update(raw_pos, prev_pos, now)
@@ -575,10 +580,13 @@ def main():
 
                 # GUN -> Snap to center
                 if gesture == Gesture.GUN and gesture_changed:
-                    spring.reset(center)
-                    position_smoother.reset(center)
+                    if is_direct:
+                        direct_tracker.reset(center)
+                    else:
+                        spring.reset(center)
+                        position_smoother.reset(center)
+                        home.reset()
                     mouse.move_to(center[0], center[1])
-                    home.reset()
                     audio.click()
 
                 # ROCK -> Minimize

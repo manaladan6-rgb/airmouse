@@ -492,7 +492,7 @@ class DirectTracker:
                  jitter_alpha=0.75,
                  spring_alpha=0.55,
                  smooth_alpha=0.85,
-                 mirror_x=True):
+                 mirror_x=False):
         self.screen_w = screen_w
         self.screen_h = screen_h
         self.mirror_x = mirror_x
