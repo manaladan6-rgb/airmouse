@@ -314,6 +314,8 @@ def main():
             jitter_alpha=config.direct_jitter_alpha,
             spring_alpha=config.direct_spring_alpha,
             smooth_alpha=config.direct_smooth_alpha,
+            movement_threshold=config.direct_movement_threshold,
+            pixel_deadzone=config.direct_pixel_deadzone,
             mirror_x=config.direct_mirror_x,
         )
     else:
@@ -753,17 +755,21 @@ def main():
                     precision_mode = not precision_mode
                     audio.precision_toggle()
                     if is_direct:
-                        # In direct mode, precision slows the filters for steadier cursor
+                        # In direct mode, precision makes it even smoother and steadier
                         if precision_mode:
-                            direct_tracker.jitter_x = LightJitterFilter(alpha=0.55)
-                            direct_tracker.jitter_y = LightJitterFilter(alpha=0.55)
-                            direct_tracker.spring_alpha = 0.35  # Slower spring
-                            direct_tracker.smoother = PositionSmoother(alpha=0.65)
+                            direct_tracker.jitter_x = LightJitterFilter(alpha=0.20)
+                            direct_tracker.jitter_y = LightJitterFilter(alpha=0.20)
+                            direct_tracker.spring_alpha = 0.18  # Very slow, very smooth
+                            direct_tracker.smoother = PositionSmoother(alpha=0.50)
+                            direct_tracker.movement_threshold = 0.015  # Larger noise gate
+                            direct_tracker.pixel_deadzone = 3.0  # Larger pixel deadzone
                         else:
                             direct_tracker.jitter_x = LightJitterFilter(alpha=config.direct_jitter_alpha)
                             direct_tracker.jitter_y = LightJitterFilter(alpha=config.direct_jitter_alpha)
                             direct_tracker.spring_alpha = config.direct_spring_alpha
                             direct_tracker.smoother = PositionSmoother(alpha=config.direct_smooth_alpha)
+                            direct_tracker.movement_threshold = config.direct_movement_threshold
+                            direct_tracker.pixel_deadzone = config.direct_pixel_deadzone
                     else:
                         if precision_mode:
                             position_smoother = PositionSmoother(alpha=0.6)  # Smoother in precision mode

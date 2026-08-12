@@ -45,11 +45,13 @@ class Config:
     max_accel = 50000.0         # Acceleration limiter (prevents jerks)
     stiffness_smoothing = 0.3   # Smooth stiffness transition
 
-    # Direct tracking mode physics
-    direct_jitter_alpha = 0.75      # Light jitter filter (high = responsive)
-    direct_spring_alpha = 0.55     # Stiff EMA spring (high = fast tracking, low = smooth)
-    direct_smooth_alpha = 0.85     # Light final smoothing
-    direct_mirror_x = False        # NO mirror — tracker.py already flips the camera frame
+    # Direct tracking mode physics — feels like a hardware mouse
+    direct_jitter_alpha = 0.35      # Heavy jitter filter (low = smooth, kills camera noise)
+    direct_spring_alpha = 0.30     # Slow EMA spring (low = buttery smooth, high = snappy)
+    direct_smooth_alpha = 0.70     # Final smoothing (low = very smooth)
+    direct_movement_threshold = 0.008  # Noise gate — ignore movements smaller than this
+    direct_pixel_deadzone = 2.0    # Don't move cursor if output changed < 2 pixels
+    direct_mirror_x = False       # NO mirror — tracker.py already flips the camera frame
 
     # Iron Man finger tracking
     exp_power = 0.6             # Exponential curve power (<1 = amplified small moves)
@@ -123,10 +125,12 @@ class Config:
             f"tracking_mode = \"{self.tracking_mode}\"   # \"direct\" (1:1) or \"ironman\" (exponential)",
             "",
             "[direct]",
-            f"jitter_alpha = {self.direct_jitter_alpha}     # Light jitter filter (high = responsive)",
-            f"spring_alpha = {self.direct_spring_alpha}      # Stiff EMA spring (high = fast, low = smooth)",
-            f"smooth_alpha = {self.direct_smooth_alpha}       # Light final smoothing",
-            f"mirror_x = {str(self.direct_mirror_x).lower()}            # Mirror X for natural cursor direction",
+            f"jitter_alpha = {self.direct_jitter_alpha}     # Heavy filter (low = smooth)",
+            f"spring_alpha = {self.direct_spring_alpha}      # Slow spring (low = buttery)",
+            f"smooth_alpha = {self.direct_smooth_alpha}       # Final smoothing",
+            f"movement_threshold = {self.direct_movement_threshold}  # Noise gate — ignore tiny moves",
+            f"pixel_deadzone = {self.direct_pixel_deadzone}     # Don't move if < N pixels changed",
+            f"mirror_x = {str(self.direct_mirror_x).lower()}            # Mirror X (tracker already flips)",
             "",
             "[physics]  # Ironman mode physics",
             f"mass = {self.mass}",
@@ -205,6 +209,8 @@ class Config:
                 self.direct_jitter_alpha = d.get("jitter_alpha", self.direct_jitter_alpha)
                 self.direct_spring_alpha = d.get("spring_alpha", self.direct_spring_alpha)
                 self.direct_smooth_alpha = d.get("smooth_alpha", self.direct_smooth_alpha)
+                self.direct_movement_threshold = d.get("movement_threshold", self.direct_movement_threshold)
+                self.direct_pixel_deadzone = d.get("pixel_deadzone", self.direct_pixel_deadzone)
                 self.direct_mirror_x = d.get("mirror_x", self.direct_mirror_x)
 
             if "physics" in data:

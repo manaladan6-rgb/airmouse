@@ -472,44 +472,57 @@ class LightJitterFilter:
 
 
 class DirectTracker:
-    """Direct 1:1 finger-to-screen mapping.
+    """Direct finger-to-screen mapping that feels like a hardware mouse.
 
-    Maps the finger's normalized position (0..1) directly to screen pixels.
-    No home position, no delta, no drift toward center.
-    The cursor stays exactly where your finger is.
+    Smooth, slow, sweet — no shaking, no jitter, no drift.
 
-    Uses:
-    - Light jitter filter (kills camera noise, not your movement)
-    - Stiff EMA for spring-like response without oscillation
-    - Light position smoother (removes final pixel jitter)
+    Pipeline:
+    1. Heavy EMA jitter filter — kills camera noise at the source
+    2. Movement threshold (noise gate) — if hand barely moved, cursor stays still
+       (just like a physical mouse sensor — needs real movement to register)
+    3. Smooth EMA spring — lazy following, feels like dragging through honey
+    4. Final position smoother — removes last pixel of jitter
+    5. Sub-pixel deadzone — if output hasn't moved 2+ pixels, don't move OS cursor
 
-    The finger position from MediaPipe is in normalized coords [0..1].
-    We mirror X (1 - x) so cursor follows your natural hand direction,
-    then map to screen coordinates.
+    The result: cursor that glides like a real mouse, not a shaky webcam tracker.
     """
 
     def __init__(self, screen_w, screen_h,
-                 jitter_alpha=0.75,
-                 spring_alpha=0.55,
-                 smooth_alpha=0.85,
+                 jitter_alpha=0.35,
+                 spring_alpha=0.30,
+                 smooth_alpha=0.70,
+                 movement_threshold=0.008,
+                 pixel_deadzone=2.0,
                  mirror_x=False):
         self.screen_w = screen_w
         self.screen_h = screen_h
         self.mirror_x = mirror_x
 
-        # Light jitter filter — just kills camera noise
+        # Heavy jitter filter — kills camera noise before it reaches the cursor
+        # alpha=0.35 means: 35% new input + 65% old state per frame
+        # This creates a very smooth, lazy response that swallows tremor
         self.jitter_x = LightJitterFilter(alpha=jitter_alpha)
         self.jitter_y = LightJitterFilter(alpha=jitter_alpha)
 
-        # Stiff EMA spring — tracks finger instantly without oscillation
-        # alpha=0.55 means: 55% new target + 45% old position per frame
-        # At 30fps, this converges within 3-4 frames (~100ms)
-        # No mass, no oscillation, no overshoot — just fast following
+        # Smooth EMA spring — lazy, buttery following
+        # alpha=0.30 means: 30% new target + 70% old position per frame
+        # Feels like moving through honey — smooth and controlled
         self.spring_alpha = spring_alpha
         self._spring_pos = None
 
-        # Light position smoother — final anti-jitter pass
+        # Final position smoother — last line of defense against jitter
         self.smoother = PositionSmoother(alpha=smooth_alpha)
+
+        # Movement threshold (noise gate) in normalized coords
+        # If the filtered finger position hasn't moved this much, ignore it
+        # This simulates the physical click of a real mouse sensor
+        self.movement_threshold = movement_threshold
+        self._last_accepted_pos = None  # Last position that passed the gate
+
+        # Pixel deadzone — if output hasn't moved this many pixels, don't update OS cursor
+        # Prevents sub-pixel jitter from reaching the screen
+        self.pixel_deadzone = pixel_deadzone
+        self._last_output_pos = None  # Last position sent to OS
 
         # Velocity tracking (for audio whoosh)
         self._prev_pos = None
@@ -518,28 +531,43 @@ class DirectTracker:
     def update(self, finger_pos, dt):
         """Map finger position to screen cursor position.
 
+        Pipeline: raw → jitter filter → noise gate → screen map → spring → smooth → pixel gate
+
         Args:
             finger_pos: np.array([x, y]) in normalized coords [0..1]
             dt: frame time in seconds
 
         Returns:
-            cursor_pos: np.array([x, y]) in screen pixels
+            cursor_pos: np.array([x, y]) in screen pixels, or None if below pixel deadzone
         """
-        # Apply light jitter filter
+        # Stage 1: Heavy jitter filter — swallow camera noise
         fx = self.jitter_x.filter(np.array([finger_pos[0]]))[0]
         fy = self.jitter_y.filter(np.array([finger_pos[1]]))[0]
         filtered = np.array([fx, fy])
 
-        # Mirror X so cursor follows natural hand direction
+        # Stage 2: Movement threshold (noise gate)
+        # If hand barely moved, feed the last accepted position instead
+        # This is what makes it feel like a real mouse — no micro-tremor gets through
+        if self._last_accepted_pos is not None:
+            delta = np.linalg.norm(filtered - self._last_accepted_pos)
+            if delta < self.movement_threshold:
+                # Hand is essentially still — use last accepted position
+                filtered = self._last_accepted_pos.copy()
+            else:
+                # Real movement detected — accept and update
+                self._last_accepted_pos = filtered.copy()
+        else:
+            self._last_accepted_pos = filtered.copy()
+
+        # Map to screen coordinates
         if self.mirror_x:
             screen_x = (1.0 - filtered[0]) * self.screen_w
         else:
             screen_x = filtered[0] * self.screen_w
         screen_y = filtered[1] * self.screen_h
-
         target = np.array([screen_x, screen_y])
 
-        # Stiff EMA spring — fast tracking, zero oscillation
+        # Stage 3: Smooth EMA spring — lazy, buttery following
         if self._spring_pos is None:
             self._spring_pos = target.copy()
         else:
@@ -551,8 +579,18 @@ class DirectTracker:
         cursor_pos[0] = np.clip(cursor_pos[0], 0, self.screen_w)
         cursor_pos[1] = np.clip(cursor_pos[1], 0, self.screen_h)
 
-        # Light final smooth
+        # Stage 4: Final position smoother
         smoothed = self.smoother.smooth(cursor_pos)
+
+        # Stage 5: Pixel deadzone — if output hasn't moved enough, don't update cursor
+        # This prevents sub-pixel jitter from reaching the OS
+        if self._last_output_pos is not None:
+            output_delta = np.linalg.norm(smoothed - self._last_output_pos)
+            if output_delta < self.pixel_deadzone:
+                # Below pixel deadzone — return last output position (cursor stays still)
+                smoothed = self._last_output_pos.copy()
+
+        self._last_output_pos = smoothed.copy()
 
         # Track velocity for audio feedback
         if self._prev_pos is not None and dt > 0:
@@ -566,6 +604,8 @@ class DirectTracker:
         self.jitter_x.reset()
         self.jitter_y.reset()
         self._spring_pos = None
+        self._last_accepted_pos = None
+        self._last_output_pos = None
         self._prev_pos = None
         self.velocity = np.zeros(2)
         if center is not None:
