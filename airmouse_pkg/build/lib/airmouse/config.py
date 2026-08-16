@@ -45,12 +45,13 @@ class Config:
     max_accel = 50000.0         # Acceleration limiter (prevents jerks)
     stiffness_smoothing = 0.3   # Smooth stiffness transition
 
-    # Direct tracking mode physics — feels like a hardware mouse
-    direct_jitter_alpha = 0.35      # Heavy jitter filter (low = smooth, kills camera noise)
-    direct_spring_alpha = 0.30     # Slow EMA spring (low = buttery smooth, high = snappy)
-    direct_smooth_alpha = 0.70     # Final smoothing (low = very smooth)
-    direct_movement_threshold = 0.008  # Noise gate — ignore movements smaller than this
-    direct_pixel_deadzone = 2.0    # Don't move cursor if output changed < 2 pixels
+    # Direct tracking mode physics — IMMEDIATE like a hardware mouse
+    # Single responsive EMA (α=0.55) — no cascading lag, no spring
+    direct_jitter_alpha = 0.55      # Responsive EMA (high = snappy, low = smooth)
+    direct_spring_alpha = 0.55     # Kept for compat (same as jitter_alpha)
+    direct_smooth_alpha = 0.55     # Kept for compat (same as jitter_alpha)
+    direct_movement_threshold = 0.005  # Noise gate — ignore micro-movements
+    direct_pixel_deadzone = 1.5    # Don't move cursor if output changed < 1.5 pixels
     direct_mirror_x = False       # NO mirror — tracker.py already flips the camera frame
 
     # Iron Man finger tracking
@@ -81,10 +82,10 @@ class Config:
     edge_gravity_zone = 0.08
 
     # Gesture thresholds
-    pinch_threshold = 0.06
-    gesture_confirm_frames = 4       # Movement gestures (point, palm, three)
-    gesture_action_confirm_frames = 5  # Action gestures (pinch, peace, fist, etc.)
-    gesture_transition_cooldown = 0.15  # Seconds between different gesture switches
+    pinch_threshold = 0.07       # Relaxed for far-distance pinch detection
+    gesture_confirm_frames = 3       # Movement gestures (point, palm, three) — faster activation
+    gesture_action_confirm_frames = 4  # Action gestures (pinch, peace, fist, etc.)
+    gesture_transition_cooldown = 0.12  # Seconds between different gesture switches
     gesture_stability_frames = 2     # Frames hand must be stable for action gestures
 
     # Click
@@ -100,8 +101,8 @@ class Config:
 
     # Camera
     camera_index = 0
-    detection_confidence = 0.7
-    tracking_confidence = 0.5
+    detection_confidence = 0.6   # Lower = detect hand easier from far distance
+    tracking_confidence = 0.5    # Tracking confidence (keep moderate for stability)
 
     # Performance
     target_fps = 30

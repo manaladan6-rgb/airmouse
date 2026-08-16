@@ -87,13 +87,17 @@ def _dist(a, b):
 
 def _finger_up(landmarks, tip, pip, mcp):
     wrist = landmarks[WRIST]
-    # Adaptive threshold: slightly more lenient than before
-    return _dist(landmarks[tip], wrist) > _dist(landmarks[pip], wrist) * 1.05
+    # Adaptive threshold: 1.03 (relaxed for far-distance detection)
+    # At far distance, finger extension ratios are smaller, so we need
+    # a lower threshold to avoid missing extended fingers
+    return _dist(landmarks[tip], wrist) > _dist(landmarks[pip], wrist) * 1.03
 
 
 def _thumb_up(landmarks):
+    # Relaxed threshold 1.05 (was 1.1) for far-distance thumb detection
+    # Thumb is hardest to detect at distance — lower threshold helps
     return _dist(landmarks[THUMB_TIP], landmarks[INDEX_MCP]) > \
-           _dist(landmarks[THUMB_IP], landmarks[INDEX_MCP]) * 1.1
+           _dist(landmarks[THUMB_IP], landmarks[INDEX_MCP]) * 1.05
 
 
 def _finger_confidence(landmarks, tip, pip, mcp):
@@ -105,22 +109,25 @@ def _finger_confidence(landmarks, tip, pip, mcp):
     wrist = landmarks[WRIST]
     tip_dist = _dist(landmarks[tip], wrist)
     pip_dist = _dist(landmarks[pip], wrist)
-    # Ratio > 1.05 means finger is up
+    # Ratio > 1.03 means finger is up (relaxed for far-distance)
     ratio = tip_dist / max(pip_dist, 0.001)
-    if ratio >= 1.15:
+    if ratio >= 1.12:
         return 1.0
-    elif ratio >= 1.05:
-        return (ratio - 1.05) / 0.10  # Linear from 0 to 1 in the 1.05-1.15 range
-    elif ratio >= 0.95:
+    elif ratio >= 1.03:
+        return (ratio - 1.03) / 0.09  # Linear from 0 to 1 in the 1.03-1.12 range
+    elif ratio >= 0.93:
         return 0.0  # Below threshold but close — ambiguous
     else:
         return 0.0
 
 
-def recognize_gesture(landmarks, pinch_threshold=0.06):
+def recognize_gesture(landmarks, pinch_threshold=0.07):
     """Classify hand gesture from 21 landmarks.
 
     Returns dict with gesture, finger states, confidence, and positions.
+    
+    pinch_threshold=0.07 (relaxed from 0.06 for far-distance pinch detection).
+    At far distance, thumb-index tip distance appears larger in normalized coords.
     """
 
     idx = _finger_up(landmarks, INDEX_TIP, INDEX_PIP, INDEX_MCP)
@@ -268,8 +275,8 @@ class GestureStateMachine:
         Gesture.POINTING, Gesture.PALM, Gesture.THREE,
     }
 
-    def __init__(self, confirm_frames=4, action_confirm_frames=5,
-                 transition_cooldown=0.15, stability_frames=2):
+    def __init__(self, confirm_frames=3, action_confirm_frames=4,
+                 transition_cooldown=0.12, stability_frames=2):
         self.confirm_frames = confirm_frames
         self.action_confirm_frames = action_confirm_frames
         self.transition_cooldown = transition_cooldown
