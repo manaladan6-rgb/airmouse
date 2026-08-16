@@ -5,9 +5,9 @@ Physics Engine v3.2 — Direct Tracking + Spring-Damper + Adaptive + Momentum + 
 Two tracking modes:
 
   DIRECT (default v3.2):
-    Finger position maps 1:1 to screen position.
-    Cursor follows your finger exactly — what you see is what you get.
-    Light jitter suppression + stiff spring = accurate + smooth.
+    Finger position maps 1:1 to screen position — IMMEDIATE.
+    Single responsive EMA (α=0.55) + noise gate + direct map + pixel deadzone.
+    No cascading lag. No spring. Cursor is AT your finger, not chasing it.
 
   IRONMAN (legacy v3.1):
     FINGER-RELATIVE tracking — cursor driven by delta from home position.
@@ -15,12 +15,10 @@ Two tracking modes:
     Cursor drifts toward center when hand is still.
 
 Physics stack (DIRECT mode):
-    1. Light jitter filter  — micro-tremor kill only (no heavy macro smoothing)
-    2. Direct map           — finger [0..1] -> screen [0..W, 0..H]
-    3. Adaptive spring      — very stiff (k=600-1200) for near-instant tracking
-    4. Acceleration limit   — prevent sudden jerks
-    5. Position smoother    — light final EMA (alpha=0.85)
-    6. Screen clamp         — never go off-screen
+    1. Single responsive EMA  — kills camera noise (α=0.55, ~33ms lag)
+    2. Noise gate             — ignore micro-movements (like mouse sensor LOD)
+    3. Direct map             — finger [0..1] -> screen [0..W, 0..H] — IMMEDIATE
+    4. Pixel deadzone         — don't move if < 1.5px changed
 
 Physics stack (IRONMAN mode):
     1. Dual-stage jitter   — micro-tremor kill + macro smooth
@@ -472,150 +470,137 @@ class LightJitterFilter:
 
 
 class DirectTracker:
-    """Direct finger-to-screen mapping that feels like a hardware mouse.
+    """Direct finger-to-screen mapping — IMMEDIATE like a hardware mouse.
 
-    Smooth, slow, sweet — no shaking, no jitter, no drift.
+    No cascading lag. No spring. No honey.
+    The cursor goes WHERE your finger is, right now.
+
+    Old design (BROKEN): 3 stacked EMAs = ~300ms delay = cursor swimming
+    New design (CORRECT): 1 light EMA + direct map = ~33ms delay = instant
 
     Pipeline:
-    1. Heavy EMA jitter filter — kills camera noise at the source
-    2. Movement threshold (noise gate) — if hand barely moved, cursor stays still
-       (just like a physical mouse sensor — needs real movement to register)
-    3. Smooth EMA spring — lazy following, feels like dragging through honey
-    4. Final position smoother — removes last pixel of jitter
-    5. Sub-pixel deadzone — if output hasn't moved 2+ pixels, don't move OS cursor
+    1. Single responsive EMA (α=0.55) — kills frame-to-frame camera noise
+       This gives ~1 frame of smoothing (33ms) — invisible to the eye
+    2. Noise gate — ignore micro-movements below threshold
+       (like a physical mouse sensor's lift-off distance)
+    3. Direct map — finger [0..1] → screen [0..W, 0..H] — IMMEDIATE, 1:1
+    4. Pixel deadzone — don't move OS cursor if change < 1.5px
 
-    The result: cursor that glides like a real mouse, not a shaky webcam tracker.
+    Result: cursor is AT your finger. Not lagging. Not drifting. Just there.
     """
 
     def __init__(self, screen_w, screen_h,
-                 jitter_alpha=0.28,
-                 spring_alpha=0.25,
-                 smooth_alpha=0.65,
-                 movement_threshold=0.010,
-                 pixel_deadzone=3.0,
+                 jitter_alpha=0.55,
+                 spring_alpha=0.55,
+                 smooth_alpha=0.55,
+                 movement_threshold=0.005,
+                 pixel_deadzone=1.5,
                  mirror_x=False):
         self.screen_w = screen_w
         self.screen_h = screen_h
         self.mirror_x = mirror_x
 
-        # Heavy jitter filter — kills camera noise before it reaches the cursor
-        # alpha=0.35 means: 35% new input + 65% old state per frame
-        # This creates a very smooth, lazy response that swallows tremor
+        # THE ONE FILTER — responsive EMA that kills camera noise
+        # α=0.55 means: 55% new + 45% old per frame
+        # This is ~1 frame of smoothing — removes ±2-5px MediaPipe jitter
+        # WITHOUT creating perceptible lag (human threshold is ~100ms)
         self.jitter_x = LightJitterFilter(alpha=jitter_alpha)
         self.jitter_y = LightJitterFilter(alpha=jitter_alpha)
 
-        # Smooth EMA spring — lazy, buttery following
-        # alpha=0.30 means: 30% new target + 70% old position per frame
-        # Feels like moving through honey — smooth and controlled
+        # Keep attributes for precision mode compatibility
+        # (precision mode lowers jitter_alpha for more filtering)
         self.spring_alpha = spring_alpha
-        self._spring_pos = None
-
-        # Final position smoother — last line of defense against jitter
         self.smoother = PositionSmoother(alpha=smooth_alpha)
 
-        # Movement threshold (noise gate) in normalized coords
-        # If the filtered finger position hasn't moved this much, ignore it
-        # This simulates the physical click of a real mouse sensor
+        # Noise gate — ignore movements below this (normalized coords)
+        # A real mouse sensor has lift-off distance — this is ours
         self.movement_threshold = movement_threshold
-        self._last_accepted_pos = None  # Last position that passed the gate
+        self._last_accepted_pos = None
 
-        # Pixel deadzone — if output hasn't moved this many pixels, don't update OS cursor
-        # Prevents sub-pixel jitter from reaching the screen
+        # Pixel deadzone — don't move OS cursor if change < this many pixels
         self.pixel_deadzone = pixel_deadzone
-        self._last_output_pos = None  # Last position sent to OS
+        self._last_output_pos = None
 
         # Velocity tracking (for audio whoosh)
         self._prev_pos = None
         self.velocity = np.zeros(2)
 
-        # Store normalized filtered position for scroll/volume/brightness
-        # This is the position AFTER jitter filter + noise gate, BEFORE screen mapping
+        # Normalized filtered position for scroll/volume/brightness
         self._filtered_normalized = None
+
+        # Current screen position (for .position property)
+        self._screen_pos = None
 
     def update(self, finger_pos, dt):
         """Map finger position to screen cursor position.
 
-        Pipeline: raw → jitter filter → noise gate → screen map → spring → smooth → pixel gate
+        Pipeline: raw → EMA filter → noise gate → DIRECT screen map → pixel gate
 
         Args:
             finger_pos: np.array([x, y]) in normalized coords [0..1]
             dt: frame time in seconds
 
         Returns:
-            cursor_pos: np.array([x, y]) in screen pixels, or None if below pixel deadzone
+            cursor_pos: np.array([x, y]) in screen pixels
         """
-        # Stage 1: Heavy jitter filter — swallow camera noise
+        # Stage 1: Single responsive EMA — kill camera noise
         fx = self.jitter_x.filter(np.array([finger_pos[0]]))[0]
         fy = self.jitter_y.filter(np.array([finger_pos[1]]))[0]
         filtered = np.array([fx, fy])
 
-        # Stage 2: Movement threshold (noise gate)
-        # If hand barely moved, feed the last accepted position instead
-        # This is what makes it feel like a real mouse — no micro-tremor gets through
+        # Stage 2: Noise gate — if hand barely moved, hold position
+        # This is the "lift-off distance" of our virtual mouse sensor
         if self._last_accepted_pos is not None:
             delta = np.linalg.norm(filtered - self._last_accepted_pos)
             if delta < self.movement_threshold:
-                # Hand is essentially still — use last accepted position
+                # Below noise gate — hand is essentially still
                 filtered = self._last_accepted_pos.copy()
             else:
-                # Real movement detected — accept and update
+                # Real movement detected — accept it
                 self._last_accepted_pos = filtered.copy()
         else:
             self._last_accepted_pos = filtered.copy()
 
-        # Save normalized filtered position for scroll/volume/brightness modes
-        # This is the clean, jitter-free, noise-gated position in [0..1] space
+        # Save normalized position for scroll/volume/brightness
         self._filtered_normalized = filtered.copy()
 
-        # Map to screen coordinates
+        # Stage 3: DIRECT map to screen — 1:1, IMMEDIATE, no spring lag
         if self.mirror_x:
             screen_x = (1.0 - filtered[0]) * self.screen_w
         else:
             screen_x = filtered[0] * self.screen_w
         screen_y = filtered[1] * self.screen_h
-        target = np.array([screen_x, screen_y])
 
-        # Stage 3: Smooth EMA spring — lazy, buttery following
-        if self._spring_pos is None:
-            self._spring_pos = target.copy()
-        else:
-            self._spring_pos = (self.spring_alpha * target +
-                                (1.0 - self.spring_alpha) * self._spring_pos)
+        # Clamp to screen bounds
+        screen_x = np.clip(screen_x, 0, self.screen_w)
+        screen_y = np.clip(screen_y, 0, self.screen_h)
+        cursor_pos = np.array([screen_x, screen_y])
 
-        # Clamp to screen
-        cursor_pos = self._spring_pos.copy()
-        cursor_pos[0] = np.clip(cursor_pos[0], 0, self.screen_w)
-        cursor_pos[1] = np.clip(cursor_pos[1], 0, self.screen_h)
-
-        # Stage 4: Final position smoother
-        smoothed = self.smoother.smooth(cursor_pos)
-
-        # Stage 5: Pixel deadzone — if output hasn't moved enough, don't update cursor
-        # This prevents sub-pixel jitter from reaching the OS
+        # Stage 4: Pixel deadzone — prevent sub-pixel jitter
         if self._last_output_pos is not None:
-            output_delta = np.linalg.norm(smoothed - self._last_output_pos)
+            output_delta = np.linalg.norm(cursor_pos - self._last_output_pos)
             if output_delta < self.pixel_deadzone:
-                # Below pixel deadzone — return last output position (cursor stays still)
-                smoothed = self._last_output_pos.copy()
+                cursor_pos = self._last_output_pos.copy()
 
-        self._last_output_pos = smoothed.copy()
+        self._last_output_pos = cursor_pos.copy()
+        self._screen_pos = cursor_pos.copy()
 
-        # Track velocity for audio feedback
+        # Track velocity (for audio feedback)
         if self._prev_pos is not None and dt > 0:
-            self.velocity = (smoothed - self._prev_pos) / dt
-        self._prev_pos = smoothed.copy()
+            self.velocity = (cursor_pos - self._prev_pos) / dt
+        self._prev_pos = cursor_pos.copy()
 
-        return smoothed
+        return cursor_pos
 
     def reset(self, center=None):
         """Reset tracker state."""
         self.jitter_x.reset()
         self.jitter_y.reset()
-        self._spring_pos = None
         self._last_accepted_pos = None
         self._last_output_pos = None
         self._prev_pos = None
         self._filtered_normalized = None
+        self._screen_pos = None
         self.velocity = np.zeros(2)
         if center is not None:
             self.smoother.reset(center)
@@ -624,13 +609,14 @@ class DirectTracker:
 
     @property
     def position(self):
-        return self._spring_pos if self._spring_pos is not None else np.array([self.screen_w / 2, self.screen_h / 2])
+        """Current screen position in pixels."""
+        return self._screen_pos if self._screen_pos is not None else np.array([self.screen_w / 2, self.screen_h / 2])
 
     @property
     def filtered_normalized(self):
-        """Normalized filtered position (0-1 range) after jitter + noise gate.
+        """Normalized filtered position (0-1 range) after EMA + noise gate.
 
-        Use this for scroll/volume/brightness delta calculations instead of raw_pos.
+        Use this for scroll/volume/brightness delta calculations.
         This gives smooth, noise-free deltas for continuous gestures.
         """
         return self._filtered_normalized if self._filtered_normalized is not None else np.array([0.5, 0.5])

@@ -761,14 +761,15 @@ def main():
                     precision_mode = not precision_mode
                     audio.precision_toggle()
                     if is_direct:
-                        # In direct mode, precision makes it even smoother and steadier
+                        # Precision mode: lower the single EMA for more smoothing
+                        # and raise the noise gate to filter more micro-movements
                         if precision_mode:
-                            direct_tracker.jitter_x = LightJitterFilter(alpha=0.15)
-                            direct_tracker.jitter_y = LightJitterFilter(alpha=0.15)
-                            direct_tracker.spring_alpha = 0.12  # Ultra slow, very smooth
-                            direct_tracker.smoother = PositionSmoother(alpha=0.40)
-                            direct_tracker.movement_threshold = 0.018  # Larger noise gate
-                            direct_tracker.pixel_deadzone = 4.0  # Larger pixel deadzone
+                            direct_tracker.jitter_x = LightJitterFilter(alpha=0.35)
+                            direct_tracker.jitter_y = LightJitterFilter(alpha=0.35)
+                            direct_tracker.spring_alpha = 0.35  # For compat
+                            direct_tracker.smoother = PositionSmoother(alpha=0.35)  # For compat
+                            direct_tracker.movement_threshold = 0.008  # Higher noise gate
+                            direct_tracker.pixel_deadzone = 2.5  # Larger pixel deadzone
                         else:
                             direct_tracker.jitter_x = LightJitterFilter(alpha=config.direct_jitter_alpha)
                             direct_tracker.jitter_y = LightJitterFilter(alpha=config.direct_jitter_alpha)

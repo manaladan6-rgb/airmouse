@@ -45,12 +45,13 @@ class Config:
     max_accel = 50000.0         # Acceleration limiter (prevents jerks)
     stiffness_smoothing = 0.3   # Smooth stiffness transition
 
-    # Direct tracking mode physics — feels like a hardware mouse
-    direct_jitter_alpha = 0.28      # Heavy jitter filter (low = smooth, kills camera noise)
-    direct_spring_alpha = 0.25     # Slow EMA spring (low = buttery smooth, high = snappy)
-    direct_smooth_alpha = 0.65     # Final smoothing (low = very smooth)
-    direct_movement_threshold = 0.010  # Noise gate — ignore movements smaller than this
-    direct_pixel_deadzone = 3.0    # Don't move cursor if output changed < 3 pixels
+    # Direct tracking mode physics — IMMEDIATE like a hardware mouse
+    # Single responsive EMA (α=0.55) — no cascading lag, no spring
+    direct_jitter_alpha = 0.55      # Responsive EMA (high = snappy, low = smooth)
+    direct_spring_alpha = 0.55     # Kept for compat (same as jitter_alpha)
+    direct_smooth_alpha = 0.55     # Kept for compat (same as jitter_alpha)
+    direct_movement_threshold = 0.005  # Noise gate — ignore micro-movements
+    direct_pixel_deadzone = 1.5    # Don't move cursor if output changed < 1.5 pixels
     direct_mirror_x = False       # NO mirror — tracker.py already flips the camera frame
 
     # Iron Man finger tracking
