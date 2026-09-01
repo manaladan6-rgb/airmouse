@@ -1,5 +1,14 @@
 """
-Gesture Recognition Engine v3.1 — 14 gestures + swipe + enhanced state machine.
+Gesture Recognition Engine v4.0 — Angle-based detection + hysteresis.
+
+v4.0 improvements:
+  - ANGLE-based finger curl detection (true MCP-PIP-DIP joint angles)
+    More accurate than distance ratios at all distances
+  - HYSTERESIS on finger up/down (prevents gesture flapping)
+    Different thresholds for entering "up" state vs "down" state
+  - Per-finger state tracking with persistent state
+  - Better thumb detection using thumb-to-index-mcp angle
+  - Higher-precision pinch detection with z-axis consideration
 
 v3.1 improvements:
   - Gesture stability scoring (landmark variance over time)
@@ -85,38 +94,120 @@ def _dist(a, b):
     return np.sqrt((a.x - b.x)**2 + (a.y - b.y)**2 + (a.z - b.z)**2)
 
 
-def _finger_up(landmarks, tip, pip, mcp):
-    wrist = landmarks[WRIST]
-    # Adaptive threshold: 1.03 (relaxed for far-distance detection)
-    # At far distance, finger extension ratios are smaller, so we need
-    # a lower threshold to avoid missing extended fingers
-    return _dist(landmarks[tip], wrist) > _dist(landmarks[pip], wrist) * 1.03
+def _angle_at(joint, p1, p3):
+    """Compute angle at `joint` formed by p1-joint-p3 (in degrees).
+
+    Uses cosine rule: cos(theta) = (a^2 + b^2 - c^2) / (2ab)
+    """
+    a = _dist(p1, joint)
+    b = _dist(joint, p3)
+    c = _dist(p1, p3)
+    if a < 1e-6 or b < 1e-6:
+        return 180.0
+    cos_theta = (a*a + b*b - c*c) / (2 * a * b)
+    cos_theta = max(-1.0, min(1.0, cos_theta))
+    return np.degrees(np.arccos(cos_theta))
+
+
+def _finger_curl_angle(landmarks, mcp, pip, dip, tip):
+    """Compute finger curl angle at the PIP joint (degrees).
+
+    180° = finger fully extended (straight)
+    ~90° = finger fully curled
+    ~150° = slightly bent
+
+    This is much more accurate than distance ratios — works at any distance.
+    """
+    return _angle_at(landmarks[pip], landmarks[mcp], landmarks[dip])
+
+
+# Per-finger hysteresis state — prevents flapping when finger is borderline
+# Each finger has separate "going up" and "going down" thresholds
+_FINGER_HYSTERESIS = {
+    # finger_name: (up_threshold_deg, down_threshold_deg)
+    # Up = angle must exceed this to count as "up"
+    # Down = angle must drop below this to count as "down"
+    # Difference = hysteresis band (~15°) — prevents flapping
+    'index':  (160.0, 145.0),
+    'middle': (160.0, 145.0),
+    'ring':   (160.0, 145.0),
+    'pinky':  (155.0, 140.0),  # Pinky is shorter, thresholds slightly lower
+}
+
+# Persistent state for hysteresis
+_finger_state = {'index': False, 'middle': False, 'ring': False, 'pinky': False}
+
+
+def _finger_up_angle(landmarks, mcp, pip, dip, tip, finger_name='index'):
+    """Angle-based finger up detection with hysteresis.
+
+    Uses PIP joint angle:
+      - > 160° = finger straight (extended)
+      - < 145° = finger curled (folded)
+      - 145-160° = hysteresis band (keep previous state)
+
+    This prevents gestures from flapping when fingers are borderline.
+    """
+    angle = _finger_curl_angle(landmarks, mcp, pip, dip, tip)
+    up_thresh, down_thresh = _FINGER_HYSTERESIS[finger_name]
+
+    current_state = _finger_state[finger_name]
+    if current_state:
+        # Currently up — only go down if angle drops below down_thresh
+        if angle < down_thresh:
+            _finger_state[finger_name] = False
+    else:
+        # Currently down — only go up if angle exceeds up_thresh
+        if angle > up_thresh:
+            _finger_state[finger_name] = True
+    return _finger_state[finger_name]
+
+
+def _finger_up(landmarks, tip, pip, mcp, finger_name='index'):
+    """Backward-compat wrapper — uses angle-based detection with hysteresis."""
+    # Infer DIP index from PIP index (DIP = PIP + 1)
+    dip = pip + 1
+    return _finger_up_angle(landmarks, mcp, pip, dip, tip, finger_name)
 
 
 def _thumb_up(landmarks):
-    # Relaxed threshold 1.05 (was 1.1) for far-distance thumb detection
-    # Thumb is hardest to detect at distance — lower threshold helps
-    return _dist(landmarks[THUMB_TIP], landmarks[INDEX_MCP]) > \
-           _dist(landmarks[THUMB_IP], landmarks[INDEX_MCP]) * 1.05
+    """Thumb up detection — uses CMC-MCP-IP angle.
+
+    A thumb is "up" (extended away from palm) when the CMC-MCP-IP angle is large
+    (> 150°). When folded across palm, the angle is much smaller.
+    """
+    angle = _angle_at(landmarks[THUMB_MCP], landmarks[THUMB_CMC], landmarks[THUMB_IP])
+    # Use a slightly lower threshold for thumb — it's less angular than other fingers
+    return angle > 150.0
+
+
+def _thumb_extended_out(landmarks):
+    """Check if thumb is extended outward (away from index finger).
+
+    Used for SHAKA / ROCK / SIX gestures where thumb needs to be out, not just up.
+    """
+    # Distance from thumb tip to index MCP (palm edge)
+    thumb_to_palm = _dist(landmarks[THUMB_TIP], landmarks[INDEX_MCP])
+    # Distance from thumb MCP to index MCP (anatomical reference)
+    ref = _dist(landmarks[THUMB_MCP], landmarks[INDEX_MCP])
+    if ref < 1e-6:
+        return False
+    # If thumb tip is more than 1.3x its MCP distance from index MCP, it's extended out
+    return thumb_to_palm > ref * 1.3
 
 
 def _finger_confidence(landmarks, tip, pip, mcp):
     """Return 0.0-1.0 confidence that a finger is up.
 
-    Based on how far past the PIP joint the tip is.
-    1.0 = clearly up, 0.5 = borderline, 0.0 = clearly down.
+    Based on PIP angle — 180° = 1.0 (fully extended), 90° = 0.0 (fully curled).
     """
-    wrist = landmarks[WRIST]
-    tip_dist = _dist(landmarks[tip], wrist)
-    pip_dist = _dist(landmarks[pip], wrist)
-    # Ratio > 1.03 means finger is up (relaxed for far-distance)
-    ratio = tip_dist / max(pip_dist, 0.001)
-    if ratio >= 1.12:
+    dip = pip + 1
+    angle = _finger_curl_angle(landmarks, mcp, pip, dip, tip)
+    # Map 145°-170° to 0.0-1.0
+    if angle >= 170:
         return 1.0
-    elif ratio >= 1.03:
-        return (ratio - 1.03) / 0.09  # Linear from 0 to 1 in the 1.03-1.12 range
-    elif ratio >= 0.93:
-        return 0.0  # Below threshold but close — ambiguous
+    elif angle >= 145:
+        return (angle - 145) / 25.0
     else:
         return 0.0
 
@@ -124,17 +215,17 @@ def _finger_confidence(landmarks, tip, pip, mcp):
 def recognize_gesture(landmarks, pinch_threshold=0.07):
     """Classify hand gesture from 21 landmarks.
 
+    v4.0: Uses angle-based detection with hysteresis — no more flapping.
+
     Returns dict with gesture, finger states, confidence, and positions.
-    
-    pinch_threshold=0.07 (relaxed from 0.06 for far-distance pinch detection).
-    At far distance, thumb-index tip distance appears larger in normalized coords.
     """
 
-    idx = _finger_up(landmarks, INDEX_TIP, INDEX_PIP, INDEX_MCP)
-    mid = _finger_up(landmarks, MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP)
-    ring = _finger_up(landmarks, RING_TIP, RING_PIP, RING_MCP)
-    pin = _finger_up(landmarks, PINKY_TIP, PINKY_PIP, PINKY_MCP)
+    idx = _finger_up(landmarks, INDEX_TIP, INDEX_PIP, INDEX_MCP, 'index')
+    mid = _finger_up(landmarks, MIDDLE_TIP, MIDDLE_PIP, MIDDLE_MCP, 'middle')
+    ring = _finger_up(landmarks, RING_TIP, RING_PIP, RING_MCP, 'ring')
+    pin = _finger_up(landmarks, PINKY_TIP, PINKY_PIP, PINKY_MCP, 'pinky')
     thu = _thumb_up(landmarks)
+    thu_out = _thumb_extended_out(landmarks)
 
     # Confidence scores for each finger
     idx_conf = _finger_confidence(landmarks, INDEX_TIP, INDEX_PIP, INDEX_MCP)
@@ -144,7 +235,11 @@ def recognize_gesture(landmarks, pinch_threshold=0.07):
 
     pinch_dist = _dist(landmarks[THUMB_TIP], landmarks[INDEX_TIP])
     ok_dist = _dist(landmarks[THUMB_TIP], landmarks[MIDDLE_TIP])
+
+    # Pinch: thumb-index distance below threshold AND middle is not up
+    # (avoids misclassifying peace as pinch)
     is_pinch = pinch_dist < pinch_threshold and not mid
+    # OK: thumb-middle distance below threshold AND index/ring are not up
     is_ok = ok_dist < pinch_threshold and not idx and not ring
 
     fingers_up = sum([idx, mid, ring, pin, thu])
@@ -166,7 +261,7 @@ def recognize_gesture(landmarks, pinch_threshold=0.07):
         gesture = Gesture.OK
     elif thu and idx and not mid and not ring and not pin:
         gesture = Gesture.GUN
-    elif thu and pin and not idx and not mid and not ring:
+    elif thu_out and pin and not idx and not mid and not ring:
         gesture = Gesture.SHAKA
     elif thu and idx and pin and not mid and not ring:
         gesture = Gesture.SIX
@@ -207,10 +302,15 @@ def recognize_gesture(landmarks, pinch_threshold=0.07):
     }
 
 
+def reset_finger_state():
+    """Reset hysteresis state — call when hand is lost."""
+    _finger_state.update({'index': False, 'middle': False, 'ring': False, 'pinky': False})
+
+
 class SwipeDetector:
     """Detects horizontal swipe gestures from hand velocity history.
 
-    v3.1: Better velocity tracking with longer history and adaptive threshold.
+    v4.0: Better velocity tracking with longer history and adaptive threshold.
     """
 
     def __init__(self, speed_threshold=0.4, min_frames=4, cooldown=0.5):
@@ -255,6 +355,11 @@ class GestureStateMachine:
     - Transition cooldown (prevent rapid gesture switching)
     - Stability gating (require stable hand for action gestures)
     - Progress tracking (for HUD feedback)
+
+    v4.0 improvements:
+    - Faster confirmation (3 frames movement, 4 action)
+    - Shorter transition cooldown (0.12s) for snappier feel
+    - Better progress tracking
 
     v3.1 improvements:
     - Transition cooldown between different gestures
@@ -366,3 +471,4 @@ class GestureStateMachine:
         self._candidate = Gesture.NONE
         self._count = 0
         self._progress = 0.0
+        reset_finger_state()

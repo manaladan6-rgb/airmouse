@@ -1,5 +1,13 @@
 """
-Configuration v3.2 — loads from ~/.airmouse/config.toml or uses defaults.
+Configuration v4.0 — Professional edition with One Euro Filter.
+
+New in v4.0:
+  - One Euro Filter (Casiez et al. 2012) for adaptive cursor filtering
+    - Adapts cutoff frequency to speed (smooth when slow, responsive when fast)
+    - Beats any fixed EMA cascade — no lag vs. jitter tradeoff
+  - Velocity prediction for sub-frame latency compensation
+  - Angle-based gesture detection with hysteresis (no flapping)
+  - Better thumb detection using joint angles
 
 New in v3.2:
   - DIRECT tracking mode (default) — cursor follows finger 1:1
@@ -45,14 +53,20 @@ class Config:
     max_accel = 50000.0         # Acceleration limiter (prevents jerks)
     stiffness_smoothing = 0.3   # Smooth stiffness transition
 
-    # Direct tracking mode physics — IMMEDIATE like a hardware mouse
-    # Single responsive EMA (α=0.55) — no cascading lag, no spring
-    direct_jitter_alpha = 0.55      # Responsive EMA (high = snappy, low = smooth)
-    direct_spring_alpha = 0.55     # Kept for compat (same as jitter_alpha)
-    direct_smooth_alpha = 0.55     # Kept for compat (same as jitter_alpha)
+    # Direct tracking mode physics — v4.0 One Euro Filter
+    # Single adaptive filter — no cascading lag, no jitter tradeoff
+    direct_jitter_alpha = 0.55      # Legacy compat (One Euro overrides)
+    direct_spring_alpha = 0.55     # Legacy compat
+    direct_smooth_alpha = 0.55     # Legacy compat
     direct_movement_threshold = 0.005  # Noise gate — ignore micro-movements
     direct_pixel_deadzone = 1.5    # Don't move cursor if output changed < 1.5 pixels
     direct_mirror_x = False       # NO mirror — tracker.py already flips the camera frame
+
+    # One Euro Filter params (v4.0) — adaptive cursor filtering
+    one_euro_mincutoff = 1.5      # Hz — cutoff at zero speed (lower = smoother at rest)
+    one_euro_beta = 1.0           # Speed coef (higher = more responsive at speed)
+    one_euro_dcutoff = 1.0        # Hz — derivative filter cutoff
+    direct_prediction_factor = 0.5  # Velocity lookahead for direct mode (0=off, 1=full)
 
     # Iron Man finger tracking
     exp_power = 0.6             # Exponential curve power (<1 = amplified small moves)
@@ -126,12 +140,18 @@ class Config:
             f"tracking_mode = \"{self.tracking_mode}\"   # \"direct\" (1:1) or \"ironman\" (exponential)",
             "",
             "[direct]",
-            f"jitter_alpha = {self.direct_jitter_alpha}     # Heavy filter (low = smooth)",
-            f"spring_alpha = {self.direct_spring_alpha}      # Slow spring (low = buttery)",
-            f"smooth_alpha = {self.direct_smooth_alpha}       # Final smoothing",
+            f"jitter_alpha = {self.direct_jitter_alpha}     # Legacy (One Euro overrides)",
+            f"spring_alpha = {self.direct_spring_alpha}      # Legacy",
+            f"smooth_alpha = {self.direct_smooth_alpha}       # Legacy",
             f"movement_threshold = {self.direct_movement_threshold}  # Noise gate — ignore tiny moves",
             f"pixel_deadzone = {self.direct_pixel_deadzone}     # Don't move if < N pixels changed",
             f"mirror_x = {str(self.direct_mirror_x).lower()}            # Mirror X (tracker already flips)",
+            "",
+            "[one_euro]  # v4.0 One Euro Filter — adaptive cursor filtering",
+            f"mincutoff = {self.one_euro_mincutoff}        # Hz — cutoff at zero speed (lower = smoother)",
+            f"beta = {self.one_euro_beta}           # Speed coef (higher = more responsive)",
+            f"dcutoff = {self.one_euro_dcutoff}        # Hz — derivative filter cutoff",
+            f"prediction_factor = {self.direct_prediction_factor}   # Velocity lookahead (0=off, 1=full)",
             "",
             "[physics]  # Ironman mode physics",
             f"mass = {self.mass}",
@@ -213,6 +233,13 @@ class Config:
                 self.direct_movement_threshold = d.get("movement_threshold", self.direct_movement_threshold)
                 self.direct_pixel_deadzone = d.get("pixel_deadzone", self.direct_pixel_deadzone)
                 self.direct_mirror_x = d.get("mirror_x", self.direct_mirror_x)
+
+            if "one_euro" in data:
+                oe = data["one_euro"]
+                self.one_euro_mincutoff = oe.get("mincutoff", self.one_euro_mincutoff)
+                self.one_euro_beta = oe.get("beta", self.one_euro_beta)
+                self.one_euro_dcutoff = oe.get("dcutoff", self.one_euro_dcutoff)
+                self.direct_prediction_factor = oe.get("prediction_factor", self.direct_prediction_factor)
 
             if "physics" in data:
                 p = data["physics"]

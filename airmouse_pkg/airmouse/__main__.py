@@ -311,12 +311,13 @@ def main():
     if is_direct:
         direct_tracker = DirectTracker(
             screen_w=screen_w, screen_h=screen_h,
-            jitter_alpha=config.direct_jitter_alpha,
-            spring_alpha=config.direct_spring_alpha,
-            smooth_alpha=config.direct_smooth_alpha,
             movement_threshold=config.direct_movement_threshold,
             pixel_deadzone=config.direct_pixel_deadzone,
             mirror_x=config.direct_mirror_x,
+            one_euro_mincutoff=config.one_euro_mincutoff,
+            one_euro_beta=config.one_euro_beta,
+            one_euro_dcutoff=config.one_euro_dcutoff,
+            prediction_factor=config.direct_prediction_factor,
         )
     else:
         # Ironman mode physics (legacy v3.1)
@@ -761,22 +762,8 @@ def main():
                     precision_mode = not precision_mode
                     audio.precision_toggle()
                     if is_direct:
-                        # Precision mode: lower the single EMA for more smoothing
-                        # and raise the noise gate to filter more micro-movements
-                        if precision_mode:
-                            direct_tracker.jitter_x = LightJitterFilter(alpha=0.35)
-                            direct_tracker.jitter_y = LightJitterFilter(alpha=0.35)
-                            direct_tracker.spring_alpha = 0.35  # For compat
-                            direct_tracker.smoother = PositionSmoother(alpha=0.35)  # For compat
-                            direct_tracker.movement_threshold = 0.008  # Higher noise gate
-                            direct_tracker.pixel_deadzone = 2.5  # Larger pixel deadzone
-                        else:
-                            direct_tracker.jitter_x = LightJitterFilter(alpha=config.direct_jitter_alpha)
-                            direct_tracker.jitter_y = LightJitterFilter(alpha=config.direct_jitter_alpha)
-                            direct_tracker.spring_alpha = config.direct_spring_alpha
-                            direct_tracker.smoother = PositionSmoother(alpha=config.direct_smooth_alpha)
-                            direct_tracker.movement_threshold = config.direct_movement_threshold
-                            direct_tracker.pixel_deadzone = config.direct_pixel_deadzone
+                        # v4.0: precision mode uses One Euro Filter swap
+                        direct_tracker.set_precision_mode(precision_mode)
                     else:
                         if precision_mode:
                             position_smoother = PositionSmoother(alpha=0.6)  # Smoother in precision mode

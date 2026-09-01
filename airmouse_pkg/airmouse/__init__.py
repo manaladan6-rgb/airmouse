@@ -1,2 +1,2 @@
-"""AirMouse — Physics-driven webcam finger mouse. Iron Man Next-Gen edition."""
-__version__ = "3.2.0"
+"""AirMouse — Physics-driven webcam finger mouse. v4.0 Professional edition."""
+__version__ = "4.0.0"
