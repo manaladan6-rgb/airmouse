@@ -1,0 +1,52 @@
+# ===== SECURITY — NEVER COMMIT THESE =====
+# Tokens, secrets, credentials
+*.token
+*.key
+*.pem
+.env
+.env.*
+secrets/
+.secrets/
+credentials.json
+
+# Config files that may contain personal settings
+config.toml
+.airmouse/
+
+# ===== BUILD ARTIFACTS =====
+# PyInstaller build
+build_pyinstaller/
+build/
+bundle/
+*.spec
+
+# Python build
+*.egg-info/
+*.egg-link
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution (keep .whl out of repo — too big)
+dist/
+*.whl
+*.tar.gz
+
+# ===== IDE / EDITOR =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ===== MEDIAPIPE MODEL =====
+# Large model file — users download on first run
+hand_landmarker.task
+*.task
+
+# ===== LOGS / CACHE =====
+*.log
+.cache/
+.pytest_cache/
