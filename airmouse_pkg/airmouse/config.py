@@ -68,6 +68,9 @@ class Config:
     one_euro_dcutoff = 1.0        # Hz — derivative filter cutoff
     direct_prediction_factor = 0.0  # OFF — prediction adds complications
 
+    # Trackpad mode (v4.2) — natural trackpad feel
+    trackpad_mode = False         # True = tap=click, hold=drag, 2-finger=scroll
+
     # Iron Man finger tracking
     exp_power = 0.6             # Exponential curve power (<1 = amplified small moves)
     exp_scale = 3.0             # Overall sensitivity scale

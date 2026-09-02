@@ -264,6 +264,11 @@ def main():
     if args.scale is not None: config.exp_scale = args.scale
     if args.mode is not None: config.tracking_mode = args.mode
 
+    # Trackpad mode — natural trackpad feel (tap=click, hold=drag, 2-finger=scroll)
+    trackpad_mode = args.trackpad or getattr(config, 'trackpad_mode', False)
+    if trackpad_mode:
+        print("  >> TRACKPAD MODE: tap=click, hold=drag, 2-finger=scroll, 3-finger=show desktop")
+
     # Multi-monitor support
     displays = enumerate_displays()
     selected_display = None
@@ -401,6 +406,16 @@ def main():
     VOLUME_COOLDOWN = 0.15   # Seconds between volume adjustments
     BRIGHTNESS_COOLDOWN = 0.3  # Brightness changes are slower
 
+    # Trackpad mode state
+    pinch_start_time = 0.0      # When pinch began (for tap vs hold detection)
+    pinch_was_active = False    # Was pinch active last frame?
+    trackpad_dragging = False   # Currently dragging (pinch held)
+    peace_start_time = 0.0      # When peace began (for tap vs scroll detection)
+    peace_was_active = False    # Was peace active last frame?
+    PINCH_TAP_MAX = 0.25        # Pinch held < 250ms = tap (click)
+    PINCH_HOLD_MIN = 0.35       # Pinch held > 350ms = hold (drag)
+    PEACE_TAP_MAX = 0.25        # Peace held < 250ms = tap (right click)
+
     # Keyboard actions (lazy-init, never crash)
     kb = None
     def _kb():
@@ -421,6 +436,10 @@ def main():
     print("  +==================================================+")
     print(f"  Screen: {screen_w}x{screen_h}  |  Audio: {'ON' if config.audio_enabled else 'OFF'}  |  Gestures: 14+2 swipe")
     print(f"  Tracking: {'DIRECT (1:1 finger-to-screen)' if is_direct else 'IRONMAN (exponential finger-relative)'}")
+    if trackpad_mode:
+        print(f"  Mode: TRACKPAD (tap=click, hold=drag, 2-finger=scroll, 3-finger=show desktop)")
+    else:
+        print(f"  Mode: CLASSIC (14 gestures)")
     if precision_mode:
         print(f"  Mode: PRECISION (power={config.precision_power}, scale={config.precision_scale})")
     _show_quick_reference()
@@ -513,90 +532,220 @@ def main():
                 # ═══ GESTURE ACTIONS ═══
                 # (works for both direct and ironman modes)
 
-                # PINCH -> Left click
-                if gesture == Gesture.PINCH and gesture_changed:
-                    if now - last_click_time > config.pinch_cooldown:
-                        mouse.left_click()
+                if trackpad_mode:
+                    # ═══ TRACKPAD MODE ═══
+                    # Natural trackpad feel — no gesture switching needed.
+                    #
+                    # PINCH (1-finger tap/hold):
+                    #   - Quick tap (< 250ms) = left click
+                    #   - Hold (> 350ms) + move = drag
+                    #   - Release after hold = drop
+                    #
+                    # PEACE (2-finger):
+                    #   - Quick tap (< 250ms) = right click
+                    #   - Hold + move up/down = scroll
+                    #
+                    # THREE (3-finger): show desktop
+                    # FIST: freeze cursor
+                    # THUMBS_UP: double click
+                    # PINKY: middle click
+                    # OK: close window
+                    # SIX: task switcher
+                    # ROCK: minimize
+                    # SHAKA: volume mode
+                    # RING: brightness mode
+
+                    # --- PINCH: tap=click, hold=drag ---
+                    if gesture == Gesture.PINCH:
+                        if not pinch_was_active:
+                            # Pinch just started — record time
+                            pinch_start_time = now
+                            pinch_was_active = True
+                        else:
+                            # Pinch held — check if we should start dragging
+                            pinch_duration = now - pinch_start_time
+                            if pinch_duration > PINCH_HOLD_MIN and not trackpad_dragging and not dragging:
+                                mouse.start_drag()
+                                trackpad_dragging = True
+                                dragging = True
+                                audio.drag_start()
+                    else:
+                        # Pinch released
+                        if pinch_was_active:
+                            pinch_duration = now - pinch_start_time
+                            if pinch_duration < PINCH_TAP_MAX:
+                                # Quick tap = left click
+                                if now - last_click_time > config.pinch_cooldown:
+                                    mouse.left_click()
+                                    audio.click()
+                                    last_click_time = now
+                            # End drag if was dragging
+                            if trackpad_dragging:
+                                mouse.stop_drag()
+                                trackpad_dragging = False
+                                dragging = False
+                            pinch_was_active = False
+
+                    # --- PEACE: tap=right click, hold+move=scroll ---
+                    if gesture == Gesture.PEACE:
+                        if not peace_was_active:
+                            peace_start_time = now
+                            peace_was_active = True
+                            prev_index_y = filtered_pos[1]
+                            scroll_accum = 0.0
+                        else:
+                            peace_duration = now - peace_start_time
+                            if peace_duration > PEACE_TAP_MAX:
+                                # Held long enough = scroll mode
+                                scrolling = True
+                                if prev_index_y is not None:
+                                    sd = (filtered_pos[1] - prev_index_y) * 80
+                                    scroll_accum += sd
+                                    if abs(scroll_accum) > 0.5:
+                                        scroll_amount = int(scroll_accum)
+                                        if scroll_amount != 0:
+                                            mouse.scroll(scroll_amount)
+                                            audio.scroll_tick()
+                                        scroll_accum = 0.0
+                                prev_index_y = filtered_pos[1]
+                            else:
+                                scrolling = False
+                    else:
+                        # Peace released
+                        if peace_was_active:
+                            peace_duration = now - peace_start_time
+                            if peace_duration < PEACE_TAP_MAX:
+                                # Quick tap = right click
+                                if now - last_click_time > config.pinch_cooldown:
+                                    mouse.right_click()
+                                    audio.right_click()
+                                    last_click_time = now
+                            peace_was_active = False
+                        scrolling = False
+
+                    # --- THREE: show desktop (3-finger swipe up on trackpad) ---
+                    if gesture == Gesture.THREE and gesture_changed:
+                        _safe_kb_action(_kb(), "show_desktop")
+                        audio.click()
+
+                    # --- FIST: freeze cursor ---
+                    if gesture == Gesture.FIST and gesture_changed:
+                        cursor_frozen = not cursor_frozen
+                        audio.freeze()
+
+                    # --- THUMBS_UP: double click ---
+                    if gesture == Gesture.THUMBS_UP and gesture_changed:
+                        mouse.double_click()
                         audio.click()
                         last_click_time = now
 
-                # PEACE -> Right click
-                elif gesture == Gesture.PEACE and gesture_changed:
-                    if now - last_click_time > config.pinch_cooldown:
-                        mouse.right_click()
+                    # --- PINKY: middle click ---
+                    if gesture == Gesture.PINKY and gesture_changed:
+                        try:
+                            mouse.mouse.click(mouse._button.middle, 1)
+                        except Exception:
+                            pass
                         audio.right_click()
                         last_click_time = now
 
-                # THUMBS_UP -> Double click
-                elif gesture == Gesture.THUMBS_UP and gesture_changed:
-                    mouse.double_click()
-                    audio.click()
-                    last_click_time = now
+                    # --- OK: close window ---
+                    if gesture == Gesture.OK and gesture_changed:
+                        _safe_kb_action(_kb(), "close_window")
+                        audio.click()
 
-                # PINKY -> Middle click
-                elif gesture == Gesture.PINKY and gesture_changed:
-                    try:
-                        mouse.mouse.click(mouse._button.middle, 1)
-                    except Exception:
-                        pass
-                    audio.right_click()
-                    last_click_time = now
+                    # --- SIX: task switcher ---
+                    if gesture == Gesture.SIX and gesture_changed:
+                        _safe_kb_action(_kb(), "switch_window")
+                        audio.click()
 
-                # FIST -> Toggle freeze
-                elif gesture == Gesture.FIST and gesture_changed:
-                    cursor_frozen = not cursor_frozen
-                    audio.freeze()
+                    # --- ROCK: minimize ---
+                    if gesture == Gesture.ROCK and gesture_changed:
+                        _safe_kb_action(_kb(), "minimize_window")
+                        audio.click()
 
-                # OK -> Close window (Alt+F4)
-                elif gesture == Gesture.OK and gesture_changed:
-                    _safe_kb_action(_kb(), "close_window")
-                    audio.click()
-
-                # SIX -> Task switcher (Alt+Tab)
-                elif gesture == Gesture.SIX and gesture_changed:
-                    _safe_kb_action(_kb(), "switch_window")
-                    audio.click()
-
-                # PALM -> Drag mode
-                if gesture == Gesture.PALM and not dragging:
-                    mouse.start_drag()
-                    dragging = True
-                    audio.drag_start()
-                elif gesture != Gesture.PALM and dragging:
-                    mouse.stop_drag()
-                    dragging = False
-
-                # THREE -> Scroll mode
-                # Scale factor 80 = sensitive enough for far-distance scrolling
-                # Accum threshold 0.5 = responsive, no lag
-                # Scroll delta is smoothed via filtered_pos (not raw)
-                if gesture == Gesture.THREE:
-                    scrolling = True
-                    if gesture_changed:
-                        prev_index_y = filtered_pos[1]
-                        scroll_accum = 0.0
-                    if prev_index_y is not None:
-                        sd = (filtered_pos[1] - prev_index_y) * 80
-                        scroll_accum += sd
-                        if abs(scroll_accum) > 0.5:
-                            scroll_amount = int(scroll_accum)
-                            if scroll_amount != 0:
-                                mouse.scroll(scroll_amount)
-                                audio.scroll_tick()
-                            scroll_accum = 0.0
-                        prev_index_y = filtered_pos[1]
                 else:
-                    scrolling = False
+                    # ═══ CLASSIC GESTURE MODE ═══
+                    # PINCH -> Left click
+                    if gesture == Gesture.PINCH and gesture_changed:
+                        if now - last_click_time > config.pinch_cooldown:
+                            mouse.left_click()
+                            audio.click()
+                            last_click_time = now
 
-                # GUN -> Show desktop (Win+D / Cmd+H)
-                if gesture == Gesture.GUN and gesture_changed:
-                    _safe_kb_action(_kb(), "show_desktop")
-                    audio.click()
+                    # PEACE -> Right click
+                    elif gesture == Gesture.PEACE and gesture_changed:
+                        if now - last_click_time > config.pinch_cooldown:
+                            mouse.right_click()
+                            audio.right_click()
+                            last_click_time = now
 
-                # ROCK -> Minimize
-                if gesture == Gesture.ROCK and gesture_changed:
-                    _safe_kb_action(_kb(), "minimize_window")
-                    audio.click()
+                    # THUMBS_UP -> Double click
+                    elif gesture == Gesture.THUMBS_UP and gesture_changed:
+                        mouse.double_click()
+                        audio.click()
+                        last_click_time = now
+
+                    # PINKY -> Middle click
+                    elif gesture == Gesture.PINKY and gesture_changed:
+                        try:
+                            mouse.mouse.click(mouse._button.middle, 1)
+                        except Exception:
+                            pass
+                        audio.right_click()
+                        last_click_time = now
+
+                    # FIST -> Toggle freeze
+                    elif gesture == Gesture.FIST and gesture_changed:
+                        cursor_frozen = not cursor_frozen
+                        audio.freeze()
+
+                    # OK -> Close window (Alt+F4)
+                    elif gesture == Gesture.OK and gesture_changed:
+                        _safe_kb_action(_kb(), "close_window")
+                        audio.click()
+
+                    # SIX -> Task switcher (Alt+Tab)
+                    elif gesture == Gesture.SIX and gesture_changed:
+                        _safe_kb_action(_kb(), "switch_window")
+                        audio.click()
+
+                    # PALM -> Drag mode
+                    if gesture == Gesture.PALM and not dragging:
+                        mouse.start_drag()
+                        dragging = True
+                        audio.drag_start()
+                    elif gesture != Gesture.PALM and dragging and not trackpad_dragging:
+                        mouse.stop_drag()
+                        dragging = False
+
+                    # THREE -> Scroll mode
+                    if gesture == Gesture.THREE:
+                        scrolling = True
+                        if gesture_changed:
+                            prev_index_y = filtered_pos[1]
+                            scroll_accum = 0.0
+                        if prev_index_y is not None:
+                            sd = (filtered_pos[1] - prev_index_y) * 80
+                            scroll_accum += sd
+                            if abs(scroll_accum) > 0.5:
+                                scroll_amount = int(scroll_accum)
+                                if scroll_amount != 0:
+                                    mouse.scroll(scroll_amount)
+                                    audio.scroll_tick()
+                                scroll_accum = 0.0
+                            prev_index_y = filtered_pos[1]
+                    else:
+                        scrolling = False
+
+                    # GUN -> Show desktop (Win+D / Cmd+H)
+                    if gesture == Gesture.GUN and gesture_changed:
+                        _safe_kb_action(_kb(), "show_desktop")
+                        audio.click()
+
+                    # ROCK -> Minimize
+                    if gesture == Gesture.ROCK and gesture_changed:
+                        _safe_kb_action(_kb(), "minimize_window")
+                        audio.click()
 
                 # SHAKA -> Volume mode (move up/down to adjust)
                 #   With debounce — don't spam volume changes
