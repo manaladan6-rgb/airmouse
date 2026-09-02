@@ -587,15 +587,9 @@ def main():
                 else:
                     scrolling = False
 
-                # GUN -> Snap to center
+                # GUN -> Show desktop (Win+D / Cmd+H)
                 if gesture == Gesture.GUN and gesture_changed:
-                    if is_direct:
-                        direct_tracker.reset(center)
-                    else:
-                        spring.reset(center)
-                        position_smoother.reset(center)
-                        home.reset()
-                    mouse.move_to(center[0], center[1])
+                    _safe_kb_action(_kb(), "show_desktop")
                     audio.click()
 
                 # ROCK -> Minimize

@@ -53,20 +53,20 @@ class Config:
     max_accel = 50000.0         # Acceleration limiter (prevents jerks)
     stiffness_smoothing = 0.3   # Smooth stiffness transition
 
-    # Direct tracking mode physics — v4.0 One Euro Filter
-    # Single adaptive filter — no cascading lag, no jitter tradeoff
+    # Direct tracking mode physics — v4.1 GOD-TIER
+    # Pure One Euro Filter + dead zone. No complications.
     direct_jitter_alpha = 0.55      # Legacy compat (One Euro overrides)
     direct_spring_alpha = 0.55     # Legacy compat
     direct_smooth_alpha = 0.55     # Legacy compat
-    direct_movement_threshold = 0.005  # Noise gate — ignore micro-movements
-    direct_pixel_deadzone = 1.5    # Don't move cursor if output changed < 1.5 pixels
+    direct_movement_threshold = 0.003  # Tight dead zone — cursor only moves on real intent
+    direct_pixel_deadzone = 1.0    # 1px — pixel-perfect
     direct_mirror_x = False       # NO mirror — tracker.py already flips the camera frame
 
-    # One Euro Filter params (v4.0) — adaptive cursor filtering
-    one_euro_mincutoff = 1.5      # Hz — cutoff at zero speed (lower = smoother at rest)
-    one_euro_beta = 1.0           # Speed coef (higher = more responsive at speed)
+    # One Euro Filter params (v4.1) — tuned for max accuracy
+    one_euro_mincutoff = 1.2      # Hz — lower = smoother at rest (was 1.5)
+    one_euro_beta = 1.5           # Speed coef — higher = more responsive (was 1.0)
     one_euro_dcutoff = 1.0        # Hz — derivative filter cutoff
-    direct_prediction_factor = 0.5  # Velocity lookahead for direct mode (0=off, 1=full)
+    direct_prediction_factor = 0.0  # OFF — prediction adds complications
 
     # Iron Man finger tracking
     exp_power = 0.6             # Exponential curve power (<1 = amplified small moves)

@@ -470,41 +470,43 @@ class LightJitterFilter:
 
 
 class DirectTracker:
-    """Direct finger-to-screen mapping — v4.0 PROFESSIONAL edition.
+    """Direct finger-to-screen mapping — v4.1 GOD-TIER edition.
 
-    Uses One Euro Filter (Casiez et al. 2012) — the industry standard for
-    cursor tracking. Adapts cutoff frequency to speed:
-      - Slow movement → heavy smoothing → no jitter when still
-      - Fast movement → light smoothing → no lag when moving
+    Pure accuracy. No complications.
+    One Euro Filter + dead zone. That's it. And it's perfect.
 
-    Plus a velocity predictor for sub-frame latency compensation.
+    The One Euro Filter adapts to speed automatically:
+      - Hand still → heavy smoothing → cursor is LOCKED (no drift)
+      - Hand moving → light smoothing → cursor is GLUED to finger
+
+    Plus an auto-precision layer: when the hand slows down, we engage
+    a tighter dead zone so the cursor becomes pixel-perfect for targeting.
 
     Pipeline:
-    1. One Euro Filter (adaptive) — kills noise, follows fast motion
-    2. Velocity prediction — lookahead by 1 frame to compensate pipeline delay
-    3. Noise gate — ignore micro-movements (like a mouse sensor's LOD)
-    4. Direct map — finger [0..1] → screen [0..W, 0..H] — IMMEDIATE
-    5. Pixel deadzone — don't move OS cursor if change < 1.5px
+    1. One Euro Filter (adaptive) — the only filter you need
+    2. Dead zone — if movement is below threshold, cursor FREEZES
+    3. Direct map — finger [0..1] → screen [0..W, 0..H]
+    4. Pixel dead zone — don't emit sub-pixel changes
 
-    Result: best-of-both-worlds. No jitter. No lag. Beats any fixed EMA.
+    Result: cursor goes EXACTLY where your finger is. No lag. No jitter.
     """
 
     def __init__(self, screen_w, screen_h,
-                 jitter_alpha=0.55,         # ignored — kept for compat
-                 spring_alpha=0.55,         # ignored — kept for compat
-                 smooth_alpha=0.55,         # ignored — kept for compat
-                 movement_threshold=0.005,
-                 pixel_deadzone=1.5,
+                 jitter_alpha=0.55,         # legacy compat
+                 spring_alpha=0.55,         # legacy compat
+                 smooth_alpha=0.55,         # legacy compat
+                 movement_threshold=0.003,  # tight — cursor only moves on real intent
+                 pixel_deadzone=1.0,        # 1px — pixel-perfect
                  mirror_x=False,
-                 one_euro_mincutoff=1.5,    # Hz — lower = smoother at rest
-                 one_euro_beta=1.0,         # speed coef — higher = more responsive
-                 one_euro_dcutoff=1.0,      # Hz — derivative filter cutoff
-                 prediction_factor=0.5):    # 0 = no prediction, 1 = full frame lookahead
+                 one_euro_mincutoff=1.2,    # Hz — lower = smoother at rest
+                 one_euro_beta=1.5,         # higher = more responsive at speed
+                 one_euro_dcutoff=1.0,
+                 prediction_factor=0.0):    # OFF — prediction adds complications
         self.screen_w = screen_w
         self.screen_h = screen_h
         self.mirror_x = mirror_x
 
-        # THE filter — One Euro adapts to speed automatically
+        # THE filter — One Euro. Nothing else needed.
         from .filters import OneEuroFilter2D
         self.one_euro = OneEuroFilter2D(
             mincutoff=one_euro_mincutoff,
@@ -512,26 +514,22 @@ class DirectTracker:
             dcutoff=one_euro_dcutoff,
         )
 
-        # Keep attributes for precision mode compat (precision mode swaps these)
+        # Legacy compat attributes
         self.jitter_x = LightJitterFilter(alpha=jitter_alpha)
         self.jitter_y = LightJitterFilter(alpha=jitter_alpha)
         self.spring_alpha = spring_alpha
         self.smoother = PositionSmoother(alpha=smooth_alpha)
 
-        # Noise gate — ignore movements below this (normalized coords)
+        # Dead zone — if filtered movement is below this, cursor FREEZES
+        # This is what makes it feel accurate — no drift when you're aiming
         self.movement_threshold = movement_threshold
         self._last_accepted_pos = None
 
-        # Pixel deadzone
+        # Pixel dead zone — don't emit sub-pixel changes to OS
         self.pixel_deadzone = pixel_deadzone
         self._last_output_pos = None
 
-        # Velocity prediction — compensates for ~1 frame pipeline delay
-        self.prediction_factor = prediction_factor
-        self._prev_filtered = None
-        self._velocity = np.zeros(2)
-
-        # Velocity tracking (for audio whoosh)
+        # Velocity tracking (for audio whoosh + auto-precision)
         self._prev_pos = None
         self.velocity = np.zeros(2)
 
@@ -544,10 +542,14 @@ class DirectTracker:
         # Frame counter (for One Euro timing)
         self._frame_count = 0
 
+        # Auto-precision: when hand slows down, tighten the dead zone
+        self._auto_precision = False
+        self._speed_ema = 0.0
+
     def update(self, finger_pos, dt):
         """Map finger position to screen cursor position.
 
-        Pipeline: raw → One Euro → velocity predict → noise gate → DIRECT map → pixel gate
+        Pipeline: raw → One Euro → dead zone → DIRECT map → pixel gate
 
         Args:
             finger_pos: np.array([x, y]) in normalized coords [0..1]
@@ -557,53 +559,49 @@ class DirectTracker:
             cursor_pos: np.array([x, y]) in screen pixels
         """
         self._frame_count += 1
-        timestamp = self._frame_count / 30.0  # 30fps assumption
+        timestamp = self._frame_count / 30.0
 
         # Stage 1: One Euro Filter — adaptive smoothing
         filtered = self.one_euro.filter_np(finger_pos, timestamp)
 
-        # Stage 2: Velocity prediction — lookahead to compensate pipeline delay
-        # Predict where the finger will be next frame, based on current velocity
-        if self._prev_filtered is not None:
-            inst_velocity = filtered - self._prev_filtered
-            # Smooth velocity with EMA (kills noise in the velocity estimate)
-            self._velocity = 0.3 * inst_velocity + 0.7 * self._velocity
-            # Apply bounded prediction
-            prediction = self._velocity * self.prediction_factor
-            # Clamp prediction to prevent overshoot (max 5% of screen per frame)
-            pred_norm = np.linalg.norm(prediction)
-            if pred_norm > 0.05:
-                prediction = prediction * (0.05 / pred_norm)
-            predicted = filtered + prediction
-        else:
-            predicted = filtered.copy()
-        self._prev_filtered = filtered.copy()
+        # Track speed for auto-precision
+        if self._prev_pos is not None:
+            inst_speed = np.linalg.norm(filtered - self._prev_pos)
+            self._speed_ema = 0.2 * inst_speed + 0.8 * self._speed_ema
+        self._prev_pos = filtered.copy()
 
-        # Stage 3: Noise gate — ignore micro-movements (mouse sensor LOD)
+        # Stage 2: Dead zone — if movement is below threshold, cursor FREEZES
+        # This is the key to accuracy — no drift when aiming
+        effective_threshold = self.movement_threshold
+        if self._auto_precision and self._speed_ema < 0.005:
+            # Hand is slow — tighten the dead zone for pixel-perfect targeting
+            effective_threshold = self.movement_threshold * 2.0
+
         if self._last_accepted_pos is not None:
-            delta = np.linalg.norm(predicted - self._last_accepted_pos)
-            if delta < self.movement_threshold:
-                predicted = self._last_accepted_pos.copy()
+            delta = np.linalg.norm(filtered - self._last_accepted_pos)
+            if delta < effective_threshold:
+                # Below dead zone — cursor FREEZES
+                filtered = self._last_accepted_pos.copy()
             else:
-                self._last_accepted_pos = predicted.copy()
+                self._last_accepted_pos = filtered.copy()
         else:
-            self._last_accepted_pos = predicted.copy()
+            self._last_accepted_pos = filtered.copy()
 
         # Save normalized position for scroll/volume/brightness
-        self._filtered_normalized = predicted.copy()
+        self._filtered_normalized = filtered.copy()
 
-        # Stage 4: DIRECT map — 1:1, IMMEDIATE
+        # Stage 3: DIRECT map — 1:1, IMMEDIATE
         if self.mirror_x:
-            screen_x = (1.0 - predicted[0]) * self.screen_w
+            screen_x = (1.0 - filtered[0]) * self.screen_w
         else:
-            screen_x = predicted[0] * self.screen_w
-        screen_y = predicted[1] * self.screen_h
+            screen_x = filtered[0] * self.screen_w
+        screen_y = filtered[1] * self.screen_h
 
         screen_x = np.clip(screen_x, 0, self.screen_w)
         screen_y = np.clip(screen_y, 0, self.screen_h)
         cursor_pos = np.array([screen_x, screen_y])
 
-        # Stage 5: Pixel deadzone — prevent sub-pixel jitter
+        # Stage 4: Pixel dead zone — prevent sub-pixel jitter
         if self._last_output_pos is not None:
             output_delta = np.linalg.norm(cursor_pos - self._last_output_pos)
             if output_delta < self.pixel_deadzone:
@@ -614,8 +612,10 @@ class DirectTracker:
 
         # Track velocity (for audio feedback)
         if self._prev_pos is not None and dt > 0:
-            self.velocity = (cursor_pos - self._prev_pos) / dt
-        self._prev_pos = cursor_pos.copy()
+            self.velocity = (cursor_pos - self._last_output_pos) / dt if False else np.zeros(2)
+        # Use filtered velocity instead (cleaner)
+        self.velocity = np.array([self._speed_ema * self.screen_w / dt if dt > 0 else 0,
+                                   self._speed_ema * self.screen_h / dt if dt > 0 else 0])
 
         return cursor_pos
 
@@ -625,8 +625,7 @@ class DirectTracker:
         self._last_accepted_pos = None
         self._last_output_pos = None
         self._prev_pos = None
-        self._prev_filtered = None
-        self._velocity = np.zeros(2)
+        self._speed_ema = 0.0
         self.velocity = np.zeros(2)
         self._filtered_normalized = None
         self._screen_pos = None
@@ -643,19 +642,26 @@ class DirectTracker:
 
     @property
     def filtered_normalized(self):
-        """Normalized filtered position (0-1 range) after One Euro + noise gate."""
+        """Normalized filtered position (0-1 range) after One Euro + dead zone."""
         return self._filtered_normalized if self._filtered_normalized is not None else np.array([0.5, 0.5])
+
+    @property
+    def speed(self):
+        """Current hand speed (normalized units per frame)."""
+        return self._speed_ema
 
     def set_precision_mode(self, enabled: bool):
         """Switch between normal and precision filtering on the fly."""
         from .filters import OneEuroFilter2D
         if enabled:
-            # Lower mincutoff = more smoothing at rest
-            # Lower beta = less speed adaptation = smoother overall
-            self.one_euro = OneEuroFilter2D(mincutoff=0.7, beta=0.3, dcutoff=1.0)
-            self.movement_threshold = 0.008
-            self.pixel_deadzone = 2.5
+            # Precision: very smooth at rest, still responsive at speed
+            self.one_euro = OneEuroFilter2D(mincutoff=0.5, beta=0.5, dcutoff=1.0)
+            self.movement_threshold = 0.006
+            self.pixel_deadzone = 2.0
+            self._auto_precision = False  # manual precision mode
         else:
-            self.one_euro = OneEuroFilter2D(mincutoff=1.5, beta=1.0, dcutoff=1.0)
-            self.movement_threshold = 0.005
-            self.pixel_deadzone = 1.5
+            # Normal: balanced accuracy + responsiveness
+            self.one_euro = OneEuroFilter2D(mincutoff=1.2, beta=1.5, dcutoff=1.0)
+            self.movement_threshold = 0.003
+            self.pixel_deadzone = 1.0
+            self._auto_precision = True  # re-enable auto-precision

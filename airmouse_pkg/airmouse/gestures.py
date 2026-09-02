@@ -73,7 +73,7 @@ GESTURE_INFO = {
     Gesture.THUMBS_UP:  {"emoji": "6", "name": "Thumbs Up","desc": "Only thumb up, fingers closed",         "action": "Double click (open items)"},
     Gesture.THREE:      {"emoji": "7", "name": "Three",   "desc": "Index + middle + ring fingers up",     "action": "Scroll mode (move up/down)"},
     Gesture.PINKY:      {"emoji": "8", "name": "Pinky",    "desc": "Only pinky finger up",                  "action": "Middle click (close tabs)"},
-    Gesture.GUN:        {"emoji": "9", "name": "Gun",      "desc": "Thumb up + index pointing (L-shape)",   "action": "Snap cursor to screen center"},
+    Gesture.GUN:        {"emoji": "9", "name": "Gun",      "desc": "Thumb up + index pointing (L-shape)",   "action": "Show desktop / Minimize all"},
     Gesture.ROCK:       {"emoji": "10","name": "Rock",     "desc": "Index + pinky up, others down",         "action": "Minimize window (Win+Down)"},
     Gesture.SHAKA:      {"emoji": "11","name": "Shaka",    "desc": "Thumb + pinky out (hang loose)",        "action": "Volume mode (up/down)"},
     Gesture.OK:         {"emoji": "12","name": "OK",       "desc": "Thumb + middle touch (OK sign)",        "action": "Close window (Alt+F4)"},
