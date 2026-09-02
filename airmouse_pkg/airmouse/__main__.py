@@ -216,6 +216,7 @@ def main():
     parser.add_argument("--precision", action="store_true", help="Start in precision mode")
     parser.add_argument("--mode", type=str, choices=["direct", "ironman"], default=None,
                         help="Tracking mode: direct (1:1) or ironman (exponential)")
+    parser.add_argument("--trackpad", action="store_true", help="Trackpad mode: tap=click, hold=drag, 2-finger=scroll")
     parser.add_argument("--monitor", type=int, default=None, help="Monitor index (0=primary)")
     parser.add_argument("--list-monitors", action="store_true", help="List monitors and exit")
     parser.add_argument("--autostart", type=str, choices=["on", "off"], default=None, help="Enable/disable auto-start")
