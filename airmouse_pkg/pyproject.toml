@@ -4,22 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "airmouse"
-version = "4.2.0"
-description = "AirMouse v4.2 Trackpad Edition — 14-gesture physics-driven finger mouse with One Euro Filter, trackpad mode (tap=click, hold=drag, 2-finger=scroll), angle-based gesture detection with hysteresis, auto-precision mode, system control gestures, and pixel-perfect accuracy"
+version = "5.0.0"
+description = "AirMouse v5.0 Voice + Kalman Edition — 14-gesture physics-driven finger mouse with hybrid One Euro + Kalman fusion filtering, voice control (30 commands, turbo sensitivity), pinch-to-zoom, adaptive calibration that learns your hand, macro recorder/replay, angle-based gesture detection with hysteresis, and single-file simple mode"
 license = "MIT"
 requires-python = ">=3.9"
 authors = [{name = "AirMouse"}]
-keywords = ["airmouse", "hand-tracking", "gesture", "mouse", "physics", "mediapipe", "iron-man"]
+keywords = ["airmouse", "hand-tracking", "gesture", "mouse", "physics", "mediapipe", "voice-control", "kalman-filter", "iron-man"]
 
 dependencies = [
-    "mediapipe>=0.10.9",
+    "mediapipe>=0.10.9,<1.0",
     "opencv-python>=4.8.0",
     "pynput>=1.7.6",
-    "numpy>=1.24.0",
+    "numpy>=1.24.0,<2.3",
 ]
 
 [project.optional-dependencies]
 sound = ["sounddevice>=0.5.0"]
+voice = ["SpeechRecognition>=3.10.0", "pyaudio>=0.2.13"]
+tts = ["pyttsx3>=2.90"]
 
 [project.scripts]
 airmouse = "airmouse.__main__:main"

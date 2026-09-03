@@ -52,3 +52,22 @@ Stage Summary:
 - Settings GUI: full tkinter window with sliders, toggles, monitor selector, auto-start
 - Bundle prep: PyInstaller spec, launcher, build.py ready
 - Wheel: /home/z/my-project/download/airmouse-3.2.0-py3-none-any.whl
+
+---
+Task ID: 5
+Agent: main (coordinator)
+Task: AirMouse v5.0.0 — VOICE + KALMAN Edition
+
+Work Log:
+- voice_control.py NEW: 30 voice commands, fuzzy matching (difflib), 3 sensitivity profiles (normal/high/turbo — turbo = MAD nonstop listening), background daemon thread with mic-error backoff, thread-safe command queue, optional TTS, graceful degradation without SpeechRecognition
+- filters.py: KalmanFilter1D (constant-velocity, CWNA process model, Joseph-form update), KalmanFilter2D, HybridOneEuroKalman (speed-adaptive blend driven by the Kalman velocity channel; Monte-Carlo tuned: q=1.0, speed_ref=0.15, w_k 0.85->0.15). Verified: still-hand output std 0.009 (2.2x jitter lock), zero perceptible lag at speed, smoother than raw on moving signals
+- calibration.py NEW: AdaptiveCalibration — learns reach box (decaying min/max), tremor, speed; remaps to full screen with soft margin; suggested_filter_params() live-tunes One Euro; persists to ~/.airmouse/calibration.json
+- macros.py NEW: MacroRecorder/MacroPlayer — timestamped click/scroll/zoom/drag events, JSON persistence in ~/.airmouse/macros/, sync + async replay with overlap guard
+- zoom.py NEW: PinchZoomController (engage hysteresis 0.30s, deadzone, EMA, remainder-keeping accumulator) + zoom_scroll (Ctrl+wheel via pynput, safe fallback)
+- airmouse_simple.py NEW (repo root): single-file simple mode — embedded OneEuro+Kalman hybrid, adaptive calibration, pinch-zoom, gestures, macros, optional voice; heavy imports inside main() so pure logic is testable headless
+- __main__.py: all wired — --voice/--voice-mode/--mic/--no-kalman/--no-zoom/--no-calibration/--calibrate/--record/--play/--macros; voice poll every frame; adaptive remap + one-shot filter tune; pinch-zoom in classic mode; macro hooks on every action; HUD voice caption + VOICE/KALMAN/ZOOM/REC/CAL badges; hotkeys [v] [k] [z] [m]; state persisted on exit
+- config.py: [voice] [kalman] [zoom] [calibration] TOML sections; pyproject 5.0.0 (mediapipe pinned <1.0); README rewritten
+- Tests: py_compile + pyflakes all green; unit suites for filters/calibration/macros/zoom/voice-matcher all green; full boot smoke test green; simulated-hand integration test through the real main loop green (adaptive tune applied, 8 zoom ticks, macro captured 6 events, replay OK, --macros OK); airmouse_simple.py boot green
+
+Stage Summary:
+- v5.0.0: 4 new modules + 1 single-file mode + full wiring; all tests green; wheel airmouse-5.0.0-py3-none-any.whl built

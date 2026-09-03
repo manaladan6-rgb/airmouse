@@ -1,5 +1,12 @@
 """
-Configuration v4.0 — Professional edition with One Euro Filter.
+Configuration v5.0 — Voice + Kalman hybrid + Zoom + Calibration + Macros.
+
+New in v5.0:
+  - Voice control (speech recognition + 30 commands, normal/high/turbo sensitivity)
+  - Hybrid One Euro + Kalman fusion cursor filter (adaptive speed blend)
+  - Pinch-to-zoom gesture (hold pinch, move hand up/down = Ctrl+wheel zoom)
+  - Adaptive calibration (learns the user's reach box + tremor + speed)
+  - Macro recorder (record/replay gesture-action sequences)
 
 New in v4.0:
   - One Euro Filter (Casiez et al. 2012) for adaptive cursor filtering
@@ -131,6 +138,29 @@ class Config:
     show_camera = True
     show_hud = True
 
+    # ═══ v5.0 — VOICE CONTROL ═══
+    voice_enabled = False            # requires: pip install SpeechRecognition pyaudio
+    voice_sensitivity = "high"       # "normal" | "high" | "turbo" (turbo = MAD mode)
+    voice_mic_index = -1             # -1 = system default microphone
+    voice_speak = True               # spoken confirmations (pyttsx3, optional)
+
+    # ═══ v5.0 — HYBRID ONE EURO + KALMAN FILTER ═══
+    kalman_enabled = True            # False = pure One Euro (v4.1 behavior)
+    kalman_fusion = "adaptive"       # "adaptive" | "kalman" | "one_euro" | "average"
+    kalman_process_noise = 1.0       # higher = snappier Kalman arm
+    kalman_measurement_noise = 0.05  # lower = trust camera more
+    kalman_speed_ref = 0.15          # normalized units/s crossover to One Euro
+
+    # ═══ v5.0 — PINCH-TO-ZOOM ═══
+    zoom_enabled = True              # hold pinch, move hand up/down = zoom
+    zoom_engage_hold = 0.30          # seconds of pinch before zoom engages
+    zoom_gain = 1.0                  # zoom speed multiplier
+    zoom_max_ticks = 6               # max wheel ticks per frame
+
+    # ═══ v5.0 — ADAPTIVE CALIBRATION ═══
+    adaptive_calibration = True      # learns your reach box + tremor + speed
+    calibration_save_every = 300     # autosave interval (frames)
+
     def save_defaults(self):
         """Save current config as TOML (creates template for user editing)."""
         if tomllib is None:
@@ -213,6 +243,33 @@ class Config:
             "[ui]",
             f"show_camera = {str(self.show_camera).lower()}",
             f"show_hud = {str(self.show_hud).lower()}",
+            "",
+            "# ═══ v5.0 — Voice control (pip install SpeechRecognition pyaudio) ═══",
+            "[voice]",
+            f"enabled = {str(self.voice_enabled).lower()}",
+            f"sensitivity = \"{self.voice_sensitivity}\"   # normal | high | turbo (turbo = MAD)",
+            f"mic_index = {self.voice_mic_index}             # -1 = default microphone",
+            f"speak = {str(self.voice_speak).lower()}               # spoken confirmations",
+            "",
+            "# ═══ v5.0 — Hybrid One Euro + Kalman fusion filter ═══",
+            "[kalman]",
+            f"enabled = {str(self.kalman_enabled).lower()}              # False = pure One Euro (v4.1 feel)",
+            f"fusion = \"{self.kalman_fusion}\"      # adaptive | kalman | one_euro | average",
+            f"process_noise = {self.kalman_process_noise}        # higher = snappier Kalman arm",
+            f"measurement_noise = {self.kalman_measurement_noise}   # lower = trust camera more",
+            f"speed_ref = {self.kalman_speed_ref}        # units/s crossover to One Euro",
+            "",
+            "# ═══ v5.0 — Pinch-to-zoom (hold pinch, move up/down) ═══",
+            "[zoom]",
+            f"enabled = {str(self.zoom_enabled).lower()}",
+            f"engage_hold = {self.zoom_engage_hold}          # seconds of pinch before zoom engages",
+            f"gain = {self.zoom_gain}              # zoom speed multiplier",
+            f"max_ticks = {self.zoom_max_ticks}           # max wheel ticks per frame",
+            "",
+            "# ═══ v5.0 — Adaptive calibration (learns your hand) ═══",
+            "[calibration]",
+            f"adaptive_enabled = {str(self.adaptive_calibration).lower()}",
+            f"save_every = {self.calibration_save_every}          # autosave interval (frames)",
         ]
         with open(CONFIG_PATH, "w") as f:
             f.write("\n".join(lines) + "\n")
@@ -311,6 +368,34 @@ class Config:
             if "ui" in data:
                 self.show_camera = data["ui"].get("show_camera", self.show_camera)
                 self.show_hud = data["ui"].get("show_hud", self.show_hud)
+
+            # ═══ v5.0 sections ═══
+            if "voice" in data:
+                v = data["voice"]
+                self.voice_enabled = v.get("enabled", self.voice_enabled)
+                self.voice_sensitivity = v.get("sensitivity", self.voice_sensitivity)
+                self.voice_mic_index = v.get("mic_index", self.voice_mic_index)
+                self.voice_speak = v.get("speak", self.voice_speak)
+
+            if "kalman" in data:
+                k = data["kalman"]
+                self.kalman_enabled = k.get("enabled", self.kalman_enabled)
+                self.kalman_fusion = k.get("fusion", self.kalman_fusion)
+                self.kalman_process_noise = k.get("process_noise", self.kalman_process_noise)
+                self.kalman_measurement_noise = k.get("measurement_noise", self.kalman_measurement_noise)
+                self.kalman_speed_ref = k.get("speed_ref", self.kalman_speed_ref)
+
+            if "zoom" in data:
+                z = data["zoom"]
+                self.zoom_enabled = z.get("enabled", self.zoom_enabled)
+                self.zoom_engage_hold = z.get("engage_hold", self.zoom_engage_hold)
+                self.zoom_gain = z.get("gain", self.zoom_gain)
+                self.zoom_max_ticks = z.get("max_ticks", self.zoom_max_ticks)
+
+            if "calibration" in data:
+                cb = data["calibration"]
+                self.adaptive_calibration = cb.get("adaptive_enabled", self.adaptive_calibration)
+                self.calibration_save_every = cb.get("save_every", self.calibration_save_every)
 
         except Exception as e:
             print(f"  Warning: Config load error: {e}, using defaults")

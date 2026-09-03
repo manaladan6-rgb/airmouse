@@ -1,5 +1,5 @@
 """
-AirMouse v3.2.0 — Direct Tracking Edition
+AirMouse v5.0.0 — VOICE + KALMAN Edition
 
     airmouse              # Start with tutorial (first run)
     airmouse --skip       # Skip tutorial
@@ -8,7 +8,7 @@ AirMouse v3.2.0 — Direct Tracking Edition
     airmouse --mode ironman  # Exponential finger-relative (legacy, stylized)
 
 14 Gestures:
-    Point   (1)  -> Move cursor          Pinch  (2)  -> Left click
+    Point   (1)  -> Move cursor          Pinch  (2)  -> Left click / HOLD = ZOOM
     Peace   (3)  -> Right click          Palm   (4)  -> Drag mode
     Fist    (5)  -> Freeze cursor        Thumb  (6)  -> Double click
     Three   (7)  -> Scroll mode          Pinky  (8)  -> Middle click
@@ -19,9 +19,22 @@ AirMouse v3.2.0 — Direct Tracking Edition
 Swipe:
     Left  -> Browser back    Right -> Browser forward
 
+v5.0 POWER FEATURES:
+    --voice            Voice commands (30 phrases, works while you gesture)
+    --voice-mode turbo MAD voice mode: nonstop listening, fuzzy matching
+    --no-kalman        Disable the hybrid One Euro + Kalman fusion filter
+    --no-zoom          Disable pinch-to-zoom (hold pinch + move = Ctrl+wheel)
+    --no-calibration   Disable adaptive calibration (learns your reach)
+    --calibrate        Run a guided 8s calibration sweep on startup
+    --record NAME      Record a macro this session (clicks/scrolls/zooms)
+    --play NAME        Replay a macro on startup
+    --macros           List saved macros and exit
+
 Keyboard shortcuts (in camera window):
     [q] quit   [d] debug   [r] recalibrate   [s] sound toggle
     [p] precision mode   [t] tutorial   [h] help
+    [v] voice on/off   [k] Kalman hybrid on/off   [z] zoom on/off
+    [m] macro record on/off
 """
 
 import os
@@ -45,6 +58,10 @@ from .audio import AudioFeedback
 from .config import Config, CONFIG_PATH
 from .tutorial import run_tutorial
 from .display import enumerate_displays, get_primary_display
+from .voice_control import VoiceCommandEngine, VoiceCommand, SENSITIVITY_PROFILES
+from .calibration import AdaptiveCalibration, get_default_calibration
+from .macros import MacroRecorder, MacroPlayer, list_macros, MACRO_DIR
+from .zoom import PinchZoomController, zoom_scroll
 
 
 def _get_screen_size():
@@ -70,7 +87,9 @@ def _get_screen_size():
 
 def _draw_hud(frame, gesture_result, spring, fps, config,
               frozen, dragging, scrolling, volume_mode, brightness_mode,
-              precision_mode, gsm_progress, gesture_confidence):
+              precision_mode, gsm_progress, gesture_confidence,
+              voice_caption=None, voice_active=False, zoom_active=False,
+              recording=False, kalman_on=False, cal_ready=False):
     """Draw Iron Man HUD overlay with v3.1 enhancements."""
     if frame is None:
         return
@@ -129,6 +148,16 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
         badges.append(("BRIGHT", (255, 200, 0)))
     if precision_mode:
         badges.append(("PRECISE", (200, 200, 255)))
+    if zoom_active:
+        badges.append(("ZOOM", (255, 100, 255)))
+    if recording:
+        badges.append(("REC", (0, 0, 255)))
+    if voice_active:
+        badges.append(("VOICE", (0, 255, 180)))
+    if kalman_on:
+        badges.append(("KALMAN", (180, 255, 0)))
+    if cal_ready:
+        badges.append(("CAL", (0, 255, 100)))
     if spring is None:
         badges.append(("DIRECT", (0, 255, 255)))
     bx = 10
@@ -151,6 +180,14 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
         if t:
             cv2.putText(frame, t, (w - 120, h - 55 + i * 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1, cv2.LINE_AA)
+
+    # Voice caption (top-center) — last heard phrase + matched command
+    if voice_caption:
+        (cw, _), _ = cv2.getTextSize(voice_caption, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
+        vx = max(4, (w - cw) // 2)
+        cv2.rectangle(frame, (vx - 6, 8), (vx + cw + 8, 32), (20, 20, 20), -1)
+        cv2.putText(frame, voice_caption, (vx, 26),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 180), 1, cv2.LINE_AA)
 
     # Draw tracked finger landmarks
     lm = gesture_result.get("landmarks")
@@ -188,6 +225,33 @@ def _show_quick_reference():
     print("  |  ->  Swipe Right  Fast right motion             -> Browser Forward    |")
     print("  +------------------------------------------------------+")
     print("  Keyboard: [q]uit [d]ebug [r]ecalibrate [s]ound [p]recision [t]utorial")
+    print("            [v]oice [k]alman [z]oom [m]acro-record [h]elp")
+
+
+def _macro_executor(event, params, mouse, kb=None):
+    """v5.0: execute a single macro event — used by macro replay."""
+    try:
+        if event == "click":
+            mouse.left_click()
+        elif event == "right_click":
+            mouse.right_click()
+        elif event == "double_click":
+            mouse.double_click()
+        elif event == "middle_click":
+            if mouse.mouse is not None and mouse._button is not None:
+                mouse.mouse.click(mouse._button.middle, 1)
+        elif event == "scroll":
+            mouse.scroll(int(params.get("amount", 0)))
+        elif event == "zoom":
+            zoom_scroll(int(params.get("ticks", 0)))
+        elif event == "move" and kb is not None:
+            pass  # absolute moves are not replayed (screen-dependent)
+        elif event == "drag_start":
+            mouse.start_drag()
+        elif event == "drag_stop":
+            mouse.stop_drag()
+    except Exception:
+        pass
 
 
 def _safe_kb_action(kb_instance, action_name):
@@ -204,7 +268,7 @@ def _safe_kb_action(kb_instance, action_name):
 def main():
     parser = argparse.ArgumentParser(
         prog="airmouse",
-        description="AirMouse v3.1.0 - Iron Man Next-Gen Edition",
+        description="AirMouse v5.0.0 - Voice + Kalman Edition",
     )
     parser.add_argument("--skip", action="store_true", help="Skip tutorial")
     parser.add_argument("--tutorial", action="store_true", help="Force tutorial")
@@ -221,12 +285,36 @@ def main():
     parser.add_argument("--list-monitors", action="store_true", help="List monitors and exit")
     parser.add_argument("--autostart", type=str, choices=["on", "off"], default=None, help="Enable/disable auto-start")
     parser.add_argument("--settings", action="store_true", help="Open settings GUI")
+    # ═══ v5.0 flags ═══
+    parser.add_argument("--voice", action="store_true", help="Enable voice commands (SpeechRecognition + pyaudio)")
+    parser.add_argument("--voice-mode", type=str, choices=["normal", "high", "turbo"], default=None,
+                        help="Voice sensitivity: normal | high | turbo (turbo = MAD nonstop listening)")
+    parser.add_argument("--mic", type=int, default=None, help="Microphone index (default: system default)")
+    parser.add_argument("--no-kalman", action="store_true", help="Disable hybrid One Euro + Kalman filter (pure One Euro)")
+    parser.add_argument("--no-zoom", action="store_true", help="Disable pinch-to-zoom gesture")
+    parser.add_argument("--no-calibration", action="store_true", help="Disable adaptive calibration")
+    parser.add_argument("--calibrate", action="store_true", help="Run guided 8s calibration sweep on startup")
+    parser.add_argument("--record", type=str, default=None, metavar="NAME", help="Record a macro this session")
+    parser.add_argument("--play", type=str, default=None, metavar="NAME", help="Replay macro NAME on startup")
+    parser.add_argument("--macros", action="store_true", help="List saved macros and exit")
     args = parser.parse_args()
 
     # Handle --settings
     if args.settings:
         from .settings_gui import show_settings
         show_settings()
+        return
+
+    # Handle --macros (list saved macros)
+    if args.macros:
+        names = list_macros()
+        if names:
+            print(f"  Saved macros ({MACRO_DIR}):")
+            for n in names:
+                print(f"    - {n}")
+        else:
+            print(f"  No macros saved yet ({MACRO_DIR}).")
+            print("  Record one:  airmouse --record my_macro")
         return
 
     # Handle --list-monitors
@@ -263,6 +351,12 @@ def main():
     if args.power is not None: config.exp_power = args.power
     if args.scale is not None: config.exp_scale = args.scale
     if args.mode is not None: config.tracking_mode = args.mode
+    # v5.0 flag overrides
+    if args.voice: config.voice_enabled = True
+    if args.voice_mode is not None: config.voice_sensitivity = args.voice_mode
+    if args.no_kalman: config.kalman_enabled = False
+    if args.no_zoom: config.zoom_enabled = False
+    if args.no_calibration: config.adaptive_calibration = False
 
     # Trackpad mode — natural trackpad feel (tap=click, hold=drag, 2-finger=scroll)
     trackpad_mode = args.trackpad or getattr(config, 'trackpad_mode', False)
@@ -324,6 +418,12 @@ def main():
             one_euro_beta=config.one_euro_beta,
             one_euro_dcutoff=config.one_euro_dcutoff,
             prediction_factor=config.direct_prediction_factor,
+            # v5.0 — hybrid One Euro + Kalman fusion
+            use_hybrid=config.kalman_enabled,
+            hybrid_process_noise=config.kalman_process_noise,
+            hybrid_measurement_noise=config.kalman_measurement_noise,
+            hybrid_fusion=config.kalman_fusion,
+            hybrid_speed_ref=config.kalman_speed_ref,
         )
     else:
         # Ironman mode physics (legacy v3.1)
@@ -372,6 +472,73 @@ def main():
         transition_cooldown=config.gesture_transition_cooldown,
     )
 
+    # ═══ v5.0 — Adaptive Calibration ═══
+    calib = get_default_calibration()
+    calib.enabled = bool(config.adaptive_calibration)
+    if args.calibrate and config.adaptive_calibration:
+        print("  >> Guided calibration: move your hand SLOWLY around the")
+        print("     area you want to use for the next 8 seconds...")
+        t_end = time.perf_counter() + 8.0
+        while time.perf_counter() < t_end:
+            hd = tracker.read()
+            if hd["hand_found"] and hd["landmarks"] is not None:
+                calib.update(hd["index_pos"])
+            time.sleep(1.0 / 30.0)
+        calib.save()
+        print(f"  -> Calibration learned (coverage {calib.coverage:.0%}). Saved.")
+    elif config.adaptive_calibration and calib.is_ready:
+        print(f"  >> Adaptive calibration: loaded (coverage {calib.coverage:.0%})")
+
+    # ═══ v5.0 — Voice Control ═══
+    voice = None
+    voice_caption = ""        # last transcript for HUD
+    voice_caption_until = 0.0 # show transcript for 2s
+    if config.voice_enabled:
+        sensitivity = config.voice_sensitivity if config.voice_sensitivity in SENSITIVITY_PROFILES else "high"
+        mic_index = config.voice_mic_index if isinstance(config.voice_mic_index, int) and config.voice_mic_index >= 0 else None
+        voice = VoiceCommandEngine(sensitivity=sensitivity, mic_index=mic_index)
+        if voice.is_available():
+            voice.start()
+            print(f"  >> VOICE ONLINE ({sensitivity} mode) — say: click, right click,"
+                  f" scroll up, zoom in, freeze, precision, quit ...")
+        else:
+            print("  >> Voice requested but SpeechRecognition/pyaudio unavailable.")
+            print("     Install:  pip install SpeechRecognition pyaudio")
+            voice = None
+
+    # ═══ v5.0 — Pinch-to-Zoom ═══
+    # Zoom engages when pinch is HELD past zoom_engage_hold; a quick pinch
+    # stays a click. Disabled in trackpad mode (pinch-hold = drag there).
+    pinch_zoom = None
+    zoom_enabled = config.zoom_enabled and not trackpad_mode
+    if zoom_enabled:
+        pinch_zoom = PinchZoomController(
+            engage_hold=config.zoom_engage_hold,
+            gain=config.zoom_gain,
+            max_ticks_per_frame=config.zoom_max_ticks,
+        )
+        print("  >> PINCH-ZOOM: quick pinch = click | hold pinch + move = zoom")
+
+    # ═══ v5.0 — Macro Recorder ═══
+    macro_rec = MacroRecorder()
+    recording_macro = False
+    macro_name = args.record
+    if args.record:
+        macro_rec.start(args.record)
+        recording_macro = True
+        print(f"  >> MACRO RECORDING: '{args.record}' — all clicks/scrolls/zooms are captured.")
+        print("     Stop with [m] or voice 'stop recording'.")
+    if args.play:
+        try:
+            player = MacroPlayer(lambda ev, pr: _macro_executor(ev, pr, mouse))
+            player.load(args.play)
+            print(f"  >> Playing macro '{args.play}'...")
+            player.play(speed=1.0)
+            print(f"  -> Macro '{args.play}' done.")
+        except FileNotFoundError:
+            print(f"  !! Macro '{args.play}' not found in {MACRO_DIR}")
+            print(f"     Saved: {list_macros()}")
+
     # State
     center = np.array([screen_w / 2.0, screen_h / 2.0])
     if is_direct:
@@ -416,6 +583,11 @@ def main():
     PINCH_HOLD_MIN = 0.35       # Pinch held > 350ms = hold (drag)
     PEACE_TAP_MAX = 0.25        # Peace held < 250ms = tap (right click)
 
+    # v5.0 — classic-mode pinch-zoom state (quick pinch = click, hold = zoom)
+    classic_pinch_start = 0.0   # when current pinch began
+    classic_pinch_held = False  # pinch currently down (classic mode)
+    zoom_ticks_total = 0        # session zoom counter (debug/HUD)
+
     # Keyboard actions (lazy-init, never crash)
     kb = None
     def _kb():
@@ -428,18 +600,148 @@ def main():
                 pass
         return kb
 
+    # ═══ v5.0 — macro record helper ═══
+    def _mrec(event, **params):
+        """Record a macro event if a recording is active. Never raises."""
+        if recording_macro:
+            try:
+                macro_rec.record(event, **params)
+            except Exception:
+                pass
+
+    # ═══ v5.0 — voice command dispatch ═══
+    def _dispatch_voice(cmd):
+        """Execute a voice command. Returns True if the app should quit."""
+        nonlocal cursor_frozen, precision_mode, zoom_enabled, dragging
+        nonlocal recording_macro, macro_name
+        try:
+            if cmd == VoiceCommand.CLICK:
+                mouse.left_click(); audio.click(); _mrec("click")
+            elif cmd == VoiceCommand.RIGHT_CLICK:
+                mouse.right_click(); audio.right_click(); _mrec("right_click")
+            elif cmd == VoiceCommand.DOUBLE_CLICK:
+                mouse.double_click(); audio.click(); _mrec("double_click")
+            elif cmd == VoiceCommand.MIDDLE_CLICK:
+                try:
+                    mouse.mouse.click(mouse._button.middle, 1)
+                except Exception:
+                    pass
+                audio.right_click(); _mrec("middle_click")
+            elif cmd == VoiceCommand.SCROLL_UP:
+                mouse.scroll(-3); audio.scroll_tick(); _mrec("scroll", amount=-3)
+            elif cmd == VoiceCommand.SCROLL_DOWN:
+                mouse.scroll(3); audio.scroll_tick(); _mrec("scroll", amount=3)
+            elif cmd == VoiceCommand.ZOOM_IN:
+                zoom_scroll(3); audio.click(); _mrec("zoom", ticks=3)
+            elif cmd == VoiceCommand.ZOOM_OUT:
+                zoom_scroll(-3); audio.click(); _mrec("zoom", ticks=-3)
+            elif cmd == VoiceCommand.ZOOM_TOGGLE:
+                zoom_enabled = not zoom_enabled
+                if pinch_zoom is not None:
+                    pinch_zoom.reset()
+                audio.mode_enter() if zoom_enabled else audio.mode_exit()
+                print(f"  -> Zoom {'ON' if zoom_enabled else 'OFF'}")
+            elif cmd == VoiceCommand.DRAG:
+                if dragging:
+                    mouse.stop_drag(); dragging = False; audio.click()
+                    _mrec("drag_stop")
+                else:
+                    mouse.start_drag(); dragging = True; audio.drag_start()
+                    _mrec("drag_start")
+            elif cmd == VoiceCommand.FREEZE:
+                cursor_frozen = True; audio.freeze()
+            elif cmd == VoiceCommand.UNFREEZE:
+                cursor_frozen = False; audio.mode_enter()
+            elif cmd == VoiceCommand.PRECISION:
+                precision_mode = not precision_mode
+                audio.precision_toggle()
+                if is_direct:
+                    direct_tracker.set_precision_mode(precision_mode)
+                print(f"  -> Precision {'ON' if precision_mode else 'OFF'}")
+            elif cmd == VoiceCommand.CALIBRATE:
+                calib.reset()
+                if is_direct:
+                    direct_tracker.reset(center)
+                audio.recalibrate()
+                print("  -> Recalibrated (adaptive calibration reset)")
+            elif cmd == VoiceCommand.RECORD:
+                if not recording_macro:
+                    macro_name = f"session_{time.strftime('%H%M%S')}"
+                    macro_rec.start(macro_name)
+                    recording_macro = True
+                    audio.mode_enter()
+                    print(f"  -> Recording macro '{macro_name}'...")
+            elif cmd == VoiceCommand.STOP_RECORD:
+                if recording_macro:
+                    macro_rec.stop()
+                    macro_rec.save()
+                    recording_macro = False
+                    audio.mode_exit()
+                    print(f"  -> Macro '{macro_name}' saved to {MACRO_DIR}")
+            elif cmd == VoiceCommand.PLAY_MACRO:
+                names = list_macros()
+                if names:
+                    player = MacroPlayer(lambda ev, pr: _macro_executor(ev, pr, mouse))
+                    player.load(names[-1])
+                    player.play_async(speed=1.0)
+                    audio.click()
+                    print(f"  -> Playing macro '{names[-1]}'...")
+            elif cmd == VoiceCommand.VOLUME_UP:
+                _safe_kb_action(_kb(), "volume_up")
+            elif cmd == VoiceCommand.VOLUME_DOWN:
+                _safe_kb_action(_kb(), "volume_down")
+            elif cmd == VoiceCommand.MUTE:
+                _safe_kb_action(_kb(), "volume_mute")
+            elif cmd == VoiceCommand.MEDIA_NEXT:
+                _safe_kb_action(_kb(), "media_next")
+            elif cmd == VoiceCommand.MEDIA_PREV:
+                _safe_kb_action(_kb(), "media_prev")
+            elif cmd == VoiceCommand.MEDIA_PLAY:
+                _safe_kb_action(_kb(), "media_play_pause")
+            elif cmd == VoiceCommand.MINIMIZE:
+                _safe_kb_action(_kb(), "minimize_window")
+            elif cmd == VoiceCommand.CLOSE_WINDOW:
+                _safe_kb_action(_kb(), "close_window")
+            elif cmd == VoiceCommand.TASK_SWITCHER:
+                _safe_kb_action(_kb(), "switch_window")
+            elif cmd == VoiceCommand.SHOW_DESKTOP:
+                _safe_kb_action(_kb(), "show_desktop")
+            elif cmd == VoiceCommand.SCREENSHOT:
+                _safe_kb_action(_kb(), "screenshot")
+            elif cmd == VoiceCommand.VOICE_OFF:
+                if voice is not None:
+                    paused = voice.toggle()
+                    audio.mode_exit() if paused else audio.mode_enter()
+                    print(f"  -> Voice {'PAUSED' if paused else 'LISTENING'}")
+            elif cmd == VoiceCommand.QUIT:
+                print("  -> Voice quit requested")
+                return True
+        except Exception as e:
+            print(f"  !! voice dispatch error: {e}")
+        return False
+
     # Banner
     print()
     print("  +==================================================+")
-    print(f"  |     AirMouse v{_pkg.__version__} - Iron Man Next-Gen Edition  |")
-    print("  |     14 gestures | Physics cursor | Finger-relative  |")
+    print(f"  |   AirMouse v{_pkg.__version__} - VOICE + KALMAN Edition     |")
+    print("  |   14 gestures | Hybrid filter | Voice | Zoom | Macros |")
     print("  +==================================================+")
     print(f"  Screen: {screen_w}x{screen_h}  |  Audio: {'ON' if config.audio_enabled else 'OFF'}  |  Gestures: 14+2 swipe")
     print(f"  Tracking: {'DIRECT (1:1 finger-to-screen)' if is_direct else 'IRONMAN (exponential finger-relative)'}")
-    if trackpad_mode:
-        print(f"  Mode: TRACKPAD (tap=click, hold=drag, 2-finger=scroll, 3-finger=show desktop)")
+    print(f"  Filter: {'HYBRID One Euro + Kalman (' + config.kalman_fusion + ')' if (is_direct and config.kalman_enabled) else 'One Euro (classic)'}"
+          f"  |  Calibration: {'ADAPTIVE' if config.adaptive_calibration else 'off'}"
+          f"  |  Zoom: {'ON' if zoom_enabled else 'off'}")
+    if voice is not None:
+        print(f"  Voice: ON ({config.voice_sensitivity})"
+              + (" [MAD TURBO — nonstop listening]" if config.voice_sensitivity == "turbo" else ""))
     else:
-        print(f"  Mode: CLASSIC (14 gestures)")
+        print("  Voice: off (enable with --voice)")
+    if recording_macro:
+        print(f"  Macro: RECORDING '{macro_name}'")
+    if trackpad_mode:
+        print("  Mode: TRACKPAD (tap=click, hold=drag, 2-finger=scroll, 3-finger=show desktop)")
+    else:
+        print("  Mode: CLASSIC (14 gestures)")
     if precision_mode:
         print(f"  Mode: PRECISION (power={config.precision_power}, scale={config.precision_scale})")
     _show_quick_reference()
@@ -450,6 +752,21 @@ def main():
             t0 = time.perf_counter()
             dt = 1.0 / max(fps, 1.0)
             now = time.perf_counter()
+
+            # ═══ v5.0 — VOICE POLL ═══
+            # Voice works even when no hand is visible — poll every frame.
+            if voice is not None and voice.is_available():
+                vcmd = voice.poll()
+                while vcmd and vcmd != VoiceCommand.NONE and running:
+                    transcript = voice.last_transcript or "?"
+                    voice_caption = f"\"{transcript}\" -> {vcmd}"
+                    voice_caption_until = now + 2.0
+                    if _dispatch_voice(vcmd):
+                        running = False
+                        break
+                    vcmd = voice.poll()
+                if now > voice_caption_until:
+                    voice_caption = ""
 
             hand_data = tracker.read()
             gesture_result = {"gesture": Gesture.NONE, "landmarks": None, "confidence": 0.0}
@@ -478,6 +795,20 @@ def main():
                         audio.gesture_confirm()
 
                 raw_pos = gesture_result["index_pos"]
+
+                # ═══ v5.0 — ADAPTIVE CALIBRATION ═══
+                # Learns the user's reach box + tremor + speed as they use it,
+                # then remaps the raw hand position to fill the full screen.
+                if config.adaptive_calibration:
+                    raw_pos = calib.update(raw_pos)
+                    if (not getattr(calib, "_tuned_applied", False)) and calib.is_ready:
+                        params = calib.suggested_filter_params()
+                        if is_direct:
+                            direct_tracker.tune_filters(**params)
+                        calib._tuned_applied = True
+                        print(f"  -> Adaptive tune: mincutoff={params['mincutoff']:.2f} beta={params['beta']:.2f}")
+                    if calib.samples % 300 == 0:
+                        calib.save()
 
                 if is_direct:
                     # ═══ DIRECT TRACKING (v3.2) ═══
@@ -665,12 +996,37 @@ def main():
 
                 else:
                     # ═══ CLASSIC GESTURE MODE ═══
-                    # PINCH -> Left click
-                    if gesture == Gesture.PINCH and gesture_changed:
+                    # v5.0: HOLD pinch + move = ZOOM (quick pinch still clicks)
+                    if zoom_enabled and pinch_zoom is not None:
+                        if gesture == Gesture.PINCH:
+                            if not classic_pinch_held:
+                                classic_pinch_held = True
+                                classic_pinch_start = now
+                            zticks = pinch_zoom.update(True, filtered_pos[1], now)
+                            if zticks != 0:
+                                zoom_scroll(zticks)
+                                zoom_ticks_total += zticks
+                                _mrec("zoom", ticks=zticks)
+                        elif classic_pinch_held:
+                            classic_pinch_held = False
+                            pinch_zoom.update(False, filtered_pos[1], now)
+                            # quick pinch (released before zoom engaged) = click
+                            if not pinch_zoom.active \
+                               and (now - classic_pinch_start) < config.zoom_engage_hold + 0.1 \
+                               and now - last_click_time > config.pinch_cooldown:
+                                mouse.left_click()
+                                audio.click()
+                                last_click_time = now
+                                _mrec("click")
+
+                    # PINCH -> Left click (immediate when zoom is off)
+                    if gesture == Gesture.PINCH and gesture_changed \
+                       and not (zoom_enabled and pinch_zoom is not None):
                         if now - last_click_time > config.pinch_cooldown:
                             mouse.left_click()
                             audio.click()
                             last_click_time = now
+                            _mrec("click")
 
                     # PEACE -> Right click
                     elif gesture == Gesture.PEACE and gesture_changed:
@@ -678,12 +1034,14 @@ def main():
                             mouse.right_click()
                             audio.right_click()
                             last_click_time = now
+                            _mrec("right_click")
 
                     # THUMBS_UP -> Double click
                     elif gesture == Gesture.THUMBS_UP and gesture_changed:
                         mouse.double_click()
                         audio.click()
                         last_click_time = now
+                        _mrec("double_click")
 
                     # PINKY -> Middle click
                     elif gesture == Gesture.PINKY and gesture_changed:
@@ -693,6 +1051,7 @@ def main():
                             pass
                         audio.right_click()
                         last_click_time = now
+                        _mrec("middle_click")
 
                     # FIST -> Toggle freeze
                     elif gesture == Gesture.FIST and gesture_changed:
@@ -714,9 +1073,11 @@ def main():
                         mouse.start_drag()
                         dragging = True
                         audio.drag_start()
+                        _mrec("drag_start")
                     elif gesture != Gesture.PALM and dragging and not trackpad_dragging:
                         mouse.stop_drag()
                         dragging = False
+                        _mrec("drag_stop")
 
                     # THREE -> Scroll mode
                     if gesture == Gesture.THREE:
@@ -732,6 +1093,7 @@ def main():
                                 if scroll_amount != 0:
                                     mouse.scroll(scroll_amount)
                                     audio.scroll_tick()
+                                    _mrec("scroll", amount=scroll_amount)
                                 scroll_accum = 0.0
                             prev_index_y = filtered_pos[1]
                     else:
@@ -871,6 +1233,9 @@ def main():
                         mouse.stop_drag()
                         dragging = False
                     scrolling = False
+                    if pinch_zoom is not None:
+                        pinch_zoom.reset()
+                    classic_pinch_held = False
                     if volume_mode:
                         volume_mode = False
                     if brightness_mode:
@@ -881,7 +1246,13 @@ def main():
                 _draw_hud(hand_data["frame"], gesture_result, spring, fps,
                           config, cursor_frozen, dragging, scrolling,
                           volume_mode, brightness_mode, precision_mode,
-                          gsm.progress, gesture_confidence)
+                          gsm.progress, gesture_confidence,
+                          voice_caption=voice_caption,
+                          voice_active=(voice is not None and voice.listening),
+                          zoom_active=(pinch_zoom.active if pinch_zoom else False),
+                          recording=recording_macro,
+                          kalman_on=(is_direct and config.kalman_enabled),
+                          cal_ready=calib.is_ready)
                 cv2.imshow("AirMouse", hand_data["frame"])
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):
@@ -920,6 +1291,41 @@ def main():
                     run_tutorial(tracker)
                 elif key == ord("h"):
                     _show_quick_reference()
+                # ═══ v5.0 hotkeys ═══
+                elif key == ord("v"):
+                    if voice is not None and voice.is_available():
+                        paused = voice.toggle()
+                        audio.mode_exit() if paused else audio.mode_enter()
+                        print(f"  -> Voice {'PAUSED' if paused else 'LISTENING'}")
+                    else:
+                        print("  -> Voice unavailable (install SpeechRecognition + pyaudio, restart with --voice)")
+                elif key == ord("k"):
+                    if is_direct:
+                        config.kalman_enabled = not config.kalman_enabled
+                        direct_tracker.toggle_hybrid(config.kalman_enabled)
+                        audio.precision_toggle()
+                        print(f"  -> Hybrid Kalman filter {'ON' if config.kalman_enabled else 'OFF'}")
+                    else:
+                        print("  -> Kalman hybrid applies to DIRECT mode only")
+                elif key == ord("z"):
+                    zoom_enabled = not zoom_enabled
+                    if pinch_zoom is not None:
+                        pinch_zoom.reset()
+                    audio.mode_enter() if zoom_enabled else audio.mode_exit()
+                    print(f"  -> Pinch-to-zoom {'ON' if zoom_enabled else 'OFF'}")
+                elif key == ord("m"):
+                    if recording_macro:
+                        macro_rec.stop()
+                        macro_rec.save()
+                        recording_macro = False
+                        audio.mode_exit()
+                        print(f"  -> Macro '{macro_name}' saved to {MACRO_DIR}")
+                    else:
+                        macro_name = f"session_{time.strftime('%H%M%S')}"
+                        macro_rec.start(macro_name)
+                        recording_macro = True
+                        audio.mode_enter()
+                        print(f"  -> Recording macro '{macro_name}' (press [m] again to stop)")
 
             # FPS throttling
             elapsed = time.perf_counter() - t0
@@ -937,6 +1343,24 @@ def main():
     finally:
         running = False
         tracker.release()
+        # v5.0 cleanup — persist what was learned, stop threads, save macros
+        try:
+            if recording_macro and macro_rec.recording:
+                macro_rec.stop()
+                macro_rec.save()
+                print(f"  Macro '{macro_name}' saved to {MACRO_DIR}")
+        except Exception:
+            pass
+        try:
+            if config.adaptive_calibration:
+                calib.save()
+        except Exception:
+            pass
+        try:
+            if voice is not None:
+                voice.stop()
+        except Exception:
+            pass
         if dragging:
             try:
                 mouse.stop_drag()

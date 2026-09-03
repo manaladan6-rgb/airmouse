@@ -501,7 +501,12 @@ class DirectTracker:
                  one_euro_mincutoff=1.2,    # Hz — lower = smoother at rest
                  one_euro_beta=1.5,         # higher = more responsive at speed
                  one_euro_dcutoff=1.0,
-                 prediction_factor=0.0):    # OFF — prediction adds complications
+                 prediction_factor=0.0,     # OFF — prediction adds complications
+                 use_hybrid=True,           # v5.0: One Euro + Kalman fusion
+                 hybrid_process_noise=1.0,
+                 hybrid_measurement_noise=0.05,
+                 hybrid_fusion="adaptive",
+                 hybrid_speed_ref=0.15):
         self.screen_w = screen_w
         self.screen_h = screen_h
         self.mirror_x = mirror_x
@@ -513,6 +518,23 @@ class DirectTracker:
             beta=one_euro_beta,
             dcutoff=one_euro_dcutoff,
         )
+
+        # v5.0 — Hybrid One Euro + Kalman fusion filter.
+        # Kalman dominates when the hand is still (rock-solid lock),
+        # One Euro dominates at speed (responsiveness). Drop-in upgrade.
+        self.use_hybrid = bool(use_hybrid)
+        self.hybrid = None
+        if self.use_hybrid:
+            from .filters import HybridOneEuroKalman
+            self.hybrid = HybridOneEuroKalman(
+                mincutoff=one_euro_mincutoff,
+                beta=one_euro_beta,
+                dcutoff=one_euro_dcutoff,
+                kalman_process_noise=hybrid_process_noise,
+                kalman_measurement_noise=hybrid_measurement_noise,
+                fusion=hybrid_fusion,
+                speed_ref=hybrid_speed_ref,
+            )
 
         # Legacy compat attributes
         self.jitter_x = LightJitterFilter(alpha=jitter_alpha)
@@ -561,8 +583,11 @@ class DirectTracker:
         self._frame_count += 1
         timestamp = self._frame_count / 30.0
 
-        # Stage 1: One Euro Filter — adaptive smoothing
-        filtered = self.one_euro.filter_np(finger_pos, timestamp)
+        # Stage 1: Adaptive filter — hybrid (One Euro ⊕ Kalman) or pure One Euro
+        if self.use_hybrid and self.hybrid is not None:
+            filtered = self.hybrid.filter_np(finger_pos, timestamp)
+        else:
+            filtered = self.one_euro.filter_np(finger_pos, timestamp)
 
         # Track speed for auto-precision
         if self._prev_pos is not None:
@@ -622,6 +647,8 @@ class DirectTracker:
     def reset(self, center=None):
         """Reset tracker state."""
         self.one_euro.reset()
+        if self.hybrid is not None:
+            self.hybrid.reset()
         self._last_accepted_pos = None
         self._last_output_pos = None
         self._prev_pos = None
@@ -652,16 +679,47 @@ class DirectTracker:
 
     def set_precision_mode(self, enabled: bool):
         """Switch between normal and precision filtering on the fly."""
-        from .filters import OneEuroFilter2D
+        from .filters import OneEuroFilter2D, HybridOneEuroKalman
         if enabled:
             # Precision: very smooth at rest, still responsive at speed
             self.one_euro = OneEuroFilter2D(mincutoff=0.5, beta=0.5, dcutoff=1.0)
+            if self.hybrid is not None:
+                self.hybrid = HybridOneEuroKalman(
+                    mincutoff=0.5, beta=0.5, dcutoff=1.0,
+                    kalman_process_noise=getattr(self, '_hybrid_q', 1.0),
+                    kalman_measurement_noise=getattr(self, '_hybrid_r', 0.05),
+                    fusion=getattr(self, '_hybrid_fusion', 'adaptive'),
+                    speed_ref=getattr(self, '_hybrid_speed_ref', 0.15),
+                )
             self.movement_threshold = 0.006
             self.pixel_deadzone = 2.0
             self._auto_precision = False  # manual precision mode
         else:
             # Normal: balanced accuracy + responsiveness
             self.one_euro = OneEuroFilter2D(mincutoff=1.2, beta=1.5, dcutoff=1.0)
+            if self.hybrid is not None:
+                self.hybrid = HybridOneEuroKalman(
+                    mincutoff=1.2, beta=1.5, dcutoff=1.0,
+                    kalman_process_noise=getattr(self, '_hybrid_q', 1.0),
+                    kalman_measurement_noise=getattr(self, '_hybrid_r', 0.05),
+                    fusion=getattr(self, '_hybrid_fusion', 'adaptive'),
+                    speed_ref=getattr(self, '_hybrid_speed_ref', 0.15),
+                )
             self.movement_threshold = 0.003
             self.pixel_deadzone = 1.0
             self._auto_precision = True  # re-enable auto-precision
+
+    def toggle_hybrid(self, enabled: bool):
+        """v5.0: switch between hybrid (One Euro ⊕ Kalman) and pure One Euro
+        on the fly — used by the [k] hotkey and voice 'precision'/'kalman'."""
+        self.use_hybrid = bool(enabled)
+
+    def tune_filters(self, mincutoff: float = None, beta: float = None):
+        """v5.0: live-tune the One Euro params from adaptive calibration.
+        Applies to BOTH arms (pure One Euro and the hybrid's One Euro side)."""
+        from .filters import OneEuroFilter2D
+        mc = mincutoff if mincutoff is not None else self.one_euro._fx.mincutoff
+        bt = beta if beta is not None else self.one_euro._fx.beta
+        self.one_euro = OneEuroFilter2D(mincutoff=mc, beta=bt, dcutoff=1.0)
+        if self.hybrid is not None:
+            self.hybrid.one_euro = OneEuroFilter2D(mincutoff=mc, beta=bt, dcutoff=1.0)
