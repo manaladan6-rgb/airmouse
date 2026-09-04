@@ -73,9 +73,22 @@ class PermissionRule:
     key: str = "*"
     decision: Decision = Decision.ASK
     pattern: str = ""            # for ALLOW_PATTERN (fnmatch)
-    remaining_uses: int = -1     # -1 = unlimited
+    remaining_uses: int = -1     # -1 = unlimited (NEVER honored for ALLOW_ONCE)
     granted_by: str = "system"
     reason: str = ""
+
+    def __post_init__(self) -> None:
+        # §15 fix (v15.1.1): ALLOW_ONCE is by definition a counted,
+        # finite grant.  A negative uses value must never make it
+        # unlimited (and a zero/negative value must not leave the grant
+        # permanently dead), so uses is coerced to max(1, int(uses)).
+        # Other kinds keep their semantics (-1 = unlimited) unchanged.
+        if self.decision is Decision.ALLOW_ONCE:
+            try:
+                uses = int(self.remaining_uses)
+            except (TypeError, ValueError):
+                uses = 1
+            self.remaining_uses = max(1, uses)
 
 
 @dataclass
@@ -150,6 +163,15 @@ class AgentPermissionEngine:
                 return False
             if decision is Decision.ALLOW_PATTERN and not pattern:
                 return False
+            # §15 fix: ALLOW_ONCE can never be unlimited — coerce its
+            # uses to max(1, int(uses)) here as well (belt-and-braces
+            # with PermissionRule.__post_init__) so the audit-visible
+            # grant is the same one check() will enforce.
+            if decision is Decision.ALLOW_ONCE:
+                try:
+                    uses = max(1, int(uses))
+                except (TypeError, ValueError):
+                    uses = 1
             if len(self._rules) >= self.max_rules:
                 self._rules = self._rules[-self.max_rules + 1:]
             self._rules.append(PermissionRule(

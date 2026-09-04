@@ -28,6 +28,7 @@ Copyright (c) AirMouse.  MIT License.
 from __future__ import annotations
 
 import enum
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -35,6 +36,11 @@ MAX_CHAIN = 8
 MAX_VALUE = 160
 MAX_ATTEMPTS_RECORDED = 16
 RESOLVE_TIMEOUT_DEFAULT = 2.0
+
+#: default virtual desktop used when no screen_perception engine is given
+#: (geometry zones are proportional, so this is only a pixel frame)
+DEFAULT_SCREEN_W = 1920
+DEFAULT_SCREEN_H = 1080
 
 
 class TargetKind(enum.Enum):
@@ -327,3 +333,403 @@ def _sanitize_target(target: Any, kind: str) -> ResolvedTarget:
                       for k, v in list(meta.items())[:6]}
             if isinstance(meta, dict) else {})
     raise ValueError("unsupported provider result type")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Default provider factory (v15.1.1) — real screen-perception adapters
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# Out of the box the resolver used to ship with ZERO registered providers
+# (every resolve returned ok=False).  :func:`build_default_resolver` wraps
+# the real perception providers from :mod:`airmouse.screen_perception`
+# into the resolver's provider contract (wrap, don't rewrite):
+#
+#     accessibility → dom (browser) → ocr (only when ITS OWN enabled flag
+#     is on) → geometry → coordinate (only when the factory allows it AND
+#     the request carries the explicit allow_coordinate_fallback flag)
+#
+# Every adapter reports the PROVIDER'S OWN honest confidence; an
+# unavailable provider simply yields no candidates (existing degradation,
+# never raises).
+
+#: filler words stripped from request needles before token matching
+_NEEDLE_FILLER = frozenset({
+    "the", "a", "an", "click", "focus", "open", "press", "select", "on",
+    "in", "to", "please", "button", "link", "tab", "window", "field",
+    "box", "input", "screen", "region", "zone", "switch",
+})
+
+#: human aliases for the nine deterministic geometry zones
+_GEO_ZONE_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "geo:center": ("center", "middle", "mid"),
+    "geo:corner_tl": ("top left", "topleft", "upper left", "tl"),
+    "geo:corner_tr": ("top right", "topright", "upper right", "tr"),
+    "geo:corner_bl": ("bottom left", "bottomleft", "lower left", "bl"),
+    "geo:corner_br": ("bottom right", "bottomright", "lower right", "br"),
+    "geo:edge_top": ("top edge", "top strip", "top"),
+    "geo:edge_bottom": ("bottom edge", "bottom strip", "bottom"),
+    "geo:edge_left": ("left edge", "left strip", "left"),
+    "geo:edge_right": ("right edge", "right strip", "right"),
+}
+
+
+def _request_needle(request: Any) -> str:
+    """The user-visible needle of a request: ``value`` else ``description``.
+
+    Lowercased + whitespace-normalized; '' when the request carries no
+    usable needle.  Never raises.
+    """
+    for attr in ("value", "description"):
+        try:
+            raw = str(getattr(request, attr, "") or "").strip()
+        except Exception:
+            raw = ""
+        if raw:
+            return " ".join(raw.lower().split())
+    return ""
+
+
+def _text_matches(needle: str, haystack: str) -> bool:
+    """Honest needle/haystack match: substring either way OR any
+    significant token of the needle appears in the haystack.
+
+    Filler words (``the``, ``button``, …) are never matched on their own.
+    Never raises; '' haystack never matches.
+    """
+    n = " ".join(str(needle or "").split()).lower()
+    h = " ".join(str(haystack or "").split()).lower()
+    if not n or not h:
+        return False
+    if n in h:
+        return True
+    if len(h) >= 3 and h in n:
+        return True
+    tokens = [t for t in re.split(r"[^a-z0-9]+", n)
+              if len(t) >= 3 and t not in _NEEDLE_FILLER]
+    return any(t in h for t in tokens)
+
+
+def _screen_target_to_result(target: Any, kind: str) -> Dict[str, Any]:
+    """Convert a perception :class:`ScreenTarget` into the resolver's
+    provider-result dict (data only; clamping happens in
+    :func:`_sanitize_target`).  Never raises."""
+    try:
+        bbox = getattr(target, "bbox", None)
+        bb = (float(bbox[0]), float(bbox[1]),
+              float(bbox[2]), float(bbox[3])) if bbox else None
+        point = None
+        if bb is not None:
+            point = (bb[0] + bb[2] / 2.0, bb[1] + bb[3] / 2.0)
+        conf = float(getattr(target, "confidence", 0.0) or 0.0)
+        return {
+            "kind": kind,
+            "value": str(getattr(target, "text", "") or ""),
+            "point": point,
+            "bbox": bb,
+            "confidence": max(0.0, min(1.0, conf)),
+            "provider": kind,
+            "target_id": str(getattr(target, "id", "") or ""),
+            "metadata": {
+                "source": str(getattr(target, "source", "") or kind),
+                "application": str(getattr(target, "application", "") or ""),
+                "type": str(getattr(getattr(target, "type", ""), "value",
+                                    "") or ""),
+            },
+        }
+    except Exception:
+        return {}
+
+
+def _accessibility_provider_adapter(provider: Any) -> ProviderFn:
+    """Adapt the perception AccessibilityProvider (active window).
+
+    Matches the request needle against the window title / application
+    name.  A vague request (no needle) does NOT claim the whole window —
+    returns None.  Unavailable/empty → no candidates.
+    """
+    def resolve(request: TargetRequest) -> Optional[ResolvedTarget]:
+        if provider is None or \
+                not bool(getattr(provider, "available", False)):
+            return None
+        try:
+            targets = list(provider.update() or [])
+        except Exception:
+            return None
+        needle = _request_needle(request)
+        if not needle:
+            return None
+        for t in targets:
+            hay = " ".join([str(getattr(t, "text", "") or ""),
+                            str(getattr(t, "application", "") or ""),
+                            str(getattr(t, "id", "") or "")])
+            if _text_matches(needle, hay):
+                out = _screen_target_to_result(t, "accessibility")
+                if out:
+                    return out
+        return None
+    return resolve
+
+
+def _ocr_provider_adapter(provider: Any) -> ProviderFn:
+    """Adapt the perception OCRProvider (opt-in text targets)."""
+    def resolve(request: TargetRequest) -> Optional[ResolvedTarget]:
+        if provider is None or \
+                not bool(getattr(provider, "available", False)):
+            return None
+        try:
+            targets = list(provider.update() or [])
+        except Exception:
+            return None
+        needle = _request_needle(request)
+        best = None
+        for t in targets:
+            if not needle or _text_matches(
+                    needle, str(getattr(t, "text", "") or "")):
+                conf = float(getattr(t, "confidence", 0.0) or 0.0)
+                if best is None or conf > \
+                        float(getattr(best, "confidence", 0.0) or 0.0):
+                    best = t
+        if best is None:
+            return None
+        return _screen_target_to_result(best, "ocr") or None
+    return resolve
+
+
+def _tokens(text: str) -> List[str]:
+    """Lowercased alphanumeric tokens of a phrase; never raises."""
+    try:
+        return [t for t in re.split(r"[^a-z0-9]+", str(text or "").lower())
+                if t]
+    except Exception:
+        return []
+
+
+def _contig_subsequence(small: List[str], big: List[str]) -> bool:
+    """True when ``small`` appears inside ``big`` as contiguous tokens."""
+    if not small or len(small) > len(big):
+        return False
+    for i in range(len(big) - len(small) + 1):
+        if big[i:i + len(small)] == small:
+            return True
+    return False
+
+
+def _geometry_provider_adapter(provider: Any) -> ProviderFn:
+    """Adapt the perception GeometryProvider (nine deterministic zones).
+
+    Matching passes, most specific first: exact zone id → exact zone
+    alias → contiguous-token containment between the needle and a zone
+    alias → zone text.  A vague request falls back to the documented
+    safe default (the center zone).  Reports the ZONE'S OWN confidence.
+    """
+    def resolve(request: TargetRequest) -> Optional[ResolvedTarget]:
+        if provider is None:
+            return None
+        try:
+            targets = list(provider.update() or [])
+        except Exception:
+            return None
+        by_id = {str(getattr(t, "id", "") or ""): t for t in targets}
+        needle = _request_needle(request)
+        chosen = None
+        if not needle:
+            chosen = by_id.get("geo:center")      # documented safe default
+        else:
+            ntok = _tokens(needle)
+            if needle in by_id:                    # "geo:center"
+                chosen = by_id[needle]
+            if chosen is None:                     # exact alias
+                for zid, aliases in _GEO_ZONE_ALIASES.items():
+                    if needle in aliases:
+                        chosen = by_id.get(zid)
+                        break
+            if chosen is None and ntok:            # phrase containment
+                for zid, aliases in _GEO_ZONE_ALIASES.items():
+                    atoks_sets = [_tokens(a) for a in aliases]
+                    atoks_sets.append(_tokens(zid))
+                    if any(_contig_subsequence(a, ntok)
+                           or _contig_subsequence(ntok, a)
+                           for a in atoks_sets if a):
+                        chosen = by_id.get(zid)
+                        break
+            if chosen is None:                     # zone text ("center")
+                for t in targets:
+                    if _text_matches(needle,
+                                     str(getattr(t, "text", "") or "")):
+                        chosen = t
+                        break
+        if chosen is None:
+            return None
+        return _screen_target_to_result(chosen, "geometry") or None
+    return resolve
+
+
+def _browser_mapper_provider_adapter(browser: Any) -> ProviderFn:
+    """Adapt a BrowserController/BrowserTargetMapper element map.
+
+    Data-only: reads the mapper's collected ScreenTargets (source 'dom');
+    no JS beyond what :mod:`airmouse.browser` already evaluates.
+    """
+    mapper = getattr(browser, "mapper", None) or browser
+
+    def resolve(request: TargetRequest) -> Optional[ResolvedTarget]:
+        targets_fn = getattr(mapper, "targets", None)
+        if not callable(targets_fn):
+            return None
+        try:
+            targets = list(targets_fn() or [])
+        except Exception:
+            return None
+        needle = _request_needle(request)
+        if not needle:
+            return None
+        for t in targets:
+            hay = " ".join([str(getattr(t, "text", "") or ""),
+                            str(getattr(t, "id", "") or "")])
+            if _text_matches(needle, hay):
+                out = _screen_target_to_result(t, "dom")
+                if out:
+                    return out
+        return None
+    return resolve
+
+
+def _coordinate_provider(screen_w: int, screen_h: int) -> ProviderFn:
+    """LAST-RESORT coordinate provider (center of the virtual desktop).
+
+    Registered ONLY when the factory explicitly allows it; the resolver's
+    per-request ``allow_coordinate_fallback`` gate still applies (§6/§8),
+    so this can never fire silently.
+    """
+    w, h = max(1, int(screen_w)), max(1, int(screen_h))
+
+    def resolve(request: TargetRequest) -> Optional[ResolvedTarget]:
+        return {
+            "kind": "coordinate",
+            "value": "",
+            "point": (w / 2.0, h / 2.0),
+            "bbox": (0.0, 0.0, float(w), float(h)),
+            "confidence": 0.40,     # honest: an explicit last-resort guess
+            "provider": "coordinate",
+            "target_id": "coordinate:center",
+            "metadata": {"source": "coordinate"},
+        }
+    return resolve
+
+
+def _providers_from_screen_perception(
+        screen_perception: Any
+) -> Tuple[List[Any], int, int]:
+    """Extract the perception provider list (+ screen size) from whatever
+    the caller passed: None → fresh default providers; a
+    ScreenPerceptionEngine-like object → its own providers (test-injected
+    stubs honoured); a plain list/tuple → used as-is.  Never raises."""
+    try:
+        from .screen_perception import (AccessibilityProvider,  # noqa: F401
+                                        GeometryProvider, OCRProvider)
+    except ImportError:  # pragma: no cover - direct file execution fallback
+        from airmouse.screen_perception import (AccessibilityProvider,
+                                                GeometryProvider,
+                                                OCRProvider)
+
+    screen_w, screen_h = DEFAULT_SCREEN_W, DEFAULT_SCREEN_H
+    providers: Optional[List[Any]] = None
+    if screen_perception is not None:
+        if isinstance(screen_perception, (list, tuple)):
+            providers = list(screen_perception)
+        else:
+            injected = getattr(screen_perception, "providers", None)
+            if isinstance(injected, (list, tuple)):
+                providers = list(injected)
+            try:
+                screen_w = int(getattr(screen_perception, "screen_w",
+                                       screen_w))
+                screen_h = int(getattr(screen_perception, "screen_h",
+                                       screen_h))
+            except (TypeError, ValueError):
+                pass
+    if providers is None:
+        providers = [
+            AccessibilityProvider(screen_w, screen_h),
+            OCRProvider(None),          # dormant unless ITS config enables
+            GeometryProvider(screen_w, screen_h),
+        ]
+    return providers, max(1, screen_w), max(1, screen_h)
+
+
+def build_default_resolver(screen_perception: Any = None,
+                           allow_coordinate_fallback: bool = False,
+                           min_confidence: float = 0.35,
+                           browser: Any = None) -> UniversalTargetResolver:
+    """Build a :class:`UniversalTargetResolver` with REAL providers
+    registered, so ``resolve_target()`` works out of the box.
+
+    Parameters
+    ----------
+    screen_perception :
+        Optional :class:`~airmouse.screen_perception.ScreenPerceptionEngine`
+        (its own provider list — including test-injected stubs — is
+        reused), or a plain provider list.  ``None`` constructs fresh
+        default providers on a 1920×1080 virtual desktop.
+    allow_coordinate_fallback :
+        When True a last-resort ``coordinate`` provider (screen center,
+        confidence 0.40) is registered; the resolver's EXPLICIT per-request
+        gate still applies (§6/§8), so it can never fire silently.
+    min_confidence :
+        Forwarded to the resolver (default 0.35).
+    browser :
+        Optional BrowserController / BrowserTargetMapper — its element map
+        is adapted into the ``dom`` provider (data-only).
+
+    Provider order (the resolver's default chain):
+    accessibility → dom (if ``browser`` given) → ocr (only when the OCR
+    provider's own enabled flag is on AND the tesseract stack probes OK)
+    → geometry (always) → coordinate (only when allowed above).
+
+    Every adapter reports the provider's own honest confidence; an
+    unavailable provider simply yields no candidates.  Never raises.
+    """
+    try:
+        providers, screen_w, screen_h = \
+            _providers_from_screen_perception(screen_perception)
+    except Exception:
+        providers, screen_w, screen_h = [], DEFAULT_SCREEN_W, DEFAULT_SCREEN_H
+
+    resolver = UniversalTargetResolver(min_confidence=min_confidence)
+
+    try:
+        from .screen_perception import (AccessibilityProvider, GeometryProvider,
+                                        OCRProvider)
+    except ImportError:  # pragma: no cover - direct file execution fallback
+        from airmouse.screen_perception import (AccessibilityProvider,
+                                                GeometryProvider, OCRProvider)
+
+    for provider in providers:
+        name = str(getattr(provider, "name", "") or "").lower()
+        if isinstance(provider, AccessibilityProvider) or \
+                name == "accessibility":
+            resolver.register_provider(
+                "accessibility", _accessibility_provider_adapter(provider),
+                note="active window (perception)")
+        elif isinstance(provider, OCRProvider) or name == "ocr":
+            # register ONLY when the provider's own enabled flag is on
+            if bool(getattr(provider, "available", False)):
+                resolver.register_provider(
+                    "ocr", _ocr_provider_adapter(provider),
+                    note="local OCR (user opt-in)")
+        elif isinstance(provider, GeometryProvider) or name == "geometry":
+            resolver.register_provider(
+                "geometry", _geometry_provider_adapter(provider),
+                note="nine deterministic zones")
+
+    if browser is not None:
+        resolver.register_provider(
+            "dom", _browser_mapper_provider_adapter(browser),
+            note="browser element map (data-only)")
+
+    if allow_coordinate_fallback:
+        resolver.register_provider(
+            "coordinate", _coordinate_provider(screen_w, screen_h),
+            note="last-resort screen center (explicit request flag)")
+
+    return resolver

@@ -619,12 +619,14 @@ class TestAipPermissionProbes:
 
     def test_allow_once_exhaustion_fails_closed(self):
         eng = AgentPermissionEngine()
-        # documented footgun: default uses=-1 is ALREADY exhausted —
-        # the critical property is that it fails CLOSED, never open
+        # v15.1.1 §15 fix: default uses=-1 is coerced to ONE use —
+        # the critical property is that it fails CLOSED (exactly once,
+        # never unlimited, never open)
         assert eng.grant("agent-a", "clipboard.write",
                          Decision.ALLOW_ONCE) is True
         d = eng.check("agent-a", "clipboard.write")
-        assert d.allowed is False
+        assert d.allowed is True                # the single use
+        assert eng.check("agent-a", "clipboard.write").allowed is False
         eng2 = AgentPermissionEngine()
         eng2.grant("agent-a", "clipboard.write", Decision.ALLOW_ONCE,
                    uses=1)

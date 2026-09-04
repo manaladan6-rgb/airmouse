@@ -41,6 +41,20 @@ live anywhere — but they are normalized (os.path.abspath) and any
 ``..`` component is rejected; existing files are only overwritten when
 ``overwrite=True`` is passed explicitly.
 
+ONE RESOLUTION (v15.2): the home directory itself is resolved by
+:mod:`airmouse.paths` (the authoritative resolver); :func:`airmouse_home`
+delegates to it, so this module and every migrated module share a single
+notion of "where the data lives".  ``AIRMOUSE_HOME`` semantics are
+unchanged: a non-empty value wins, otherwise ``~/.airmouse``.
+
+Lifecycle (v15.2): ``memory_reset`` / ``memory_delete`` no longer stop
+at the five named stores — they also back up + clear / remove every
+user-learning artifact listed in the privacy manifest
+(``airmouse.privacy.PRIVACY_MANIFEST``: intelligence jsons + model.bin,
+calibration.json, gaze_calibration.json, gestures.json, macros/*.json,
+lecture.md).  :func:`deletion_verifies` re-scans the home afterwards and
+proves nothing learnable is left outside ``<home>/backups/``.
+
 Compatibility note: ``airmouse.config`` pins its own paths to
 ``~/.airmouse`` at import time and is read-only for this release.  The
 :func:`config_path_scope` shim temporarily rebinds those two module
@@ -52,6 +66,7 @@ Copyright (c) AirMouse.  MIT License.
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import datetime
 import glob
@@ -60,15 +75,17 @@ import json
 import os
 import tempfile
 import time
-from typing import Any, Callable, Dict, Iterator, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+
+from . import paths as _paths
 
 __all__ = [
     "SCHEMA_VERSION", "STORE_NAMES", "SUBDIR_NAMES",
     "airmouse_home", "ensure_dirs", "atomic_write_bytes",
     "atomic_write_json", "read_json", "PersistentStore",
     "get_store", "all_stores", "memory_status", "memory_export",
-    "memory_reset", "memory_delete", "config_file_for_home",
-    "config_path_scope",
+    "memory_reset", "memory_delete", "deletion_verifies",
+    "config_file_for_home", "config_path_scope",
 ]
 
 #: bumped when the store envelope format changes
@@ -93,15 +110,15 @@ _CORRUPT_KEEP = 3
 # ---------------------------------------------------------------------------
 
 def airmouse_home() -> str:
-    """AirMouse home directory.
+    """AirMouse home directory (delegates to :mod:`airmouse.paths`).
 
-    ``$AIRMOUSE_HOME`` (non-empty) wins; otherwise
-    ``~/.airmouse``.  The result is absolute and ``~``-expanded.
+    ``$AIRMOUSE_HOME`` (non-empty) wins; otherwise ``~/.airmouse``.
+    The result is absolute and ``~``-expanded.  Resolution happens on
+    EVERY call (never cached), so an environment change is always
+    honored.  Kept as a thin delegate so there is exactly ONE resolver
+    in the codebase (:func:`airmouse.paths.airmouse_home`).
     """
-    raw = os.environ.get(_HOME_ENV, "").strip()
-    if raw:
-        return os.path.abspath(os.path.expanduser(raw))
-    return os.path.join(os.path.expanduser("~"), ".airmouse")
+    return _paths.airmouse_home()
 
 
 def _safe_name(name: str, what: str = "name") -> str:
@@ -554,6 +571,138 @@ def all_stores() -> Dict[str, PersistentStore]:
 
 
 # ---------------------------------------------------------------------------
+# user-learning artifact lifecycle (v15.2 — REAL privacy boundary)
+# ---------------------------------------------------------------------------
+
+def _lifecycle_artifacts() -> List[Dict[str, Any]]:
+    """Resolved manifest rows for the user-learning artifacts.
+
+    The five named stores are NOT included here (they keep their own
+    dedicated ``"stores"`` section in every lifecycle result); this
+    returns the rest of what the privacy manifest marks as
+    ``user_learning``: intelligence jsons + model.bin, calibration.json,
+    gaze_calibration.json, gestures.json, macros/*.json, lecture.md.
+    Never raises — on any manifest problem an empty list is returned
+    (fail-open for the *report*, while the stores still get reset, so a
+    broken manifest can never block the honest per-store lifecycle).
+    """
+    try:
+        from .privacy import privacy_manifest
+        rows = [row for row in privacy_manifest()
+                if row.get("user_learning") and row.get("kind") != "store"]
+    except Exception:
+        return []
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        path = row.get("path")
+        if isinstance(path, str) and path:
+            out.append({"name": str(row.get("name") or path),
+                        "path": path,
+                        "kind": str(row.get("kind") or "file")})
+    return out
+
+
+def _artifact_files(artifact: Dict[str, Any]) -> List[str]:
+    """Concrete existing files behind one artifact (dir → its *.json)."""
+    path = artifact["path"]
+    if artifact.get("kind") == "dir":
+        if not os.path.isdir(path):
+            return []
+        try:
+            return sorted(glob.glob(os.path.join(path, "*.json")))
+        except OSError:
+            return []
+    return [path] if os.path.exists(path) else []
+
+
+def _backup_artifact_files(files: List[str], backup_root: str,
+                           home: str) -> List[Tuple[str, str]]:
+    """Copy ``files`` into ``backup_root`` (home-relative layout).
+
+    Returns (source, backup_target) pairs for the files actually
+    copied; failures raise OSError so the caller can report honestly.
+    """
+    pairs: List[Tuple[str, str]] = []
+    for src in files:
+        rel = os.path.relpath(os.path.abspath(src), os.path.abspath(home))
+        target = os.path.join(backup_root, rel)
+        directory = os.path.dirname(target) or "."
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(src, "rb") as f:
+            raw = f.read()
+        atomic_write_bytes(target, raw)
+        pairs.append((src, target))
+    return pairs
+
+
+def _reset_artifacts(home: str) -> Tuple[List[Dict[str, Any]],
+                                         Optional[str]]:
+    """Back up + clear every user-learning artifact.  Never raises."""
+    backup_root: Optional[str] = None
+    results: List[Dict[str, Any]] = []
+    for artifact in _lifecycle_artifacts():
+        files = _artifact_files(artifact)
+        if not files:
+            results.append({"name": artifact["name"],
+                            "path": artifact["path"],
+                            "existed": False, "cleared": True})
+            continue
+        entry: Dict[str, Any] = {"name": artifact["name"],
+                                 "path": artifact["path"],
+                                 "existed": True, "cleared": False}
+        try:
+            if backup_root is None:
+                backup_root = os.path.join(
+                    ensure_dirs(), "backups", f"lifecycle-{int(time.time())}")
+                os.makedirs(backup_root, exist_ok=True)
+            pairs = _backup_artifact_files(files, backup_root, home)
+            entry["backup_dir"] = backup_root
+            if len(pairs) == 1:
+                entry["backup"] = pairs[0][1]
+            for src, _target in pairs:
+                os.remove(src)
+        except OSError as exc:
+            entry["error"] = f"{type(exc).__name__}: {exc}"
+            results.append(entry)
+            continue
+        # verify the clear actually happened (honesty over optimism)
+        leftover = _artifact_files(artifact)
+        entry["cleared"] = not leftover
+        if leftover:
+            entry["error"] = "files still present after clear"
+        results.append(entry)
+    return results, backup_root
+
+
+def _delete_artifacts() -> List[Dict[str, Any]]:
+    """Remove every user-learning artifact (backups untouched)."""
+    results: List[Dict[str, Any]] = []
+    for artifact in _lifecycle_artifacts():
+        files = _artifact_files(artifact)
+        entry: Dict[str, Any] = {"name": artifact["name"],
+                                 "path": artifact["path"],
+                                 "existed": bool(files),
+                                 "deleted": False}
+        errors: List[str] = []
+        removed = 0
+        for path in files:
+            try:
+                os.remove(path)
+                removed += 1
+            except OSError as exc:
+                errors.append(f"{os.path.basename(path)}: "
+                              f"{type(exc).__name__}")
+        if files:
+            entry["deleted"] = (removed == len(files)
+                                and not _artifact_files(artifact))
+        if errors:
+            entry["error"] = "; ".join(errors)
+        results.append(entry)
+    return results
+
+
+# ---------------------------------------------------------------------------
 # CLI facade commands
 # ---------------------------------------------------------------------------
 
@@ -565,10 +714,14 @@ def memory_status() -> dict:
 
 
 def memory_export(path: str, overwrite: bool = False) -> dict:
-    """`airmouse memory export <path>` — bundle every store into one JSON.
+    """`airmouse memory export <path>` — bundle stores + learning artifacts.
 
-    The bundle contains data + schema_version per store and nothing is
-    sent anywhere; it lands where the user points it.
+    The bundle contains data + schema_version per store, PLUS the
+    manifest artifacts (intelligence jsons + model.bin, calibration,
+    gaze calibration, gestures.json, macros/*.json, lecture.md) as
+    base64 payloads — nothing is redacted beyond the standing
+    metadata-preferred store contents and nothing is sent anywhere;
+    it all lands where the user points it.
     """
     target = _safe_export_path(path)
     if os.path.exists(target) and not overwrite:
@@ -580,20 +733,51 @@ def memory_export(path: str, overwrite: bool = False) -> dict:
         store = get_store(name)
         stores[name] = {"schema_version": store.schema_version,
                         "data": store.load()}
+    artifacts: List[Dict[str, Any]] = []
+    captured = 0
+    for artifact in _lifecycle_artifacts():
+        files = _artifact_files(artifact)
+        if not files:
+            artifacts.append({"name": artifact["name"],
+                              "path": artifact["path"],
+                              "exists": False})
+            continue
+        for fpath in files:
+            try:
+                with open(fpath, "rb") as f:
+                    raw = f.read()
+                artifacts.append({"name": artifact["name"],
+                                  "path": fpath, "exists": True,
+                                  "encoding": "base64",
+                                  "data": base64.b64encode(raw).decode("ascii")})
+                captured += 1
+            except OSError as exc:
+                artifacts.append({"name": artifact["name"],
+                                  "path": fpath, "exists": True,
+                                  "error": f"{type(exc).__name__}: {exc}"})
     payload = {"format": "airmouse-memory-export",
                "schema_version": SCHEMA_VERSION,
                "exported_at": _utcnow_iso(),
-               "home": airmouse_home(), "stores": stores}
+               "home": airmouse_home(), "stores": stores,
+               "artifacts": artifacts}
     atomic_write_json(target, payload)
     return {"path": target, "stores": list(stores),
-            "bytes": int(os.path.getsize(target))}
+            "bytes": int(os.path.getsize(target)),
+            "artifacts": len(artifacts), "artifacts_captured": captured}
 
 
 def memory_reset() -> dict:
-    """`airmouse memory reset` — per-store backup + clear.
+    """`airmouse memory reset` — per-store backup + clear, PLUS artifacts.
 
-    Backups land in <home>/backups/ and are kept.
+    Stores are backed up to <home>/backups/ and cleared.  Every
+    user-learning artifact from the privacy manifest (intelligence
+    jsons + model.bin, calibration.json, gaze_calibration.json,
+    gestures.json, macros/*.json, lecture.md) is backed up under
+    <home>/backups/lifecycle-<epoch>/ (home-relative layout) and then
+    removed — the owning modules recreate them on next save.  Backups
+    are always kept.
     """
+    home = airmouse_home()
     stores = {}
     for name, store in all_stores().items():
         result = store.reset()
@@ -602,20 +786,85 @@ def memory_reset() -> dict:
         if result.get("error"):
             entry["error"] = result["error"]
         stores[name] = entry
-    return {"home": airmouse_home(), "backups_kept": True,
-            "note": "pre-reset backups preserved under "
-                    "<home>/backups/", "stores": stores}
+    artifacts, backup_root = _reset_artifacts(home)
+    result = {"home": home, "backups_kept": True,
+              "note": "pre-reset backups preserved under "
+                      "<home>/backups/; user-learning artifacts backed "
+                      "up under <home>/backups/lifecycle-<epoch>/ then "
+                      "cleared",
+              "stores": stores, "artifacts": artifacts}
+    if backup_root is not None:
+        result["artifacts_backup_dir"] = backup_root
+    return result
 
 
 def memory_delete() -> dict:
-    """`airmouse memory delete` — remove store files (backups are KEPT)."""
+    """`airmouse memory delete` — remove store files + artifacts.
+
+    Backups under <home>/backups/ are KEPT (including the
+    lifecycle-<epoch>/ reset backups).
+    """
     stores = {}
     for name, store in all_stores().items():
         stores[name] = {"deleted": store.delete()}
+    artifacts = _delete_artifacts()
     return {"home": airmouse_home(), "backups_kept": True,
-            "note": "store files removed; backups under <home>/backups/ "
-                    "were NOT deleted — remove them yourself if you "
-                    "want everything gone", "stores": stores}
+            "note": "store files and user-learning artifacts removed; "
+                    "backups under <home>/backups/ were NOT deleted — "
+                    "remove them yourself if you want everything gone",
+            "stores": stores, "artifacts": artifacts}
+
+
+def deletion_verifies() -> dict:
+    """Post-delete/reset scan proving no user-learning data remains.
+
+    Checks every named store (a store counts as remaining only when it
+    still holds records — after ``memory_reset`` the empty envelope
+    files legitimately stay) and every user-learning artifact from the
+    privacy manifest (any remaining file counts).  Quarantined
+    ``.corrupt-*`` copies of stores also count as remaining user data.
+    ``<home>/backups/`` is deliberately excluded: backups are the one
+    place user data is *supposed* to survive.
+
+    Never raises; ``clean`` is True exactly when ``remaining`` is empty.
+    """
+    remaining: List[Dict[str, Any]] = []
+    checked = 0
+    try:
+        for name in STORE_NAMES:
+            store = get_store(name)
+            checked += 1
+            if store.exists():
+                try:
+                    records = int(store.status().get("records") or 0)
+                except Exception:
+                    records = 0
+                if records:
+                    remaining.append({"path": store.path,
+                                      "kind": "store", "name": name,
+                                      "reason": f"{records} records"})
+            try:
+                for leftover in glob.glob(store.path + ".corrupt-*"):
+                    remaining.append({"path": leftover, "kind": "store",
+                                      "name": name,
+                                      "reason": "quarantined corrupt copy"})
+            except OSError:
+                pass
+        for artifact in _lifecycle_artifacts():
+            checked += 1
+            try:
+                for path in _artifact_files(artifact):
+                    remaining.append({"path": path, "kind": "artifact",
+                                      "name": artifact["name"],
+                                      "reason": "exists"})
+            except OSError:
+                pass
+    except Exception as exc:            # never raise from a verifier
+        return {"home": airmouse_home(), "clean": False, "checked": checked,
+                "remaining": remaining,
+                "error": f"{type(exc).__name__}: {exc}"}
+    return {"home": airmouse_home(), "clean": not remaining,
+            "checked": checked, "remaining": remaining}
 
 
 # ---------------------------------------------------------------------------

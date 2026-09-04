@@ -26,8 +26,10 @@ import time
 from typing import Any, Dict, List, Optional, Sequence
 
 from . import IntelligenceState
+from .. import paths as _paths
 
-# artifact names (all inside ~/.airmouse/intelligence/)
+# artifact names (all inside the intelligence directory resolved by
+# airmouse.paths — follows $AIRMOUSE_HOME on every construction)
 _ART_MODEL = "model.bin"
 _ART_MEMORY = "memory.json"
 _ART_VOCAB = "vocabulary.json"
@@ -41,8 +43,7 @@ class IntelligencePlugin:
     def __init__(self, config: Optional[Dict[str, Any]] = None,
                  base_dir: Optional[str] = None) -> None:
         cfg = dict(config or {})
-        self.base_dir = base_dir or os.path.join(
-            os.path.expanduser("~"), ".airmouse", "intelligence")
+        self.base_dir = base_dir or _paths.intelligence_dir()
         self.enabled = bool(cfg.get("enabled", True))
         self.learning_enabled = bool(cfg.get("learning", True))
         self.memory_enabled = bool(cfg.get("memory_enabled", True))

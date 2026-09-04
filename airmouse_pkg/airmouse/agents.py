@@ -36,6 +36,7 @@ MAX_AUDIT = 400
 MAX_NAME = 40
 DEFAULT_LEASE_TTL = 30.0          # seconds
 MAX_LEASE_TTL = 300.0
+MAX_ACTION_WINDOW = 2000          # bounded per-agent rate window (§12)
 
 
 class AgentState(enum.Enum):
@@ -129,6 +130,15 @@ def _utcnow() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def _fmt_budget(value: Any) -> str:
+    """Compact, deterministic budget rendering for denial reasons."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return str(value)[:20]
+    return str(int(f)) if f.is_integer() else str(f)
+
+
 class AgentRegistry:
     """§12 multi-agent registry + resource locks + conflict policy."""
 
@@ -144,6 +154,9 @@ class AgentRegistry:
         self._conflicts: List[ConflictRecord] = []
         self._audit: List[str] = []
         self._human_present = True
+        # §12 budget bookkeeping: rolling action timestamps per agent
+        # (only maintained for agents carrying max_actions_per_minute).
+        self._action_times: Dict[str, List[float]] = {}
 
     # ── registration + discovery (§12) ──────────────────────────────────
 
@@ -165,7 +178,7 @@ class AgentRegistry:
                 priority=int(priority),
                 capabilities=tuple(str(c)[:40]
                                    for c in tuple(capabilities)[:24]),
-                budgets={str(k)[:20]: max(0.0, float(v))
+                budgets={str(k)[:32]: max(0.0, float(v))
                          for k, v in list((budgets or {}).items())[:8]},
                 state=AgentState.REGISTERED, registered_wall=_utcnow())
             self._inboxes[agent_id] = []
@@ -313,9 +326,51 @@ class AgentRegistry:
                 return False, (f"permission {permission_key} -> "
                                f"{decision.decision.value}: "
                                f"{decision.reason}")
+        # §12 budgets: enforced at the ONLY path that increments
+        # actions_used.  Unset budgets (None/empty) change nothing.
+        budget_reason = self._budget_check(agent)
+        if budget_reason:
+            self._audit.append(f"budget denied {agent_id}: "
+                               f"{budget_reason}")
+            return False, budget_reason
         agent.actions_used += 1
+        if "max_actions_per_minute" in agent.budgets:
+            now = time.perf_counter()
+            window = self._action_window(agent_id)
+            window.append(now)
         self._set_state_if(agent_id, AgentState.WAITING, AgentState.ACTIVE)
         return True, "authorized"
+
+    def _budget_check(self, agent: AgentProfile) -> str:
+        """§12 budget gate.  Returns "" when the action is within
+        budget, else a denial reason starting with
+        "budget_exhausted".  Fails CLOSED on malformed budgets."""
+        try:
+            budgets = agent.budgets or {}
+            max_total = budgets.get("max_actions")
+            if max_total is not None and \
+                    agent.actions_used + 1 > float(max_total):
+                return (f"budget_exhausted: max_actions="
+                        f"{_fmt_budget(max_total)} "
+                        f"(used {agent.actions_used})")
+            max_rate = budgets.get("max_actions_per_minute")
+            if max_rate is not None:
+                window = self._action_window(agent.agent_id)
+                if len(window) + 1 > float(max_rate):
+                    return (f"budget_exhausted: "
+                            f"max_actions_per_minute="
+                            f"{_fmt_budget(max_rate)}")
+            return ""
+        except Exception:
+            return "budget_exhausted: malformed budget"
+
+    def _action_window(self, agent_id: str) -> List[float]:
+        """Bounded rolling 60s window of action timestamps."""
+        now = time.perf_counter()
+        window = [t for t in self._action_times.get(agent_id, [])
+                  if now - t < 60.0]
+        self._action_times[agent_id] = window[-MAX_ACTION_WINDOW:]
+        return self._action_times[agent_id]
 
     # ── communication + handoff (§12) ───────────────────────────────────
 

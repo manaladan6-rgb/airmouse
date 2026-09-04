@@ -18,6 +18,15 @@ interaction history, export learned profile, import learned profile.
 The connection state machine is honest: AirMouse is offline-first; the
 CLOUD state can never become active because no cloud capability exists.
 
+v15.2 adds the PRIVACY MANIFEST: a complete, honest inventory of every
+on-disk artifact AirMouse creates (see :data:`PRIVACY_MANIFEST` and
+:func:`privacy_manifest`).  The lifecycle in ``airmouse.persistence``
+(``memory_reset`` / ``memory_delete`` / ``memory_export`` /
+``deletion_verifies``) is driven by this manifest, so the user-facing
+commands now cover the REAL learning artifacts (intelligence/*,
+calibration, gaze calibration, gestures, macros, lecture notes) and
+not just the five named stores.
+
 Copyright (c) AirMouse.  MIT License.
 """
 
@@ -25,8 +34,8 @@ from __future__ import annotations
 
 import enum
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List
 
 
 class ConnectionState(enum.Enum):
@@ -274,9 +283,11 @@ def privacy_report() -> dict:
         "kind": "on-device PersonalInteractionModel",
         "available": False, "path": None, "paths_checked": []}
     try:
-        home = _persistence.airmouse_home()
+        from . import paths as _paths
         candidates = [
-            _os.path.join(home, "intelligence", "model.bin"),
+            _paths.intelligence_model_file(),
+            # pre-manifest legacy location (kept for honest detection of
+            # data written by older builds with a split AIRMOUSE_HOME)
             _os.path.join(_os.path.expanduser("~"), ".airmouse",
                           "intelligence", "model.bin"),
         ]
@@ -303,3 +314,412 @@ def privacy_report() -> dict:
         "airmouse privacy",
     ]
     return report
+
+
+# ---------------------------------------------------------------------------
+# v15.2 — PRIVACY MANIFEST: the honest inventory of every artifact
+# ---------------------------------------------------------------------------
+
+def _gestures_location() -> str:
+    """Where the gesture registry actually persists custom mappings.
+
+    ``gesture_registry`` reads ``$AIRMOUSE_GESTURES`` when set and
+    otherwise uses ``<home>/gestures.json``; the manifest reflects that
+    real precedence so lifecycle actions hit the file users actually
+    wrote.
+    """
+    import os as _os
+
+    env = _os.environ.get("AIRMOUSE_GESTURES", "").strip()
+    if env:
+        return _os.path.abspath(_os.path.expanduser(env))
+    from . import paths as _paths
+    return _paths.gestures_file()
+
+
+def _store_location(name: str):
+    """Callable resolving the named persistence store's live path."""
+    def _resolve() -> str:
+        from . import persistence as _persistence
+        return _persistence.get_store(name).path
+    return _resolve
+
+
+def _dir_json_count(path) -> int:
+    import glob as _glob
+    import os as _os
+
+    if not path or not _os.path.isdir(path):
+        return 0
+    try:
+        return len(_glob.glob(_os.path.join(path, "*.json")))
+    except OSError:
+        return 0
+
+
+#: One row per on-disk artifact AirMouse creates.  Fields:
+#:   name         stable identifier used by the lifecycle + tests
+#:   purpose      why the artifact exists (plain language)
+#:   location     callable or str resolving the CURRENT path (dynamic —
+#:                never cached, honors AIRMOUSE_HOME on every call)
+#:   kind         "file" | "dir" | "store"
+#:   data_type    honest description of what the bytes contain
+#:   created_by / read_by / deleted_by / exported_by   honest actors
+#:   user_learning True when the artifact holds data learned from or
+#:                authored by the user — the lifecycle's target set.
+#:                False = settings / third-party model / backup area.
+PRIVACY_MANIFEST = [
+    {
+        "name": "twin_store",
+        "purpose": "persistent digital-twin interaction statistics",
+        "location": _store_location("twin"), "kind": "store",
+        "data_type": "interaction metadata: counters, timestamps and "
+                     "learned parameters (content-scrubbed)",
+        "created_by": "persistence.PersistentStore.save (learning modules)",
+        "read_by": "persistence.PersistentStore.load; memory status/export",
+        "deleted_by": "memory_reset (backup+clear); memory_delete (remove)",
+        "exported_by": "memory_export (stores bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "vocabulary_store",
+        "purpose": "persistent learned-vocabulary statistics store",
+        "location": _store_location("vocabulary"), "kind": "store",
+        "data_type": "learned vocabulary terms, counts and corrections",
+        "created_by": "persistence.PersistentStore.save (learning modules)",
+        "read_by": "persistence.PersistentStore.load; memory status/export",
+        "deleted_by": "memory_reset (backup+clear); memory_delete (remove)",
+        "exported_by": "memory_export (stores bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "skills_store",
+        "purpose": "persistent skill-usage statistics store",
+        "location": _store_location("skills"), "kind": "store",
+        "data_type": "skill usage counters and parameters",
+        "created_by": "persistence.PersistentStore.save (learning modules)",
+        "read_by": "persistence.PersistentStore.load; memory status/export",
+        "deleted_by": "memory_reset (backup+clear); memory_delete (remove)",
+        "exported_by": "memory_export (stores bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "workflows_store",
+        "purpose": "persistent learned-workflow statistics store",
+        "location": _store_location("workflows"), "kind": "store",
+        "data_type": "learned action-sequence workflow patterns",
+        "created_by": "persistence.PersistentStore.save (learning modules)",
+        "read_by": "persistence.PersistentStore.load; memory status/export",
+        "deleted_by": "memory_reset (backup+clear); memory_delete (remove)",
+        "exported_by": "memory_export (stores bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "preferences_store",
+        "purpose": "persistent in-app preference store",
+        "location": _store_location("preferences"), "kind": "store",
+        "data_type": "user preference values (settings, not content)",
+        "created_by": "persistence.PersistentStore.save (setup/learning)",
+        "read_by": "persistence.PersistentStore.load; memory status/export",
+        "deleted_by": "memory_reset (backup+clear); memory_delete (remove)",
+        "exported_by": "memory_export (stores bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "intelligence_memory",
+        "purpose": "interaction memory of the intelligence plugin",
+        "location": lambda: _intelligence_file("memory.json"),
+        "kind": "file",
+        "data_type": "interaction metadata (counts/timestamps; raw text "
+                     "is scrubbed before any write)",
+        "created_by": "IntelligencePlugin.save (airmouse.intelligence)",
+        "read_by": "IntelligencePlugin.load",
+        "deleted_by": "memory_reset (backup+remove); memory_delete",
+        "exported_by": "memory_export (artifacts bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "intelligence_vocabulary",
+        "purpose": "personal vocabulary of the intelligence plugin",
+        "location": lambda: _intelligence_file("vocabulary.json"),
+        "kind": "file",
+        "data_type": "learned vocabulary tokens, frequencies and "
+                     "correction pairs",
+        "created_by": "IntelligencePlugin.save (airmouse.intelligence)",
+        "read_by": "IntelligencePlugin.load",
+        "deleted_by": "memory_reset (backup+remove); memory_delete",
+        "exported_by": "memory_export (artifacts bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "intelligence_workflows",
+        "purpose": "learned workflow patterns of the intelligence plugin",
+        "location": lambda: _intelligence_file("workflows.json"),
+        "kind": "file",
+        "data_type": "learned action sequences and their frequencies",
+        "created_by": "IntelligencePlugin.save (airmouse.intelligence)",
+        "read_by": "IntelligencePlugin.load",
+        "deleted_by": "memory_reset (backup+remove); memory_delete",
+        "exported_by": "memory_export (artifacts bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "intelligence_selftune",
+        "purpose": "self-tuning performance counters",
+        "location": lambda: _intelligence_file("selftune.json"),
+        "kind": "file",
+        "data_type": "runtime performance counters and tuned parameters",
+        "created_by": "IntelligencePlugin.save (SelfTuner export)",
+        "read_by": "IntelligencePlugin.load (SelfTuner import)",
+        "deleted_by": "memory_reset (backup+remove); memory_delete",
+        "exported_by": "memory_export (artifacts bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "intelligence_model",
+        "purpose": "serialized on-device personalization model",
+        "location": lambda: _intelligence_file("model.bin"),
+        "kind": "file",
+        "data_type": "binary n-gram/personalization model weights "
+                     "learned from interaction statistics",
+        "created_by": "IntelligencePlugin.save (PersonalInteractionModel)",
+        "read_by": "IntelligencePlugin.load (PersonalInteractionModel.load)",
+        "deleted_by": "memory_reset (backup+remove); memory_delete",
+        "exported_by": "memory_export (artifacts bundle, base64)",
+        "user_learning": True,
+    },
+    {
+        "name": "hand_calibration",
+        "purpose": "adaptive hand reach-box calibration",
+        "location": lambda: _calibration_file(),
+        "kind": "file",
+        "data_type": "hand reach-box screen-geometry ranges + speed/"
+                     "tremor motion-profile EMAs (no raw frames)",
+        "created_by": "AdaptiveCalibration.save (airmouse.calibration)",
+        "read_by": "AdaptiveCalibration.load",
+        "deleted_by": "memory_reset (backup+remove); memory_delete",
+        "exported_by": "memory_export (artifacts bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "gaze_calibration",
+        "purpose": "gaze-to-screen affine calibration",
+        "location": lambda: _gaze_calibration_file(),
+        "kind": "file",
+        "data_type": "gaze→screen affine matrix + screen geometry + "
+                     "quality statistics",
+        "created_by": "GazeCalibration.save (airmouse.gaze_calibration)",
+        "read_by": "GazeCalibration.load",
+        "deleted_by": "memory_reset (backup+remove); memory_delete",
+        "exported_by": "memory_export (artifacts bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "custom_gestures",
+        "purpose": "user's custom gesture→action mappings",
+        "location": _gestures_location, "kind": "file",
+        "data_type": "user-authored gesture/input sequences and their "
+                     "configured actions",
+        "created_by": "GestureRegistry.save (user edits)",
+        "read_by": "GestureRegistry.load (startup)",
+        "deleted_by": "memory_reset (backup+remove); memory_delete",
+        "exported_by": "memory_export (artifacts bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "macros",
+        "purpose": "recorded macros (replayable action sequences)",
+        "location": lambda: _macros_dir(), "kind": "dir",
+        "data_type": "recorded timed input action traces "
+                     "(click/scroll/move/wait event sequences)",
+        "created_by": "MacroRecorder.save (airmouse.macros)",
+        "read_by": "MacroPlayer.load; list_macros",
+        "deleted_by": "memory_reset (backup+remove each *.json); "
+                      "memory_delete; MacroPlayer delete_macro",
+        "exported_by": "memory_export (artifacts bundle, per file)",
+        "user_learning": True,
+    },
+    {
+        "name": "lecture_notes",
+        "purpose": "default export target for TeacherMode lecture notes",
+        "location": lambda: _lecture_file(), "kind": "file",
+        "data_type": "verbatim user notes: transcribed lecture/meeting "
+                     "timeline content",
+        "created_by": "TeacherMode.export_lecture (airmouse.modes)",
+        "read_by": "the user (plain markdown file)",
+        "deleted_by": "memory_reset (backup+remove); memory_delete",
+        "exported_by": "memory_export (artifacts bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "config",
+        "purpose": "user settings file",
+        "location": lambda: _config_file(), "kind": "file",
+        "data_type": "user settings and thresholds incl. the telemetry "
+                     "flag (no learned content)",
+        "created_by": "Config.save_defaults (airmouse.config)",
+        "read_by": "Config.load at startup",
+        "deleted_by": "not deleted by the lifecycle (user settings — "
+                      "edit or remove manually)",
+        "exported_by": "not exported by memory_export",
+        "user_learning": False,
+    },
+    {
+        "name": "hand_landmarker_model",
+        "purpose": "MediaPipe hand-landmarker neural network (downloaded "
+                   "once, on first run)",
+        "location": lambda: _model_file(), "kind": "file",
+        "data_type": "third-party model weights (no user data)",
+        "created_by": "tracker.ensure_model (one-time download, "
+                      "no user content)",
+        "read_by": "HandTracker (MediaPipe)",
+        "deleted_by": "not deleted by the lifecycle (re-downloadable "
+                      "third-party binary, not user data)",
+        "exported_by": "not exported by memory_export",
+        "user_learning": False,
+    },
+    {
+        "name": "tutorial_done",
+        "purpose": "marker that the user finished the tutorial",
+        "location": lambda: _tutorial_done_file(), "kind": "file",
+        "data_type": "empty marker file (no user content)",
+        "created_by": "main() after tutorial completion",
+        "read_by": "main() at startup (skip tutorial)",
+        "deleted_by": "not deleted by the lifecycle (a marker, not "
+                      "learned data)",
+        "exported_by": "not exported by memory_export",
+        "user_learning": False,
+    },
+    {
+        "name": "backups",
+        "purpose": "pre-reset/pre-delete backups of user data",
+        "location": lambda: _backups_dir(), "kind": "dir",
+        "data_type": "byte copies of the artifacts above, taken before "
+                     "memory_reset/memory_delete",
+        "created_by": "memory_reset / memory_delete lifecycle",
+        "read_by": "the user (manual restore)",
+        "deleted_by": "never deleted automatically — backups are KEPT; "
+                      "remove <home>/backups/ yourself for a full wipe",
+        "exported_by": "not exported (duplicates of live data)",
+        "user_learning": False,
+    },
+    {
+        "name": "exports",
+        "purpose": "workspace for user-directed export bundles",
+        "location": lambda: _exports_dir(), "kind": "dir",
+        "data_type": "portable JSON copies of stores/artifacts the user "
+                     "explicitly exported",
+        "created_by": "memory_export / store.export_to (user action)",
+        "read_by": "the user",
+        "deleted_by": "not deleted automatically (user-owned copies)",
+        "exported_by": "is the export output area",
+        "user_learning": False,
+    },
+]
+
+
+def _intelligence_file(name: str) -> str:
+    import os as _os
+
+    from . import paths as _paths
+    return _os.path.join(_paths.intelligence_dir(), name)
+
+
+def _calibration_file() -> str:
+    from . import paths as _paths
+    return _paths.calibration_file()
+
+
+def _gaze_calibration_file() -> str:
+    from . import paths as _paths
+    return _paths.gaze_calibration_file()
+
+
+def _macros_dir() -> str:
+    from . import paths as _paths
+    return _paths.macros_dir()
+
+
+def _lecture_file() -> str:
+    from . import paths as _paths
+    return _paths.lecture_file()
+
+
+def _config_file() -> str:
+    from . import paths as _paths
+    return _paths.config_file()
+
+
+def _model_file() -> str:
+    from . import paths as _paths
+    return _paths.model_file()
+
+
+def _tutorial_done_file() -> str:
+    from . import paths as _paths
+    return _paths.tutorial_done_file()
+
+
+def _backups_dir() -> str:
+    from . import paths as _paths
+    return _paths.backups_dir()
+
+
+def _exports_dir() -> str:
+    from . import paths as _paths
+    return _paths.exports_dir()
+
+
+def privacy_manifest() -> list:
+    """Resolve :data:`PRIVACY_MANIFEST` with live paths + existence flags.
+
+    Every entry is resolved FRESH on every call (paths are dynamic, so
+    an ``AIRMOUSE_HOME`` change is honored) and annotated with:
+
+        path          current absolute location (or None on resolve error)
+        exists        True when the file/directory exists right now
+        size_bytes    file size (0 for dirs / missing files)
+        entries       dir artifacts: number of *.json files inside
+        resolve_error set when the location callable itself failed
+
+    Never raises: a failing entry degrades to ``resolve_error`` while
+    the rest of the manifest still resolves.
+    """
+    import os as _os
+
+    resolved: list = []
+    for entry in PRIVACY_MANIFEST:
+        row = {
+            "name": entry.get("name"),
+            "purpose": entry.get("purpose"),
+            "kind": entry.get("kind", "file"),
+            "data_type": entry.get("data_type"),
+            "created_by": entry.get("created_by"),
+            "read_by": entry.get("read_by"),
+            "deleted_by": entry.get("deleted_by"),
+            "exported_by": entry.get("exported_by"),
+            "user_learning": bool(entry.get("user_learning")),
+            "path": None, "exists": False, "size_bytes": 0,
+            "entries": None,
+        }
+        location = entry.get("location")
+        try:
+            row["path"] = (location() if callable(location)
+                           else str(location))
+        except Exception as exc:
+            row["resolve_error"] = f"{type(exc).__name__}: {exc}"
+            resolved.append(row)
+            continue
+        path = row["path"]
+        try:
+            if row["kind"] == "dir":
+                row["exists"] = _os.path.isdir(path)
+                row["entries"] = _dir_json_count(path)
+            else:
+                row["exists"] = _os.path.isfile(path)
+                if row["exists"]:
+                    row["size_bytes"] = int(_os.path.getsize(path))
+        except OSError as exc:
+            row["resolve_error"] = f"{type(exc).__name__}: {exc}"
+        resolved.append(row)
+    return resolved

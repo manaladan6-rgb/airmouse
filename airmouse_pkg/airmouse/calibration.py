@@ -53,6 +53,33 @@ import numpy as np
 
 CALIBRATION_PATH = os.path.join(os.path.expanduser("~"), ".airmouse", "calibration.json")
 
+#: import-time default, kept so a runtime override of CALIBRATION_PATH
+#: (tests / embedders) can be detected by :func:`_calibration_path`
+_DEFAULT_CALIBRATION_PATH = CALIBRATION_PATH
+
+
+def _calibration_path() -> str:
+    """ACTIVE calibration file path (dynamic; one resolution).
+
+    An explicit runtime override of the module constant
+    ``CALIBRATION_PATH`` (≠ the import-time default) still wins — that
+    keeps existing monkeypatch-style embedders working — otherwise the
+    authoritative ``airmouse.paths.calibration_file()`` is used, so
+    ``$AIRMOUSE_HOME`` set after import is always honored.
+    """
+    override = globals().get("CALIBRATION_PATH")
+    try:
+        if override and os.path.abspath(str(override)) != \
+                os.path.abspath(_DEFAULT_CALIBRATION_PATH):
+            return str(override)
+    except Exception:
+        pass
+    try:
+        from . import paths
+        return paths.calibration_file()
+    except Exception:
+        return _DEFAULT_CALIBRATION_PATH
+
 _CALIBRATION_VERSION = 1
 _SOFT_MARGIN = 0.10      # total soft margin around the learned box (5% per side)
 _EPS = 1.0e-6            # minimum box width before remap degenerates
@@ -170,9 +197,10 @@ class AdaptiveCalibration:
     # Persistence
     # ------------------------------------------------------------------
     def save(self) -> bool:
-        """Atomically write stats to CALIBRATION_PATH. Never raises."""
+        """Atomically write stats to the active calibration path. Never raises."""
         try:
-            os.makedirs(os.path.dirname(CALIBRATION_PATH) or ".", exist_ok=True)
+            path = _calibration_path()
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             payload = {
                 "version": _CALIBRATION_VERSION,
                 "saved": datetime.now().isoformat(timespec="seconds"),
@@ -182,18 +210,18 @@ class AdaptiveCalibration:
                 "speed_ema": float(self._speed_ema),
                 "tremor": float(self._tremor),
             }
-            tmp = CALIBRATION_PATH + ".tmp"
+            tmp = path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, indent=2)
-            os.replace(tmp, CALIBRATION_PATH)  # atomic on POSIX & Windows
+            os.replace(tmp, path)  # atomic on POSIX & Windows
             return True
         except Exception:
             return False
 
     def load(self) -> bool:
-        """Load stats from CALIBRATION_PATH. Returns True on success."""
+        """Load stats from the active calibration path. True on success."""
         try:
-            with open(CALIBRATION_PATH, "r", encoding="utf-8") as fh:
+            with open(_calibration_path(), "r", encoding="utf-8") as fh:
                 data = json.load(fh)
             if not isinstance(data, dict):
                 return False

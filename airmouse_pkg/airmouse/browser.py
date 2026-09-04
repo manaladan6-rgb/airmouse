@@ -52,10 +52,14 @@ import base64
 import copy
 import hashlib
 import json
+import logging
 import os
 import re
+import shutil
 import socket
 import struct
+import subprocess
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -69,6 +73,8 @@ except ImportError:  # pragma: no cover - direct file execution fallback
     from airmouse.interfaces import (Event, EventKind, Modality, ScreenTarget,
                                      ScreenTargetType, now_ts)
 
+logger = logging.getLogger("airmouse.browser")
+
 __all__ = [
     "BrowserElement", "BrowserState", "BrowserBridge",
     "SimulatedBrowserBridge", "CDPBrowserBridge",
@@ -76,6 +82,8 @@ __all__ = [
     "BrowserResolution", "SemanticBrowserResolver",
     "BrowserActionVerifier", "BrowserController",
     "BROWSER_ACTIONS",
+    "discover_browser_executable", "launch_browser",
+    "pinned_ws_parts",
 ]
 
 
@@ -761,7 +769,10 @@ class CDPBrowserBridge(BrowserBridge):
                  timeout: float = 0.5, offline: bool = False,
                  browser: str = "chrome") -> None:
         self._port = int(port)
-        self._host = str(host or "127.0.0.1")
+        # HARD RULE: the DevTools discovery endpoint is only ever fetched on
+        # loopback (§11 security).  A non-loopback host is coerced to
+        # 127.0.0.1 with a logged reason — never contacted.
+        self._host = _pin_loopback_host(host)
         self._timeout = max(0.1, float(timeout))
         self._offline = bool(offline)
         self._browser_name = str(browser or "chrome")
@@ -779,7 +790,9 @@ class CDPBrowserBridge(BrowserBridge):
 
     def _http_json(self, path: str, method: str = "GET") -> Optional[Any]:
         try:
-            url = f"http://{self._host}:{self._port}{path}"
+            # discovery fetch is pinned to loopback — hard rule, not a default
+            url = (f"http://{_pin_loopback_host(self._host)}:"
+                   f"{self._port}{path}")
             req = urllib.request.Request(url, method=method)
             req.add_header("Connection", "close")
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
@@ -829,11 +842,17 @@ class CDPBrowserBridge(BrowserBridge):
             ws_url = self._tab_ws.get(tab_id, "")
         if not ws_url:
             return None
-        parts = urllib.parse.urlsplit(ws_url)
-        host = parts.hostname or self._host
-        port = parts.port or self._port
-        path = parts.path or "/"
-        ws = _CdpWebSocket(host, port, path, timeout=self._timeout)
+        # SECURITY: only connect when the reported host is loopback.  A
+        # DevTools response claiming another host is not ours to drive —
+        # refuse it with a logged reason instead of connecting.
+        pinned = pinned_ws_parts(ws_url, self._host, self._port)
+        if pinned is None:
+            return None
+        host, port, path = pinned
+        try:
+            ws = _CdpWebSocket(host, port, path, timeout=self._timeout)
+        except Exception:
+            return None
         self._ws_cache[tab_id] = ws
         return ws
 
@@ -1126,6 +1145,244 @@ class CDPBrowserBridge(BrowserBridge):
             return ok
         except Exception:
             return False
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Browser launcher + loopback pinning (§11 last mile)
+# ═════════════════════════════════════════════════════════════════════════════
+
+#: loopback hosts a DevTools endpoint may claim (anything else is refused)
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+#: executable names probed with shutil.which, in discovery order
+_BROWSER_EXE_CANDIDATES: Tuple[str, ...] = (
+    "google-chrome", "google-chrome-stable", "chromium",
+    "chromium-browser", "chrome", "msedge",
+)
+
+
+def _pin_loopback_host(host: Any) -> str:
+    """Coerce a discovery host to loopback (hard rule, logged).
+
+    ``127.0.0.1`` / ``localhost`` / ``::1`` pass through (normalized to
+    ``127.0.0.1`` for HTTP); anything else is refused and replaced with
+    ``127.0.0.1`` — a DevTools endpoint on a non-loopback host is never
+    contacted, it is logged and ignored.
+    """
+    try:
+        h = str(host or "127.0.0.1").strip().strip("[]").lower()
+    except Exception:
+        return "127.0.0.1"
+    if h in ("127.0.0.1", "localhost", "::1", ""):
+        return "127.0.0.1"
+    logger.warning(
+        "browser: pinning DevTools discovery host %r to 127.0.0.1 "
+        "(non-loopback hosts are never contacted)", h)
+    return "127.0.0.1"
+
+
+def pinned_ws_parts(ws_url: str, default_host: str = "127.0.0.1",
+                    default_port: int = 9222
+                    ) -> Optional[Tuple[str, int, str]]:
+    """Parse a DevTools ``webSocketDebuggerUrl`` PINNED to loopback.
+
+    Returns ``(host, port, path)`` only when the URL's host is
+    ``127.0.0.1`` or ``localhost`` (a missing host falls back to the
+    pinned default).  Any other host — e.g. a hostile/misconfigured
+    ``ws://evil.example.com:9222/...`` — yields ``None`` with a logged
+    reason, and the caller must NOT connect.
+    """
+    try:
+        parts = urllib.parse.urlsplit(str(ws_url or ""))
+    except Exception:
+        logger.warning("browser: refusing unparsable webSocketDebuggerUrl")
+        return None
+    scheme = (parts.scheme or "").strip().lower()
+    if scheme not in ("ws", "wss"):
+        logger.warning("browser: refusing webSocketDebuggerUrl with "
+                       "non-ws scheme %r", scheme or "<none>")
+        return None
+    host = (parts.hostname or "").strip().strip("[]").lower()
+    if not host:
+        host = _pin_loopback_host(default_host)
+    if host not in _LOOPBACK_HOSTS:
+        logger.warning(
+            "browser: refusing non-loopback webSocketDebuggerUrl host %r "
+            "(only 127.0.0.1/localhost are accepted)", host)
+        return None
+    try:
+        port = int(parts.port) if parts.port else int(default_port)
+    except (TypeError, ValueError):
+        logger.warning("browser: refusing webSocketDebuggerUrl with "
+                       "invalid port %r", parts.port)
+        return None
+    return (host, port, parts.path or "/")
+
+
+def _devtools_ready(port: int, timeout: float = 0.5) -> bool:
+    """True when http://127.0.0.1:<port>/json/version answers (loopback)."""
+    try:
+        url = f"http://127.0.0.1:{int(port)}/json/version"
+        req = urllib.request.Request(url)
+        req.add_header("Connection", "close")
+        with urllib.request.urlopen(req, timeout=max(0.1, float(timeout))) \
+                as resp:
+            data = json.loads(resp.read(65_536).decode("utf-8", "replace"))
+        return isinstance(data, dict) and bool(data)
+    except Exception:
+        return False
+
+
+def _windows_browser_paths() -> List[str]:
+    """Typical Windows install paths (ProgramFiles envs, like §doctor)."""
+    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    lad = os.environ.get(
+        "LocalAppData", os.path.join(os.path.expanduser("~"),
+                                     "AppData", "Local"))
+    out: List[str] = []
+    for base in (pf, pf86, lad):
+        out.append(os.path.join(base, "Google", "Chrome", "Application",
+                                "chrome.exe"))
+        out.append(os.path.join(base, "Microsoft", "Edge", "Application",
+                                "msedge.exe"))
+        out.append(os.path.join(base, "Chromium", "Application",
+                                "chrome.exe"))
+    return out
+
+
+_MAC_BROWSER_PATHS: Tuple[str, ...] = (
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+)
+
+
+def discover_browser_executable(browser_path: Optional[str] = None) -> str:
+    """Locate a Chrome/Chromium/Edge executable; '' when none is found.
+
+    Discovery order: explicit ``browser_path`` (must exist on disk or be
+    resolvable on PATH — an explicit-but-missing path is an honest
+    failure, NOT silently replaced) → ``shutil.which`` over
+    :data:`_BROWSER_EXE_CANDIDATES` → Windows typical install paths
+    (ProgramFiles/ProgramFiles(x86)/LocalAppData envs) → macOS
+    /Applications bundles.  Never raises.
+    """
+    try:
+        if browser_path:
+            p = str(browser_path)
+            if os.path.isfile(p):
+                return p
+            w = shutil.which(p)
+            if w and os.path.isfile(w):
+                return w
+            return ""       # explicit but missing → honest failure
+        for name in _BROWSER_EXE_CANDIDATES:
+            w = shutil.which(name)
+            if w and os.path.isfile(w):
+                return w
+        if os.name == "nt":
+            for p in _windows_browser_paths():
+                if os.path.isfile(p):
+                    return p
+        elif os.name == "posix":
+            import platform as _platform
+            if _platform.system() == "Darwin":
+                for p in _MAC_BROWSER_PATHS:
+                    if os.path.isfile(p):
+                        return p
+    except Exception:
+        return ""
+    return ""
+
+
+def launch_browser(port: int = 9222,
+                   browser_path: Optional[str] = None,
+                   user_data_dir: Optional[str] = None,
+                   timeout_s: float = 10.0,
+                   headless: bool = False) -> Dict[str, Any]:
+    """Launch a local Chrome/Chromium/Edge with the DevTools port open.
+
+    The last mile of §11: until now a user had to start the browser by
+    hand with ``--remote-debugging-port``; this does it for them.
+
+    Behaviour
+    ---------
+    - executable discovery via :func:`discover_browser_executable`
+      (explicit path → PATH candidates → Windows/macOS well-known paths);
+    - spawned with an argv list (NO shell): ``--remote-debugging-port``,
+      ``--no-first-run``, ``--no-default-browser-check`` and a
+      ``--user-data-dir`` that is ALWAYS an isolated throwaway profile
+      under the temp dir unless the caller explicitly passes one — the
+      user's real profile is never touched by default;
+    - ``headless=True`` (tests/CI) appends ``--headless=new``; the default
+      is a real, visible browser (this is for real control);
+    - readiness = ``http://127.0.0.1:<port>/json/version`` answering
+      within ``timeout_s`` (polled; loopback is a hard rule);
+    - if something already answers on the port first, it is reused and
+      nothing is spawned.
+
+    Returns ``{"ok": bool, "port": int, "browser": <path or "">}`` plus
+    ``"error"`` (str) on failure and ``"pid"`` (int) when we spawned a
+    process.  Never raises.
+    """
+    result: Dict[str, Any] = {"ok": False, "port": int(port), "browser": ""}
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        result["error"] = "invalid_port"
+        return result
+    if not (0 < port < 65536):
+        result["error"] = "invalid_port"
+        return result
+
+    # Already-running DevTools endpoint on this port → reuse honestly
+    # (the user may have started their own browser with
+    # --remote-debugging-port; nothing is spawned then).
+    if _devtools_ready(port, timeout=0.5):
+        result["browser"] = discover_browser_executable()   # best-effort
+        result["ok"] = True
+        return result
+
+    exe = discover_browser_executable(browser_path)
+    if not exe:
+        result["error"] = "browser_not_found"
+        return result
+    result["browser"] = exe
+
+    if user_data_dir:
+        profile = str(user_data_dir)
+    else:
+        # isolated throwaway profile — NEVER the user's real profile
+        profile = os.path.join(tempfile.gettempdir(),
+                               f"airmouse-browser-profile-{port}")
+    argv = [
+        exe,
+        f"--remote-debugging-port={port}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        f"--user-data-dir={profile}",
+    ]
+    if headless:
+        argv.append("--headless=new")
+    try:
+        proc = subprocess.Popen(
+            argv, shell=False,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL)
+        result["pid"] = int(proc.pid)
+    except Exception as exc:
+        result["error"] = f"launch_failed: {exc}"
+        return result
+
+    deadline = time.monotonic() + max(0.5, float(timeout_s))
+    while time.monotonic() < deadline:
+        if _devtools_ready(port, timeout=0.5):
+            result["ok"] = True
+            return result
+        time.sleep(0.15)
+    result["error"] = "devtools_not_ready"
+    return result
 
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -39,7 +39,32 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
+#: Legacy module-level macro directory.  Kept for backwards
+#: compatibility (tests and embedders may read or override it), but the
+#: ACTIVE directory is resolved by :func:`_macro_dir` on every call:
+#: an explicit runtime override of MACRO_DIR (≠ the import-time
+#: default) wins, otherwise the authoritative
+#: ``airmouse.paths.macros_dir()`` is used — so ``$AIRMOUSE_HOME`` set
+#: after import is always honored.
 MACRO_DIR = os.path.join(os.path.expanduser("~"), ".airmouse", "macros")
+
+_DEFAULT_MACRO_DIR = MACRO_DIR
+
+
+def _macro_dir() -> str:
+    """Active macro directory (dynamic — one resolution via paths.py)."""
+    override = globals().get("MACRO_DIR")
+    try:
+        if override and os.path.abspath(str(override)) != \
+                os.path.abspath(_DEFAULT_MACRO_DIR):
+            return str(override)
+    except Exception:
+        pass
+    try:
+        from . import paths
+        return paths.macros_dir()
+    except Exception:
+        return _DEFAULT_MACRO_DIR
 
 # Module-level guard so overlapping replays are refused.
 _current_play_thread: "Optional[threading.Thread]" = None
@@ -53,8 +78,8 @@ def _sanitize_name(name: str) -> str:
 
 
 def _macro_path(name: str) -> str:
-    """File path for a macro name inside MACRO_DIR."""
-    return os.path.join(MACRO_DIR, _sanitize_name(name) + ".json")
+    """File path for a macro name inside the active macro dir."""
+    return os.path.join(_macro_dir(), _sanitize_name(name) + ".json")
 
 
 def _stop_requested(stop_check: Optional[Callable[[], bool]]) -> bool:
@@ -70,7 +95,8 @@ def _stop_requested(stop_check: Optional[Callable[[], bool]]) -> bool:
 def list_macros() -> List[str]:
     """Sorted names of all saved macros (empty list on any error)."""
     try:
-        return sorted(f[:-5] for f in os.listdir(MACRO_DIR) if f.endswith(".json"))
+        return sorted(f[:-5] for f in os.listdir(_macro_dir())
+                      if f.endswith(".json"))
     except Exception:
         return []
 
@@ -141,7 +167,7 @@ class MacroRecorder:
         self.events = []
 
     def save(self) -> str:
-        """Write the recording to ``MACRO_DIR/<name>.json`` (atomic write).
+        """Write the recording to ``<macros dir>/<name>.json`` (atomic).
 
         Returns the file path on success, ``""`` on any failure (never
         raises).  The JSON layout is::
@@ -152,7 +178,8 @@ class MacroRecorder:
         try:
             name = self.name or "macro"
             path = _macro_path(name)
-            os.makedirs(MACRO_DIR, exist_ok=True)
+            macro_dir = _macro_dir()
+            os.makedirs(macro_dir, exist_ok=True)
             payload = {
                 "name": name,
                 "created": datetime.now().isoformat(timespec="seconds"),
@@ -182,7 +209,7 @@ class MacroPlayer:
         self._macro: Optional[Dict[str, Any]] = None
 
     def load(self, name: str) -> Dict[str, Any]:
-        """Load ``MACRO_DIR/<name>.json`` and remember it for :meth:`play`.
+        """Load ``<macros dir>/<name>.json`` and remember it for :meth:`play`.
 
         Raises FileNotFoundError if the macro does not exist.
         """
@@ -300,14 +327,16 @@ class MacroPlayer:
     def _load_latest() -> Optional[Dict[str, Any]]:
         """Load the most recently saved macro (used when none was loaded)."""
         try:
+            macro_dir = _macro_dir()
             candidates = [
-                (os.path.getmtime(os.path.join(MACRO_DIR, f)), f)
-                for f in os.listdir(MACRO_DIR) if f.endswith(".json")
+                (os.path.getmtime(os.path.join(macro_dir, f)), f)
+                for f in os.listdir(macro_dir) if f.endswith(".json")
             ]
             if not candidates:
                 return None
             _, fname = max(candidates)
-            with open(os.path.join(MACRO_DIR, fname), "r", encoding="utf-8") as fh:
+            with open(os.path.join(macro_dir, fname), "r",
+                      encoding="utf-8") as fh:
                 data = json.load(fh)
             return data if isinstance(data, dict) else None
         except Exception:

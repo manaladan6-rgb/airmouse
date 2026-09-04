@@ -38,7 +38,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = [
-    "SYSTEM_OPS", "DESTRUCTIVE_SYSTEM_OPS", "FILE_OPS", "DESTRUCTIVE_FILE_OPS",
+    "SYSTEM_OPS", "DESTRUCTIVE_SYSTEM_OPS", "SENSITIVE_SYSTEM_OPS",
+    "FILE_OPS", "DESTRUCTIVE_FILE_OPS",
     "SystemActionExecutor", "MockSystemExecutor",
     "FileActionExecutor", "MockFileExecutor", "sanitize_file_name",
     "validate_url",
@@ -50,11 +51,20 @@ SYSTEM_OPS: Tuple[str, ...] = (
     "media_play", "media_pause", "media_next", "media_previous",
     "lock", "sleep", "shutdown", "restart",
     "brightness_up", "brightness_down", "bluetooth_on", "bluetooth_off",
+    "app_launch",
 )
 
 #: ops that must pass through the safety confirmation gate
 DESTRUCTIVE_SYSTEM_OPS: Tuple[str, ...] = (
     "shutdown", "restart", "sleep", "lock",
+)
+
+#: ops that are NOT destructive but still touch the world outside the
+#: pointer (launching an arbitrary local target) — surfaced for policy /
+#: telemetry / confirmation layers the same way the destructive table is,
+#: while ``is_destructive()`` honestly stays False for them.
+SENSITIVE_SYSTEM_OPS: Tuple[str, ...] = (
+    "app_launch",
 )
 
 #: allowed file operations
@@ -132,19 +142,22 @@ class SysResult:
 class SystemActionExecutor:
     """Best-effort, shell-free system operations per platform.
 
-    Media/volume: Windows uses the existing ctypes SendInput helpers in
-    :mod:`airmouse.keyboard`; Linux prefers pactl/playerctl/xdotool;
-    macOS prefers osascript.  Power ops (shutdown/restart/sleep/lock)
-    are available() but ALWAYS destructive-flagged; the safety layer
-    gates them (§18) — this executor never bypasses confirmation.
+    Media/volume: Windows routes through the LEGACY SendInput helpers in
+    :mod:`airmouse.keyboard` (VK codes, imported lazily INSIDE the Windows
+    branch) with an honest PowerShell fallback; Linux prefers
+    pactl/playerctl/xdotool; macOS prefers osascript.  Power ops
+    (shutdown/restart/sleep/lock) are available() but ALWAYS
+    destructive-flagged; the safety layer gates them (§18) — this
+    executor never bypasses confirmation.  ``app_launch`` opens one
+    sanitized local target through the platform opener (os.startfile /
+    xdg-open / open) — non-destructive but flagged in
+    :data:`SENSITIVE_SYSTEM_OPS`.
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         cfg = dict(config or {})
         self.allow_power = bool(cfg.get("allow_power", True))
         self.timeout = float(cfg.get("timeout", 4.0))
-        self._kb = None
-        self._kb_tried = False
 
     # -- availability ---------------------------------------------------------
 
@@ -161,28 +174,33 @@ class SystemActionExecutor:
             return False
         return False
 
-    def _keyboard(self):
-        """Lazily load the v5 cross-platform keyboard helper."""
-        if self._kb_tried:
-            return self._kb
-        self._kb_tried = True
+    def _win_sendinput_key(self, key_name: str) -> bool:
+        """Windows-only: one media/volume key via the LEGACY
+        :mod:`airmouse.keyboard` SendInput helpers (real VK codes).
+
+        The import is lazy and lives INSIDE the Windows branch on
+        purpose; every failure degrades to False so the caller can fall
+        back honestly.  Never raises.
+        """
+        if not _IS_WINDOWS:
+            return False
         try:
-            from .keyboard import CrossPlatformKeyboard  # guarded
-            self._kb = CrossPlatformKeyboard()
+            from .keyboard import _send_media_key  # legacy VK helpers
+            return bool(_send_media_key(str(key_name)))
         except Exception:
             try:
-                from keyboard import CrossPlatformKeyboard  # repo-root layout
-                self._kb = CrossPlatformKeyboard()
+                from keyboard import _send_media_key  # repo-root layout
+                return bool(_send_media_key(str(key_name)))
             except Exception:
-                self._kb = None
-        return self._kb
+                return False
 
-    def _argv_run(self, argv: List[str]) -> bool:
-        """Run one argv list WITHOUT a shell; never raises."""
+    def _argv_run(self, argv: List[str],
+                  timeout: Optional[float] = None) -> bool:
+        """Run one argv list WITHOUT a shell (always a timeout); never raises."""
         try:
             r = subprocess.run(
                 argv, shell=False,
-                timeout=self.timeout,
+                timeout=self.timeout if timeout is None else float(timeout),
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return r.returncode == 0
         except Exception:
@@ -190,6 +208,11 @@ class SystemActionExecutor:
 
     def is_destructive(self, op: str) -> bool:
         return str(op or "") in DESTRUCTIVE_SYSTEM_OPS
+
+    def is_sensitive(self, op: str) -> bool:
+        """True for ops that are not destructive but still touch the
+        outside world (see :data:`SENSITIVE_SYSTEM_OPS`)."""
+        return str(op or "") in SENSITIVE_SYSTEM_OPS
 
     # -- dispatch -------------------------------------------------------------
 
@@ -203,17 +226,11 @@ class SystemActionExecutor:
         if op in DESTRUCTIVE_SYSTEM_OPS and not self.allow_power:
             return SysResult(False, op, "power_ops_disabled")
 
-        kb = self._keyboard()
-
-        # media keys via the v5 cross-platform helper first
+        # media keys
         if op == "media_play":
-            if kb is not None and _kb_call(kb, "media_play_pause"):
-                return SysResult(True, op)
             return SysResult(self._media_key("play"), op,
                              "" if _media_ok() else "media_unavailable")
         if op == "media_pause":
-            if kb is not None and _kb_call(kb, "media_play_pause"):
-                return SysResult(True, op)
             return SysResult(self._media_key("play"), op)
         if op == "media_next":
             return SysResult(self._media_key("next"), op)
@@ -223,6 +240,12 @@ class SystemActionExecutor:
         # volume
         if op in ("volume_up", "volume_down", "mute", "unmute"):
             return self._volume(op)
+
+        # app launch (sensitive, not destructive — see SENSITIVE_SYSTEM_OPS)
+        if op == "app_launch":
+            target = str(params.get("target") or params.get("name")
+                         or params.get("arg") or "")
+            return self._app_launch(target, op)
 
         # power (destructive — safety layer confirms BEFORE calling here)
         if op == "lock":
@@ -248,10 +271,13 @@ class SystemActionExecutor:
 
     def _media_key(self, which: str) -> bool:
         try:
-            if _IS_WINDOWS and self._kb is not None:
-                fn = getattr(self._kb, "media_" + which, None)
-                if callable(fn):
-                    return bool(fn())
+            if _IS_WINDOWS:
+                # legacy keyboard.py SendInput helpers (VK codes), lazy
+                legacy = {"play": "play_pause", "next": "next",
+                          "previous": "prev"}.get(which, which)
+                if self._win_sendinput_key(legacy):
+                    return True
+                return False
             if _IS_LINUX:
                 playerctl = shutil.which("playerctl")
                 if playerctl:
@@ -283,10 +309,26 @@ class SystemActionExecutor:
                     pct = "+5%" if op == "volume_up" else "-5%"
                     return SysResult(self._argv_run(
                         [pactl, "set-sink-volume", "@DEFAULT_SINK@", pct]), op)
-            if _IS_WINDOWS and self._kb is not None:
-                fn = getattr(self._kb, op, None)
-                if callable(fn):
-                    return SysResult(bool(fn()), op)
+            if _IS_WINDOWS:
+                # 1st choice: legacy keyboard.py SendInput (real VK codes)
+                legacy = {"volume_up": "volume_up",
+                          "volume_down": "volume_down",
+                          "mute": "volume_mute",
+                          "unmute": "volume_mute"}.get(op, "")
+                if legacy and self._win_sendinput_key(legacy):
+                    return SysResult(True, op)
+                # honest fallback: PowerShell SendKeys (same approach the
+                # legacy module uses for brightness), argv list + timeout
+                code = {"volume_up": "175", "volume_down": "174",
+                        "mute": "173", "unmute": "173"}.get(op)
+                if code:
+                    ok = self._argv_run(
+                        ["powershell", "-NoProfile", "-Command",
+                         "(New-Object -ComObject WScript.Shell)"
+                         f".SendKeys([char]{code})"],
+                        timeout=3.0)
+                    return SysResult(ok, op,
+                                     "" if ok else "volume_unavailable")
             if _IS_MAC:
                 script = {"volume_up": "set volume output volume ((output volume of (get volume settings)) + 5)",
                           "volume_down": "set volume output volume ((output volume of (get volume settings)) - 5)",
@@ -296,6 +338,41 @@ class SystemActionExecutor:
         except Exception:
             pass
         return SysResult(False, op, "volume_unavailable")
+
+    def _app_launch(self, target: str, op: str = "app_launch") -> SysResult:
+        """Open ONE sanitized local target through the platform opener.
+
+        Windows ``os.startfile`` / Linux ``xdg-open`` / macOS ``open`` —
+        argv only (``shell=False``), 5 s timeout.  The argument must be a
+        single token/path: raw traversal (``..``) and path separators are
+        REJECTED (not silently stripped), then the name is sanitized with
+        :func:`sanitize_file_name`.  Non-destructive but sensitive
+        (:data:`SENSITIVE_SYSTEM_OPS`).
+        """
+        raw = str(target or "").strip()
+        if not raw:
+            return SysResult(False, op, "missing_target")
+        if ".." in raw or "/" in raw or "\\" in raw or any(
+                ord(ch) < 0x20 or ch.isspace() for ch in raw):
+            return SysResult(False, op, "invalid_target")
+        clean = sanitize_file_name(raw)
+        if not clean or clean != raw:
+            return SysResult(False, op, "invalid_target")
+        try:
+            if _IS_WINDOWS:
+                os.startfile(clean)  # type: ignore[attr-defined]  # noqa: S606
+                return SysResult(True, op)
+            if _IS_MAC:
+                return SysResult(self._argv_run(
+                    ["open", clean], timeout=5.0), op)
+            if _IS_LINUX:
+                if not shutil.which("xdg-open"):
+                    return SysResult(False, op, "no_opener")
+                return SysResult(self._argv_run(
+                    ["xdg-open", clean], timeout=5.0), op)
+        except Exception:
+            return SysResult(False, op, "app_launch_failed")
+        return SysResult(False, op, "no_opener")
 
     def _lock(self) -> bool:
         try:
@@ -373,14 +450,6 @@ class SystemActionExecutor:
         except Exception:
             pass
         return SysResult(False, op, "bluetooth_unsupported")
-
-
-def _kb_call(kb: Any, method: str) -> bool:
-    try:
-        fn = getattr(kb, method, None)
-        return bool(fn()) if callable(fn) else False
-    except Exception:
-        return False
 
 
 def _media_ok() -> bool:

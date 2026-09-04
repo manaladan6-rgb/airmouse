@@ -88,6 +88,17 @@ class Gestures:
     SWIPE_RIGHT = "swipe_right"
     SWIPE_UP = "swipe_up"
     SWIPE_DOWN = "swipe_down"
+    # v15.2 gesture-evolution labels (emitted by airmouse.gestures pose /
+    # trajectory / depth / oscillation detectors).  Only mapped in
+    # DEFAULT_MAPPINGS where the existing intent vocabulary has a
+    # backward-compatible slot; the rest stay event-level.
+    THUMBS_DOWN = "thumbs_down"
+    FOUR = "four"
+    FIVE = "five"
+    PUSH = "push"
+    PULL = "pull"
+    SHAKE = "shake"
+    WAVE = "wave"
 
 
 SWIPE_PREFIX = "swipe_"
@@ -118,6 +129,14 @@ DEFAULT_MAPPINGS: Dict[str, Tuple[IntentType, Dict[str, Any]]] = {
     Gestures.CIRCULAR_CW: (IntentType.SCROLL, {"direction": "down"}),
     Gestures.CIRCULAR_CCW: (IntentType.SCROLL, {"direction": "up"}),
     Gestures.DIRECTIONAL: (IntentType.MOVE, {}),
+    # v15.2: FIVE/FOUR keep the open-hand DRAG behavior the PALM label had
+    # before the more specific poses took precedence in the recognizer
+    # (an open hand now reads "five" / a thumbless open hand "four" —
+    # same intent, 100% backward compatible).  SHAKE carries the same
+    # cancel semantics the detector documents ("cancel/error").
+    Gestures.FIVE: (IntentType.DRAG, {"phase": "start"}),
+    Gestures.FOUR: (IntentType.DRAG, {"phase": "start"}),
+    Gestures.SHAKE: (IntentType.CANCEL, {"gesture": "shake"}),
 }
 
 

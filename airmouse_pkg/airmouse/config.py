@@ -289,6 +289,9 @@ class Config:
                                      # (§21: network telemetry stays OFF —
                                      #  telemetry_enabled below is authoritative)
 
+    # ═══ v15.2 — TWO-HAND FOUNDATION ═══
+    two_hand = False                 # enables two-hand tracking; requires a camera and mediapipe multi-hand
+
     def save_defaults(self):
         """Save current config as TOML (creates template for user editing)."""
         if tomllib is None:
@@ -432,6 +435,7 @@ class Config:
             f"macro_max_steps = {self.macro_max_steps}        # semantic macro guard",
             f"telemetry_enabled = {str(self.telemetry_enabled).lower()}      # §21 privacy: OFF by default; nothing phones home",
             f"perf_report_enabled = {str(self.perf_report_enabled).lower()}      # local-only perf report on shutdown",
+            f"two_hand = {str(self.two_hand).lower()}               # v15.2 two-hand tracking (camera + mediapipe multi-hand)",
         ]
         with open(CONFIG_PATH, "w") as f:
             f.write("\n".join(lines) + "\n")
@@ -598,6 +602,9 @@ class Config:
                 self.perf_report_enabled = v9.get(
                     "perf_report_enabled", v9.get("telemetry_enabled",
                                                   self.perf_report_enabled))
+                # v15.2 two-hand foundation (same boolean pattern as the
+                # neighboring v9/v10 flags)
+                self.two_hand = v10.get("two_hand", self.two_hand)
 
             # ═══ v11.5 sections (§40) — all backward compatible ═══
             if "intelligence" in data:

@@ -64,6 +64,33 @@ __all__ = ["GazeCalibration", "run_point_calibration", "GAZE_CALIBRATION_PATH"]
 GAZE_CALIBRATION_PATH = os.path.join(os.path.expanduser("~"), ".airmouse",
                                      "gaze_calibration.json")
 
+#: import-time default, kept so a runtime override of GAZE_CALIBRATION_PATH
+#: (tests / embedders) can be detected by :func:`_default_gaze_path`
+_DEFAULT_GAZE_PATH = GAZE_CALIBRATION_PATH
+
+
+def _default_gaze_path() -> str:
+    """ACTIVE default gaze-calibration file path (dynamic; one resolution).
+
+    An explicit runtime override of the module constant
+    ``GAZE_CALIBRATION_PATH`` (≠ the import-time default) still wins,
+    otherwise the authoritative
+    ``airmouse.paths.gaze_calibration_file()`` is used — so
+    ``$AIRMOUSE_HOME`` set after import is always honored.
+    """
+    override = globals().get("GAZE_CALIBRATION_PATH")
+    try:
+        if override and os.path.abspath(str(override)) != \
+                os.path.abspath(_DEFAULT_GAZE_PATH):
+            return str(override)
+    except Exception:
+        pass
+    try:
+        from . import paths
+        return paths.gaze_calibration_file()
+    except Exception:
+        return _DEFAULT_GAZE_PATH
+
 _TARGET_SNAP_TOL = 0.05   # max distance for add_sample() to snap to grid
 _MIN_FIT_POINTS = 4       # minimum kept samples for a meaningful affine fit
 _GOOD_RESIDUAL_PX = 40.0
@@ -85,7 +112,8 @@ class GazeCalibration:
             gc_max_mad_sigma (2.5)  MAD outlier gate (in sigmas)
             gc_min_kept (3)         samples per target required
             gc_screen_w (1920), gc_screen_h (1080) — default screen size
-        path: persistence path override (default GAZE_CALIBRATION_PATH).
+        path: persistence path override (default: the active
+            gaze-calibration path from ``airmouse.paths``).
             Pass a tmp path in tests.
     """
 
@@ -100,7 +128,7 @@ class GazeCalibration:
         self.min_kept = max(1, int(cfg.get("gc_min_kept", 3)))
         self.screen_w = int(cfg.get("gc_screen_w", 1920))
         self.screen_h = int(cfg.get("gc_screen_h", 1080))
-        self.path: str = str(path) if path else GAZE_CALIBRATION_PATH
+        self.path: str = str(path) if path else _default_gaze_path()
         self._grid: List[Tuple[float, float]] = []
         self._records: List[Dict[str, float]] = []
         self._order: List[Tuple[float, float]] = []
