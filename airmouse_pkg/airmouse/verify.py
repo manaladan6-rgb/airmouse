@@ -240,8 +240,20 @@ def _chk_packaging() -> str:
     import airmouse
     version = _pyproject_version()
     if version is None:
-        return ("pyproject.toml not readable in this install "
-                "(wheel) — version equality not checked")
+        # wheel install: no pyproject shipped — check the installed
+        # distribution metadata instead (never silently skip)
+        try:
+            from importlib import metadata
+            dist_version = metadata.version("airmouse")
+        except Exception:
+            return ("packaging metadata unavailable — could not verify "
+                    "version equality; run airmouse doctor")
+        if dist_version != airmouse.__version__:
+            raise RuntimeError(
+                f"installed distribution {dist_version} != "
+                f"airmouse.__version__ {airmouse.__version__}")
+        return (f"installed distribution matches package "
+                f"({dist_version})")
     if version != airmouse.__version__:
         raise RuntimeError(f"pyproject version {version} != "
                            f"airmouse.__version__ {airmouse.__version__}")

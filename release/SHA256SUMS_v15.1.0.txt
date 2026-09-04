@@ -1,0 +1,2 @@
+5b399b5eba72d152c017f47e83ce42a663c1cec67e3b5d4a7a1c0517765c1daf  airmouse-15.1.0-py3-none-any.whl
+691a684d4cceffdc8d318a0c7814404eea232d7aeb5366f0393c0150bf0b8558  airmouse-15.1.0.tar.gz
