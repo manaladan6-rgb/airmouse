@@ -323,6 +323,10 @@ class InteractionAgent:
         "safety", "screen", "screen_providers", "context_resolver", "fusion",
         "intent_engine", "action_engine", "executor", "verifier", "recovery",
         "gaze", "nl", "hands_free", "program_runner",
+        # v10: universal-offline-interaction-engine components
+        "event_bus", "context_engine", "browser", "gesture_registry", "rf",
+        "voice_engine", "system_executor", "file_executor",
+        "browser_executor",
     })
 
     def __init__(self,
@@ -356,7 +360,10 @@ class InteractionAgent:
         # -- actions (safety is gated by the AGENT, not double-gated) ----------
         self.action_engine = overrides.get("action_engine") or ActionEngine(
             executor=overrides.get("executor"), safety=None,
-            config=cfg.action_config)
+            config=cfg.action_config,
+            system_executor=overrides.get("system_executor"),
+            file_executor=overrides.get("file_executor"),
+            browser_executor=overrides.get("browser_executor"))
         self.action_engine.set_bounds(cfg.screen_w, cfg.screen_h)
         # -- verification + recovery ---------------------------------------------
         self.verifier = overrides.get("verifier") or ActionVerifier()
@@ -369,6 +376,20 @@ class InteractionAgent:
         # -- NL -------------------------------------------------------------------
         self.nl = overrides.get("nl") or NLController(
             {"dedup_window": cfg.nl_dedup_window})
+        # -- v10 components (all optional; None = feature off) -----------------
+        self.event_bus = overrides.get("event_bus")
+        self.context_engine = overrides.get("context_engine")
+        if self.context_engine is None:
+            try:
+                from .context import ContextEngine
+                self.context_engine = ContextEngine()
+            except Exception:
+                self.context_engine = None
+        self.gesture_registry = overrides.get("gesture_registry")
+        self.rf_bridge = overrides.get("rf")
+        self.browser = overrides.get("browser")
+        self.voice_engine = overrides.get("voice_engine")
+        self._injected: List[Intent] = []
         # -- telemetry ------------------------------------------------------------
         self.telemetry = Telemetry(cfg.perf_window)
         # -- hands-free controller (built now when starting in that mode) --------
@@ -451,6 +472,92 @@ class InteractionAgent:
         except Exception:
             pass
 
+    # -- v10 external intent injection ---------------------------------------------
+
+    def inject_intent(self, intent: Intent) -> bool:
+        """Queue an EXTERNALLY resolved intent (offline voice, gesture
+        registry, RF bridge) for execution on the next tick.
+
+        The intent flows through the same safety gate, action engine,
+        verification and recovery as every other intent.  Thread-safe.
+        """
+        if intent is None:
+            return False
+        with self._lock:
+            self._injected.append(intent)
+        return True
+
+    def poll_events(self, now: Optional[float] = None) -> int:
+        """Drain the optional v10 producers (voice engine, RF bridge,
+        browser controller) and convert their events into injected
+        intents.  Returns the number of intents queued.
+
+        Deterministic given (events, now); every producer is optional
+        and every failure is swallowed (modality independence, §16).
+        """
+        now = float(now if now is not None else now_ts())
+        queued = 0
+        # offline voice engine → intents
+        ve = self.voice_engine
+        if ve is not None:
+            try:
+                while True:
+                    ev = ve.poll()
+                    if ev is None:
+                        break
+                    payload = getattr(ev, "payload", {}) or {}
+                    intent = payload.get("intent")
+                    if intent is not None:
+                        if self.inject_intent(intent):
+                            queued += 1
+                    elif payload.get("text") and not payload.get("unmatched"):
+                        # committed dictation → TYPE intent (§5)
+                        d = Intent(type=IntentType.TYPE,
+                                   params={"text": str(payload["text"])[:500]},
+                                   confidence=float(getattr(ev, "confidence", 0.5) or 0.5),
+                                   sources=Modality.VOICE,
+                                   utterance=str(payload["text"]),
+                                   timestamp=now)
+                        if self.inject_intent(d):
+                            queued += 1
+            except Exception:
+                pass
+        # RF bridge → gesture registry → intents
+        rf = self.rf_bridge
+        if rf is not None and rf.available():
+            try:
+                for ev, rf_event in rf.poll(now):
+                    label = str((getattr(ev, "payload", {}) or {}).get("label", ""))
+                    if not label:
+                        continue
+                    intent = None
+                    reg = self.gesture_registry
+                    if reg is not None:
+                        _, intent = reg.feed(
+                            label, confidence=float(getattr(ev, "confidence", 0.5)),
+                            now=now)
+                    else:
+                        intent = Intent(
+                            type=IntentType.SWITCH_WINDOW
+                            if label in ("swipe_left", "swipe_right")
+                            else IntentType.SCROLL,
+                            params={"direction": label.replace("swipe_", "")},
+                            confidence=float(getattr(ev, "confidence", 0.5)),
+                            sources=Modality.RF, utterance="rf:" + label,
+                            timestamp=now)
+                    if intent is not None and self.inject_intent(intent):
+                        queued += 1
+            except Exception:
+                pass
+        # browser controller → context + screen targets
+        br = self.browser
+        if br is not None:
+            try:
+                br.poll(now)
+            except Exception:
+                pass
+        return queued
+
     # -- the per-frame pipeline -------------------------------------------------------
 
     def process_frame(self,
@@ -465,6 +572,12 @@ class InteractionAgent:
         """
         t0 = float(now if now is not None else now_ts())
         cfg = self.config
+
+        # 0. v10 producers: drain voice/RF/browser events into intents (§3)
+        try:
+            self.poll_events(t0)
+        except Exception:
+            pass
 
         # 1. gaze ----------------------------------------------------------------
         gstate = gaze_state
@@ -506,6 +619,17 @@ class InteractionAgent:
                 model = self.screen.update(t0)
             except Exception:
                 model = None
+        # v10 context engine: window + gaze target bookkeeping (§8)
+        ctx = self.context_engine
+        if ctx is not None:
+            try:
+                ctx.update_screen(cfg.screen_w, cfg.screen_h)
+                if model is not None and getattr(model, "active_window_title", ""):
+                    ctx.update_window(model.active_window_title, now=t0)
+                ctx.set_mode(getattr(self.fusion.mode, "value", "fusion"),
+                             now=t0)
+            except Exception:
+                pass
         if gstate is not None:
             conf = float(getattr(gstate, "confidence", 0.0) or 0.0)
             if bool(getattr(gstate, "screen_valid", False)):
@@ -526,6 +650,11 @@ class InteractionAgent:
                 self.fusion.update_gaze(point, target, conf, t0)
             except Exception:
                 pass
+            if ctx is not None:
+                try:
+                    ctx.update_gaze_target(target, now=t0)
+                except Exception:
+                    pass
 
         # 4. voice ------------------------------------------------------------------
         nlu = None
@@ -561,9 +690,32 @@ class InteractionAgent:
                 except Exception:
                     pass
                 intents.append(synth)
+        # v10: externally injected intents (offline voice, gesture
+        # registry sequences, RF) join the pipeline behind a lock swap.
+        try:
+            with self._lock:
+                injected, self._injected = self._injected, []
+            if injected:
+                intents.extend(injected)
+        except Exception:
+            pass
 
         # 7. gate → execute → verify → recover -----------------------------------------
         reports = self._run_intents(intents, gstate, t0)
+
+        # v10: fold the last successful action into the context engine (§8)
+        ctx = self.context_engine
+        if ctx is not None:
+            try:
+                for rep in reports:
+                    if getattr(rep, "ok", False):
+                        plan = getattr(rep, "plan", None)
+                        ctx.record_action(
+                            getattr(getattr(plan, "action", None), "value", ""),
+                            getattr(plan, "target", None), now=t0)
+                        break
+            except Exception:
+                pass
 
         return {
             "decision": decision,
