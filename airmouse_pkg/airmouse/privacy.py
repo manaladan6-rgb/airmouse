@@ -191,3 +191,115 @@ class PrivacyDashboard:
         self.audit_log.append({"ts": time.time(), "event": str(event)[:120]})
         if len(self.audit_log) > 200:
             del self.audit_log[:50]
+
+
+# ---------------------------------------------------------------------------
+# v15.1 hardening — one-call privacy report (pure addition; no existing
+# behaviour above is changed by this function).
+# ---------------------------------------------------------------------------
+
+def privacy_report() -> dict:
+    """Honest, one-call privacy posture report (v15.1).
+
+    Sections:
+        telemetry_state  actual telemetry flag, read through the public
+                         config API (Config.load()); OFF is the default
+                         and the report shows the real value
+        network_state    offline module posture — local-only, no cloud
+        storage          home path + per-store health
+                         (persistence.memory_status())
+        learned_data     which stores exist + record counts only —
+                         never any store content
+        model_state      local model availability (on-device artifacts)
+        controls         the user commands that operate on all of this
+
+    Never raises: every section degrades to an ``error`` entry on
+    failure, so the report is always renderable.
+    """
+    import os as _os
+
+    from . import offline as _offline
+    from . import persistence as _persistence
+
+    report: Dict[str, Any] = {}
+
+    # -- telemetry (config's public API; load() reads the real file) --------
+    telemetry: Dict[str, Any] = {"enabled": None, "default": "off"}
+    try:
+        from . import config as _config
+        with _persistence.config_path_scope() as cfg_path:
+            cfg = _config.Config()
+            cfg.load()
+        telemetry["enabled"] = bool(getattr(cfg, "telemetry_enabled", False))
+        telemetry["default_in_code"] = (_config.Config.telemetry_enabled
+                                        is False)
+        telemetry["config_file"] = cfg_path
+    except Exception as exc:
+        telemetry["error"] = f"{type(exc).__name__}: {exc}"
+    report["telemetry_state"] = telemetry
+
+    # -- network posture (offline module) ------------------------------------
+    network: Dict[str, Any] = {"posture": "local-only", "cloud": False,
+                               "telemetry_upload": False}
+    try:
+        network["offline_gate_features"] = sorted(
+            _offline.OfflineGate.NETWORK_FEATURES)
+    except Exception as exc:
+        network["error"] = f"{type(exc).__name__}: {exc}"
+    report["network_state"] = network
+
+    # -- storage (home + per-store health, no content) -----------------------
+    try:
+        report["storage"] = _persistence.memory_status()
+    except Exception as exc:
+        report["storage"] = {"error": f"{type(exc).__name__}: {exc}"}
+
+    # -- learned data (existence + counts only) ------------------------------
+    learned: Dict[str, Any] = {"content_included": False, "stores": {}}
+    try:
+        stores = (report.get("storage") or {}).get("stores") or {}
+        for name, status in stores.items():
+            learned["stores"][name] = {
+                "exists": bool(status.get("exists")),
+                "records": int(status.get("records") or 0)}
+        home = _persistence.airmouse_home()
+        learned["intelligence_artifacts_dir"] = _os.path.isdir(
+            _os.path.join(home, "intelligence"))
+    except Exception as exc:
+        learned["error"] = f"{type(exc).__name__}: {exc}"
+    report["learned_data"] = learned
+
+    # -- model state (local model availability) ------------------------------
+    model: Dict[str, Any] = {
+        "kind": "on-device PersonalInteractionModel",
+        "available": False, "path": None, "paths_checked": []}
+    try:
+        home = _persistence.airmouse_home()
+        candidates = [
+            _os.path.join(home, "intelligence", "model.bin"),
+            _os.path.join(_os.path.expanduser("~"), ".airmouse",
+                          "intelligence", "model.bin"),
+        ]
+        seen: List[str] = []
+        for candidate in candidates:
+            if candidate in seen:
+                continue
+            seen.append(candidate)
+            if _os.path.isfile(candidate):
+                model["available"] = True
+                model["path"] = candidate
+        model["paths_checked"] = seen
+        model["note"] = "the local model never downloads anything"
+    except Exception as exc:
+        model["error"] = f"{type(exc).__name__}: {exc}"
+    report["model_state"] = model
+
+    # -- user controls (the CLI contract) ------------------------------------
+    report["controls"] = [
+        "airmouse memory status",
+        "airmouse memory export <path>",
+        "airmouse memory reset",
+        "airmouse memory delete",
+        "airmouse privacy",
+    ]
+    return report
