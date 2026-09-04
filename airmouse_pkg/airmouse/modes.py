@@ -735,17 +735,45 @@ class ModeController:
     def _dispatch(self, action: str, param: str,
                   now: Optional[float] = None) -> Optional[str]:
         p = param.strip()
+        mode = self.mode_id
+        # shared action names route to the ACTIVE mode's controller
+        if action == "mark_important":
+            if mode == "student":
+                self.student.mark_important(p or self._last_note)
+            elif mode == "meeting":
+                self.meeting.mark_important(p, now)
+            elif mode == "research":
+                if p:
+                    self.research.notes.add(p, important=True, now=now)
+                elif self._last_note:
+                    self.research.notes.add(self._last_note, important=True,
+                                            now=now)
+            else:
+                self.teacher.mark_important(p or self._last_note, now)
+            return action
+        if action == "add_note":
+            self._last_note = p
+            if mode == "meeting":
+                self.meeting.add_note(p, now)
+            elif mode == "student" or mode == "research":
+                self.student.take_note(p, now=now)
+            else:
+                self.teacher.add_note(p, now)
+            return action
+        if action == "source_capture":
+            if mode == "research":
+                self.research.sources.capture(p or "captured source", "")
+            else:
+                self.student.save_source(p or "captured source", "")
+            return action
+        if action == "export_lecture" and mode == "meeting":
+            action = "export_summary"   # meeting phrase table maps here
         if action == "lecture_start":
             self.teacher.start_lecture(now)
         elif action == "lecture_pause":
             self.teacher.pause_lecture(now)
         elif action == "lecture_resume":
             self.teacher.resume_lecture(now)
-        elif action == "mark_important":
-            self.teacher.mark_important(p or self._last_note, now)
-        elif action == "add_note":
-            self._last_note = p
-            self.teacher.add_note(p, now)
         elif action == "export_lecture":
             self.teacher.export_lecture(
                 os.path.join(os.path.expanduser("~"), ".airmouse",
