@@ -1,4 +1,4 @@
-"""AirMouse Simple v5.0.0 — single-file edition. Everything in one file:
+"""AirMouse Simple v5.0-compatible — single-file edition. Everything in one file:
 hybrid One Euro + Kalman cursor filter, adaptive calibration, pinch-to-zoom,
 optional voice control, macro record/replay. Usage: python airmouse_simple.py
 [--cam N] [--voice] [--turbo] [--no-kalman] [--no-calibration] [--zoom-off]
