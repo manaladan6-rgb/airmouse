@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "AirMouse Browser Bridge",
+  "version": "10.0.0",
+  "description": "Local-only AirMouse bridge: streams page element METADATA (role/text/tag/geometry) to the AirMouse bridge server at 127.0.0.1:17843. Data-only; never evaluates page content.",
+  "permissions": ["tabs", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "AirMouse browser bridge (local only)"
+  }
+}
