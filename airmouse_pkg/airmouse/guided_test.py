@@ -250,6 +250,11 @@ class GuidedTestReport:
 # ---------------------------------------------------------------------------
 
 
+#: hard cap on recorded free-text answers (hostile-input bound: a
+#: oversized/abusive answer can never bloat the report or its evidence)
+_ANSWER_MAX_CHARS = 2000
+
+
 class GuidedTestRunner:
     """Runs the 12-test laboratory; plain-spoken; never crashes.
 
@@ -293,9 +298,13 @@ class GuidedTestRunner:
         return raw.strip().strip("'\"").lower() in ("y", "yes")
 
     def _ask_line(self, prompt: str) -> Optional[str]:
-        """Ask for one free-text line.  None = input ended."""
+        """Ask for one free-text line.  None = input ended.
+
+        The recorded answer is hard-capped at ``_ANSWER_MAX_CHARS`` so
+        an oversized or hostile input can never bloat the report.
+        """
         try:
-            return str(self.input_fn(prompt) or "")
+            return str(self.input_fn(prompt) or "")[:_ANSWER_MAX_CHARS]
         except (EOFError, OSError):
             return None
         except Exception:

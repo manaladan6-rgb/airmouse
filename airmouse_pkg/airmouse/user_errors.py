@@ -60,6 +60,14 @@ _TRACEBACK_MAX_CHARS = 4000
 
 _REDACTED = "<redacted>"
 
+#: ANSI escape sequences (CSI + OSC) — stripped so hostile payloads can
+#: never spoof terminal output (cursor moves, color resets, title writes)
+_ANSI_CSI_RE = re.compile(r"\x1b\[[0-9;:?]*[ -/]*[@-~]")
+_ANSI_OSC_RE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?")
+
+#: C0 control characters (keeps \n and \t; strips \r, \x00, ESC, ...)
+_C0_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
 # Token shapes: GitHub PATs (classic + fine-grained), OpenAI-style sk- keys,
 # Slack xoxb- tokens, and Authorization: Bearer headers.
 _TOKEN_PATTERNS = (
@@ -91,8 +99,10 @@ def _home_prefix_pattern() -> Optional["re.Pattern[str]"]:
 
 
 def _redact(text: str) -> str:
-    """Replace secrets / home paths. No truncation (used for tracebacks too)."""
+    """Replace secrets / home paths / control chars. No truncation
+    (used for tracebacks too)."""
     text = str(text)
+    text = _C0_RE.sub("", _ANSI_OSC_RE.sub("", _ANSI_CSI_RE.sub("", text)))
     for pattern in _TOKEN_PATTERNS:
         text = pattern.sub(_REDACTED, text)
     text = _ENV_PAIR_RE.sub(lambda m: m.group(1) + "=" + _REDACTED, text)
@@ -115,6 +125,7 @@ def sanitize_message(text: str) -> str:
     * folds the home directory prefix to ``~``
     * redacts ghp_/gho_/github_pat_/sk-/xoxb-/Bearer tokens -> ``<redacted>``
     * collapses secret-ish ``KEY=value`` pairs -> ``KEY=<redacted>``
+    * strips ANSI escape sequences and control characters (keeps \n, \t)
     * caps output at 500 chars (ellipsis-terminated)
     """
     out = _redact(text)

@@ -1,5 +1,151 @@
 # AirMouse v15.0.0 — Final Verification Report (v12.0 → v15.0)
 
+---
+
+# v15.1.0 Hardening Verification
+
+Date: 2026-09-04 (build environment: Linux x86_64 headless sandbox,
+Python 3.12.14). Scope: the v15.1.0 hardening release of v15.0.0 —
+new release surface (`setup`, `doctor`, `test [--guided]`, `verify`,
+`privacy`, `memory status|export|reset|delete`, first-run menu),
+persistence layer, CLI quality, performance budgets, packaging.
+No architecture changes were made; every v15.0.0 subsystem retains
+its verified status below. Companion: `WINDOWS_REAL_WORLD_TEST.md`
+(repo root), `docs/CAPABILITY_MATRIX.md`, `README.md` §Verification
+status. **Headline honesty statement: physical hardware (webcam,
+microphone, real hand tracking, real gaze, real browser automation)
+was NOT tested in this sandbox — it cannot be; the validation
+procedure is handed to the user via `WINDOWS_REAL_WORLD_TEST.md` and
+`airmouse test --guided`.**
+
+## Part 1 — AUTOMATED VERIFICATION
+
+- **Full suite: 1236 passed / 0 failed / 0 skipped** (re-measured
+  2026-09-04 on the v15.1.0 tree, 21 s, pytest 9.0.2). Baseline at
+  v15.0.0 was 1056; +180 new hardening tests:
+  `test_cli_quality.py` 33, `test_setup_persistence.py` 46,
+  `test_doctor.py` 42, `test_guided_test.py` 54,
+  `test_release_perf.py` 5. All 1056 pre-existing tests stayed green.
+- **`airmouse verify`** (exit 0): 10/10 automated checks PASS — Core
+  import; voice grammar + offline engine determinism; intelligence
+  learn/observe roundtrip; safety gates + e-stop + hierarchy; offline
+  selftest 18/18; simulated browser bridge; agent permission
+  deny-by-default; exclusive lease + challenger refusal; AIP
+  malformed-envelope rejection; pyproject/package version match
+  (15.1.0). The 5 PHYSICAL rows report ACTION_REQUIRED by design
+  (Part 4).
+- **`airmouse doctor`** (exit 0, `[READY FOR TESTING]`) summary
+  counts on the headless sandbox:
+
+  ```
+  READY:       32
+  OPTIONAL:    7
+  HARDWARE:    2
+  WARNING:     0
+  FAILED:      0
+  ```
+
+  41 components across 12 sections (SYSTEM 6, PYTHON 11, AIRMOUSE 4,
+  CAMERA 1, MICROPHONE 1, SPEECH 4, INPUT 2, BROWSER 3, INTELLIGENCE
+  2, AGENT 4, OFFLINE 1, SAFETY 2). The READY/WARNING split depends
+  on one file: with the hand-landmarker model present (7.5 MB at
+  `~/.airmouse/hand_landmarker.task`) it is READY 32 / WARNING 0; on
+  a machine without the model yet, "Hand tracking model" reports
+  WARNING (READY 31 / WARNING 1). HARDWARE 2 = webcam + microphone
+  (none exist in the sandbox); OPTIONAL 7 = 2 NOT_INSTALLED voice
+  extras + 2 UNAVAILABLE pynput rows (no display) + simulated-only
+  transcription providers + absent Chrome/Edge + mock executors.
+- **`airmouse setup`** (non-interactive, never installs): completed
+  11 steps, storage initialised, config created, hardware rows
+  honestly ACTION_REQUIRED, smoke test 15 self-checks passed with
+  hardware checks honestly deferred, marker written.
+- **Offline selftest**: 18/18 checks passed with networking truly
+  blocked (`airmouse offline-test`).
+- Packaging: `pyproject.toml` version == `__version__` == 15.1.0;
+  MIT; `requires-python >= 3.9`; extras voice/tts/ocr/sound.
+
+## Part 2 — SIMULATION VERIFICATION
+
+- **Guided test laboratory, headless non-interactive run
+  (`airmouse test`, exit 0): 7/7 simulation tests PASS, 0/5 hardware
+  tests (all honestly ACTION_REQUIRED), overall PARTIALLY VERIFIED.**
+  The seven simulation PASSes: Installation; Intelligence
+  (OBSERVED/PREDICTED/EXECUTED with the safety gate, labelled
+  `[SIMULATION]`); Browser (7-step simulated flow: open → click →
+  verify → new tab → navigate → back); Agent (benign request through
+  REQUEST→PERMISSION→SAFETY→AGENT→ACTION→VERIFICATION→RESULT;
+  destructive request REJECTED; hierarchy demonstrated); Multi-Agent
+  (lease granted → conflict refused → handoff → `emergency_stop_all`
+  stops both agents and gates); Recovery (missing_target, timeout,
+  app_crash all recovered; permission_denial safely stopped WITHOUT
+  retry); Offline (18/18, cloud ASR blocked, local grammar allowed).
+- Simulated-verified in the test suite (unchanged status from
+  v15.0.0): twin, temporal world model, goals/tasks, skills,
+  recovery2, target resolver, AIP, agent SDK, multi-agent registry,
+  DO IT WITH ME, simulator, failure injection, explainability,
+  licensing, marketplace — plus the new persistence layer (atomic
+  writes, checksum tamper/quarantine/recovery, migrations, path
+  traversal rejection), setup wizard (consent gating, exact pip
+  argv), user errors (token redaction incl. ghp_/sk-/Bearer),
+  first-run menu (TTY matrix).
+- Measured CLI performance (sandbox, wall clock) against the budgets
+  pinned in `tests/test_release_perf.py`:
+
+  | Command | Measured | Pinned budget (test) |
+  |---|---:|---:|
+  | `airmouse --version` | ≈ 1.5 s (1.4 s in the first hardening run) | 6.0 s |
+  | `airmouse doctor` | ≈ 2.6 s | 12.0 s |
+  | `airmouse verify` | ≈ 1.6 s | 8.0 s |
+  | `airmouse test` | ≈ 1.6 s | 8.0 s |
+
+## Part 3 — REAL WINDOWS VERIFICATION
+
+**NOT PERFORMED IN SANDBOX.** No Windows machine was available; the
+build environment is a headless Linux sandbox. The complete Windows
+10/11 validation procedure is handed to the user, step by step with
+COMMAND / WHAT TO DO / WHAT SHOULD HAPPEN / PASS / FAIL / FIX blocks:
+**`WINDOWS_REAL_WORLD_TEST.md`** in the repository root (19 steps:
+CMD → Python → install → setup → doctor → webcam/mic privacy →
+verify → guided lab → hand → mouse → gaze → voice → dictation →
+intelligence → real browser via Chrome `--remote-debugging-port=9222`
+→ agent safety → recovery/offline → export → report assembly).
+Until that procedure is executed by a human on real Windows
+hardware, every Windows-runtime claim in the docs is marked
+"expected", not "verified".
+
+## Part 4 — PHYSICAL HARDWARE VERIFICATION
+
+**NOT TESTED** — the sandbox is headless and has no peripherals.
+`airmouse verify` and `airmouse test` report all five physical areas
+as **ACTION_REQUIRED** (they can never auto-pass by design):
+
+| Physical area | Sandbox status | Where it is validated |
+|---|---|---|
+| Webcam | ACTION_REQUIRED (HARDWARE: "no camera device answered at index 0") | `airmouse test --guided` test [2/12]; WINDOWS_REAL_WORLD_TEST.md Step 9 |
+| Microphone | ACTION_REQUIRED (HARDWARE: "PortAudio works but reported no input devices") | guided test [5/12]/[6/12]; WINDOWS_REAL_WORLD_TEST.md Steps 6/12/13 |
+| Hand tracking | ACTION_REQUIRED | guided test [2/12]/[3/12]; WINDOWS_REAL_WORLD_TEST.md Steps 9/10 |
+| Gaze | ACTION_REQUIRED | guided test [4/12]; WINDOWS_REAL_WORLD_TEST.md Step 11 |
+| Real browser automation (CDP :9222) | ACTION_REQUIRED (no browser installed) | guided test [8/12] is simulated; real: WINDOWS_REAL_WORLD_TEST.md Step 15 |
+
+## Part 5 — NOT TESTED
+
+- **RF hardware** — the RF modality is an abstraction with a
+  simulated provider only; no RF hardware exists or is claimed.
+- **Real local ASR engines** — pocketsphinx / vosk / whisper adapters
+  exist but the engines are not installed in the sandbox; real
+  engine behaviour on Windows audio is unverified
+  (`airmouse voice-status` reports availability honestly).
+- **Cloud integrations** — none exist by design (no cloud code path);
+  "cloud" is structurally impossible to enable, so there is nothing
+  to test.
+- **Windows runtime** — see Part 3.
+- **PyInstaller bundles** (`build.py --windows` etc.) — build path
+  present, bundle artifacts not produced in this hardening pass.
+
+---
+
+# AirMouse v15.0.0 report (v12.0 → v15.0) — preserved below
+
 Date: 2025-09-05 (build environment: Linux sandbox, Python 3.12.14)
 Scope: v11.5.0 → v15.0.0 "Universal Human + AI Interaction Platform"
 per mission spec (7 milestone versions: v12.0.0, v12.5.0, v13.0.0,

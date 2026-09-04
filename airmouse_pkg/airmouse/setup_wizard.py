@@ -114,7 +114,7 @@ class SetupReport:
                      "wave to confirm.")
         lines.append("  * Microphone: with AirMouse running, say \"click\" "
                      "— the HUD should react (voice features are optional).")
-        lines.append("  * Guided check: run `airmouse --self-test` and "
+        lines.append("  * Guided check: run `airmouse self-test` and "
                      "confirm the report shows no FAIL lines.")
         return "\n".join(lines)
 
@@ -434,7 +434,7 @@ def _step_smoke() -> SetupStep:
             return SetupStep(
                 "smoke", "Smoke test", "FAILED",
                 f"failing self-checks: {', '.join(failures)}",
-                remediation="run `airmouse --self-test` for the full "
+                remediation="run `airmouse self-test` for the full "
                             "report")
         return SetupStep("smoke", "Smoke test", "DONE",
                          f"{len(results)} self-checks passed "
@@ -443,7 +443,7 @@ def _step_smoke() -> SetupStep:
         return SetupStep("smoke", "Smoke test", "FAILED",
                          f"self-test could not run: "
                          f"{type(exc).__name__}: {exc}",
-                         remediation="run `airmouse --self-test` and "
+                         remediation="run `airmouse self-test` and "
                                      "share the output if you need help")
 
 

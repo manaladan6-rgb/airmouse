@@ -33,8 +33,11 @@ Fail-closed, always.
 
 Path safety: every store path is derived from airmouse_home() and
 validated to stay inside it; store names containing separators, ``..``
-or null bytes are rejected.  Export targets are user-chosen, so they
-may live anywhere — but they are normalized (os.path.abspath) and any
+or null bytes are rejected.  Reads additionally verify the REAL
+(symlinks-resolved) location of the store file stays inside the home,
+so a symlink planted over a store file cannot make AirMouse read data
+that lives outside it.  Export targets are user-chosen, so they may
+live anywhere — but they are normalized (os.path.abspath) and any
 ``..`` component is rejected; existing files are only overwritten when
 ``overwrite=True`` is passed explicitly.
 
@@ -139,6 +142,20 @@ def _safe_export_path(path: str) -> str:
         raise ValueError(f"export path must not contain '..': {path!r}")
     target = os.path.abspath(os.path.expanduser(path))
     return target
+
+
+def _real_path_contained(path: str) -> bool:
+    """True when ``path``'s real location (symlinks resolved) stays
+    inside the AirMouse home directory.
+
+    The lexical ``_under_home`` check cannot see symlinks planted INSIDE
+    the home pointing OUT of it; this re-checks with realpath so a
+    hostile store symlink can never make AirMouse read data that lives
+    outside the privacy boundary.
+    """
+    home = os.path.realpath(airmouse_home())
+    real = os.path.realpath(path)
+    return real == home or real.startswith(home + os.sep)
 
 
 def ensure_dirs() -> str:
@@ -252,6 +269,10 @@ class PersistentStore:
     is quarantined as ``<name>.json.corrupt-<epoch>`` (newest
     ``_CORRUPT_KEEP`` copies kept) and ``load()`` returns ``{}`` with
     the reason recorded on ``self.last_corruption`` — fail-closed.
+    A store file that is a symlink pointing outside the AirMouse home
+    is never followed: ``load()`` refuses it (returns ``{}`` and
+    records the reason) so the privacy boundary cannot be escaped by
+    planting a link.
     """
 
     def __init__(self, name: str, schema_version: int = SCHEMA_VERSION,
@@ -297,6 +318,12 @@ class PersistentStore:
         path = self.path
         if not os.path.exists(path):
             self.last_corruption = None
+            return {}
+        if not _real_path_contained(path):
+            self.last_corruption = {
+                "path": path,
+                "reason": "store path escapes the AirMouse home "
+                          "(symlink); refused"}
             return {}
         try:
             envelope = read_json(path)
@@ -406,7 +433,13 @@ class PersistentStore:
         return target
 
     def reset(self) -> dict:
-        """Back up the current file under <home>/backups/, then clear."""
+        """Back up the current file under <home>/backups/, then clear.
+
+        Never raises on filesystem failures: when the save cannot be
+        written (e.g. read-only directory) the result carries
+        ``cleared=False`` plus an ``error`` key instead of propagating
+        the ``OSError`` — fail-closed, honest.
+        """
         backup: Optional[str] = None
         if os.path.exists(self.path):
             try:
@@ -426,8 +459,16 @@ class PersistentStore:
                 backup = candidate
             except OSError:
                 backup = None
-        self.save({})
-        return {"name": self.name, "backup": backup, "cleared": True}
+        error: Optional[str] = None
+        try:
+            self.save({})
+            cleared = True
+        except OSError as exc:
+            cleared, error = False, type(exc).__name__
+        result = {"name": self.name, "backup": backup, "cleared": cleared}
+        if error:
+            result["error"] = error
+        return result
 
     def delete(self) -> bool:
         """Remove the store file + any quarantined copies.
@@ -556,8 +597,11 @@ def memory_reset() -> dict:
     stores = {}
     for name, store in all_stores().items():
         result = store.reset()
-        stores[name] = {"backup": result["backup"],
-                        "cleared": result["cleared"]}
+        entry: Dict[str, Any] = {"backup": result["backup"],
+                                 "cleared": result["cleared"]}
+        if result.get("error"):
+            entry["error"] = result["error"]
+        stores[name] = entry
     return {"home": airmouse_home(), "backups_kept": True,
             "note": "pre-reset backups preserved under "
                     "<home>/backups/", "stores": stores}

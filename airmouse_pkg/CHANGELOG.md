@@ -1,5 +1,115 @@
 # Changelog
 
+## v15.1.0 — HARDENED RELEASE (of v15.0.0)
+
+A hardening release: **no architecture changes** — everything from
+v15.0.0 and earlier is preserved unchanged. v15.1.0 adds the release
+quality surface the platform needed: a guided setup wizard, an honest
+health doctor, a 12-test guided laboratory, an automated verification
+command, a privacy report, a user-controlled memory lifecycle, a
+first-run menu, user-grade error messages, and a crash-safe
+persistence layer — all verified by 180 new tests including a
+red-team suite and pinned performance budgets. Full suite:
+**1056 → 1236 passed, 0 failed**.
+
+### Added — release surface (new CLI commands, all fail-closed)
+
+- `airmouse setup` — guided wizard with 11 fixed steps (environment,
+  core packages, local storage, configuration, cameras, microphones,
+  browsers, optional voice extras, keyboard/mouse access, smoke test,
+  finish marker). Consent-gated: the only install command it ever
+  runs is `python -m pip install <package>`, and **only after an
+  interactive Y/N**; non-interactive runs never install. Ends with a
+  plain-language "What remains to test (needs you + hardware)"
+  section and writes the `<home>/.setup_complete` marker
+  (`setup_wizard.py`).
+- `airmouse doctor [--verbose|--json]` — 12-section, 41-component
+  health report built on a full capability detection pass
+  (`capabilities.py`): SYSTEM, PYTHON, AIRMOUSE, CAMERA, MICROPHONE,
+  SPEECH, INPUT, BROWSER, INTELLIGENCE, AGENT, OFFLINE, SAFETY.
+  Every non-READY component ships a plain "Fix:" remediation.
+  Overall verdict `[READY FOR TESTING]` / `[PARTIAL — …]` /
+  `[BLOCKED]` with **exit codes 0 / 1 / 2**. Missing hardware is
+  reported HARDWARE, optional extras NOT_INSTALLED, headless input
+  UNAVAILABLE — statuses never masquerade as failures.
+- `airmouse test` (non-interactive lab) and `airmouse test --guided`
+  (interactive 12-test laboratory: installation, camera, mouse, gaze,
+  voice, dictation, intelligence, browser, agent, multi-agent,
+  recovery, offline). Physical tests **can NEVER auto-pass** — they
+  need a human at the desk and report ACTION_REQUIRED; simulation
+  results are labelled `[SIMULATION]`. Exit code 0 unless a test
+  FAILs (`guided_test.py`).
+- `airmouse verify` — 10 real automated checks (core import, voice
+  determinism, intelligence roundtrip, safety gates, 18-check offline
+  selftest, simulated browser, permission deny-by-default, lease
+  conflict refusal, AIP malformed-envelope rejection, packaging
+  version match) + the 5-item PHYSICAL list, always ACTION_REQUIRED,
+  ending with the `airmouse test --guided` pointer (`verify.py`).
+- `airmouse privacy` — local-first report: telemetry state (OFF by
+  default, verified against the code default), network posture,
+  storage inventory, learned-data summary (content never included),
+  model state, and the full control list; `--json` supported.
+- `airmouse memory status|export|reset|delete` — user-controlled
+  lifecycle over the five local stores (twin, vocabulary, skills,
+  workflows, preferences): status inventory, `export --to <path>`
+  (local file only), reset (backs up, then clears) and delete (files
+  removed, backups kept). Reset/delete are consent-gated and
+  fail-closed on non-TTY.
+- **First-run menu** — plain `airmouse` on a fresh machine offers the
+  10-option menu (setup / doctor / guided test / verify / privacy /
+  memory / info / start / exit); TTY-only, suppressed once setup
+  completes (`cli_menu.py`).
+
+### Added — persistence + CLI quality
+
+- `persistence.py` — crash-safe local persistence: atomic writes
+  (temp file + fsync + `os.replace`), schema-versioned envelopes with
+  SHA-256 checksums, corruption quarantine (corrupt store renamed to
+  `<name>.json.corrupt-<epoch>`, newest 3 kept) and clean recovery to
+  empty, ascending migrations, `AIRMOUSE_HOME` environment override
+  for the storage home, and the memory lifecycle facades behind it.
+- `user_errors.py` — user-grade error messages (title / reason /
+  numbered fixes / hint, always ending with the `airmouse doctor`
+  pointer), a guarded CLI wrapper (no tracebacks on screen by
+  default; `--debug` prints a **redacted** traceback), and message
+  sanitisation that strips GitHub/API/bearer-style tokens, env secret
+  assignments and home-path prefixes.
+- CLI performance budgets pinned in `tests/
+  test_release_perf.py` (measured on the Linux sandbox, then pinned
+  with headroom: `--version` ≈ 1.4-1.5 s measured / 6.0 s budget,
+  `doctor` ≈ 2.6 s / 12.0 s, `verify` ≈ 1.6 s / 8.0 s, `test` ≈ 1.6 s
+  / 8.0 s).
+- Red-team suite: token-leak scans, exception-echo checks, consent
+  gating (no subprocess without consent), path-traversal rejection in
+  persistence/export, checksum tampering, fail-closed non-interactive
+  confirmations.
+
+### Fixed — release-quality defects found during hardening
+
+- Stale packaging metadata: `pyproject.toml` description still said
+  v10; the `--help` banner still said "v5.0.0" — both now derive from
+  `__version__` (15.1.0). `airmouse verify` now checks that the
+  pyproject version and the package version match.
+- KeyboardInterrupt during CLI startup crashed with a traceback —
+  now handled by the guarded CLI (exit 130).
+- Doctor verdict wording: a report with WARNINGs but no FAILED items
+  now correctly says "[PARTIAL — review WARNING items]".
+- Config defect (v15 hardening pass): a legacy v9 performance-report
+  flag could collide with the privacy telemetry setting — telemetry
+  now stays authoritatively OFF (default in code, test-enforced).
+
+### Tests
+
+- 1056 (v15.0.0 baseline) → **1236 passed / 0 failed / 0 skipped**
+  (+180): +33 CLI quality (`test_cli_quality.py`), +46
+  setup/persistence/privacy (`test_setup_persistence.py`), +42
+  doctor/capabilities/verify (`test_doctor.py`), +54 guided-test
+  laboratory (`test_guided_test.py`), +5 release performance budgets
+  (`test_release_perf.py`). Hardening/red-team assertions
+  (token-leak scans, consent gating, fail-closed confirmations) are
+  built into these suites. All 1056 pre-existing tests preserved
+  green.
+
 ## v15.0.0 — UNIVERSAL HUMAN + AI INTERACTION PLATFORM (v12.0 → v15.0)
 
 The defining evolution: the deterministic interaction core opens a

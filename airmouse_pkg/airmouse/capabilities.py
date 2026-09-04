@@ -508,8 +508,7 @@ def _hand_model_path() -> str:
         from . import tracker as _tracker
         return str(_tracker.MODEL_PATH)
     except Exception:
-        return os.path.join(os.path.expanduser("~"), ".airmouse",
-                            "hand_landmarker.task")
+        return os.path.join(_airmouse_home(), "hand_landmarker.task")
 
 
 def _detect_airmouse(quick: bool) -> List[Component]:
@@ -533,7 +532,7 @@ def _detect_airmouse(quick: bool) -> List[Component]:
             "fix or remove ~/.airmouse/config.toml (defaults are used)"))
 
     try:  # storage home
-        home = os.path.join(os.path.expanduser("~"), ".airmouse")
+        home = _airmouse_home()
         if not os.path.isdir(home):
             os.makedirs(home, exist_ok=True)
         if os.access(home, os.W_OK):
@@ -1051,6 +1050,19 @@ def _detect_safety(quick: bool) -> List[Component]:
 # ---------------------------------------------------------------------------
 # entry point
 # ---------------------------------------------------------------------------
+
+
+def _airmouse_home() -> str:
+    """Resolve the AirMouse home consistently with persistence.py
+    (AIRMOUSE_HOME env wins; defensive fallback keeps detection alive)."""
+    try:
+        from .persistence import airmouse_home
+        return airmouse_home()
+    except Exception:
+        env = os.environ.get("AIRMOUSE_HOME")
+        if env:
+            return env
+        return os.path.join(os.path.expanduser("~"), ".airmouse")
 
 
 def detect_all(quick: bool = False) -> CapabilityReport:
