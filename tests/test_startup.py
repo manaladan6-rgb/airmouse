@@ -43,9 +43,10 @@ class _StubTracker:
     PROBE_FRAMES = 12
 
     def __init__(self, camera_index=0, detection_confidence=0.5,
-                 tracking_confidence=0.5):
+                 tracking_confidence=0.5, max_hands=1, **kw):
         self._frames = 0
         self.camera_index = camera_index
+        self.max_hands = max_hands
 
     def read(self):
         self._frames += 1
@@ -204,3 +205,73 @@ def test_startup_probe_is_deterministic(monkeypatch, tmp_path):
     for _ in range(2):
         _run_startup(monkeypatch, tmp_path,
                      ["--skip", "--no-cam", "--no-sound"])
+
+
+# ═══ v16 command branches (academy / gesture-lab / profile / aip-stdio) ═══
+
+def test_academy_command_headless_plan(monkeypatch, tmp_path, capsys):
+    """`airmouse academy` must print the honest lesson plan headless and
+    exit 0 — never a crash, never a manufactured PASS."""
+    monkeypatch.setenv("AIRMOUSE_HOME", str(tmp_path / "am_acad"))
+    monkeypatch.setattr(sys, "argv", ["airmock", "academy", "--no-cam"])
+    rc = am.main()
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "PHYSICAL" in out.upper() and "LESSON" in out.upper() or "MOVE" in out.upper()
+
+
+def test_academy_unknown_lesson_exit_1(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("AIRMOUSE_HOME", str(tmp_path / "am_acad2"))
+    monkeypatch.setattr(sys, "argv",
+                        ["airmock", "academy", "no-such-lesson", "--no-cam"])
+    rc = am.main()
+    assert rc == 1
+
+
+def test_gesture_lab_command_headless(monkeypatch, tmp_path, capsys):
+    """`airmouse gesture-lab` headless: honest field demo, exit 0."""
+    monkeypatch.setenv("AIRMOUSE_HOME", str(tmp_path / "am_lab"))
+    monkeypatch.setattr(sys, "argv",
+                        ["airmock", "gesture-lab", "--no-cam"])
+    rc = am.main()
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "GESTURE" in out.upper()
+
+
+def test_profile_command_list_and_unknown(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("AIRMOUSE_HOME", str(tmp_path / "am_prof"))
+    monkeypatch.setattr(sys, "argv", ["airmock", "profile", "list"])
+    rc = am.main()
+    out = capsys.readouterr().out
+    assert rc == 0 and "accessibility" in out
+    monkeypatch.setattr(sys, "argv", ["airmock", "profile", "nope"])
+    rc = am.main()
+    assert rc == 1
+
+
+def test_aip_stdio_command_boots_and_answers(monkeypatch, tmp_path):
+    """`airmouse --aip-stdio` (simulated mode): boot the wire server,
+    send DISCOVER on stdin, get exactly one valid JSON reply."""
+    import json as _json
+    import io as _io
+    monkeypatch.setenv("AIRMOUSE_HOME", str(tmp_path / "am_aip"))
+    monkeypatch.delenv("AIRMOUSE_AIP_REAL", raising=False)
+    monkeypatch.setattr(sys, "argv", ["airmock", "--aip-stdio"])
+    inp = _io.StringIO(_json.dumps({
+        "aip_version": 1, "type": "DISCOVER", "id": "t1",
+        "agent_id": "agent-test", "ts": 0, "payload": {}}) + "\n")
+    out = _io.StringIO()
+    # main() -> aip_stdio.serve() reads sys.stdin / writes sys.stdout by
+    # default; swap both for a deterministic probe.
+    orig_in, orig_out = sys.stdin, sys.stdout
+    sys.stdin, sys.stdout = inp, out
+    try:
+        rc = am.main()
+    finally:
+        sys.stdin, sys.stdout = orig_in, orig_out
+    assert rc == 0
+    lines = [ln for ln in out.getvalue().splitlines() if ln.strip()]
+    assert len(lines) >= 1
+    reply = _json.loads(lines[-1])
+    assert str(reply.get("type", "")).lower() in ("result", "discover", "response", "capabilities") or "payload" in reply

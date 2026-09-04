@@ -522,6 +522,17 @@ def main():
     # ═══ v10.0 flags — Universal Offline Interaction Engine ═══
     parser.add_argument("--offline", action="store_true",
                         help="v10 TRUE OFFLINE mode: block network features, local ASR/grammar only")
+    parser.add_argument("--aip-stdio", action="store_true",
+                        help="serve the AIP JSON-lines protocol on stdin/stdout "
+                             "(agent-core stdio:// / agent-sdk-js StdioTransport)")
+    parser.add_argument("--aip-real", action="store_true",
+                        help="with --aip-stdio: route agent EXECUTE through the real "
+                             "ActionEngine (permission-gated); default is simulated")
+    parser.add_argument("--launch-browser", action="store_true",
+                        help="launch Chrome/Chromium/Edge with --remote-debugging-port "
+                             "and connect browser control to it")
+    parser.add_argument("--browser-port", type=int, default=9222,
+                        help="CDP port for --launch-browser (default 9222)")
     parser.add_argument("--browser", action="store_true",
                         help="v10 enable local browser bridge control (semantic page targets)")
     parser.add_argument("--browser-bridge", action="store_true",
@@ -565,7 +576,8 @@ def main():
                                  "permissions", "tasks", "protocol",
                                  "benchmark",
                                  "setup", "doctor", "test", "verify",
-                                 "privacy"],
+                                 "privacy",
+                                 "academy", "gesture-lab", "profile"],
                         help="info/diagnostic subcommand (prints and exits)")
     parser.add_argument("command_arg", nargs="?", default=None,
                         help="optional subcommand argument "
@@ -575,6 +587,33 @@ def main():
     if args.version:
         print(f"AirMouse v{_pkg.__version__} — Adaptive Human-Computer Intelligence Edition")
         return
+
+    # ═══ v16 agent last mile: AIP wire server (§25) ═══
+    # agent-core stdio:// and agent-sdk-js StdioTransport target
+    # `airmouse --aip-stdio`. Simulated by default (honestly labeled);
+    # --aip-real routes EXECUTE through the real permission-gated
+    # ActionEngine. Runs before any camera/mediapipe initialization.
+    if args.aip_stdio:
+        from . import aip_stdio
+        from .actions import ActionEngine
+        engine = None
+        label = "simulated"
+        if args.aip_real:
+            try:
+                from .actions import PynputExecutor
+                engine = ActionEngine(executor=PynputExecutor())
+                label = "real"
+                print("  >> AIP REAL MODE — agent EXECUTE reaches the OS "
+                      "(permission-gated, fail-closed)", flush=True)
+            except Exception as _re:
+                print(f"  !! real executor unavailable ({_re}) — "
+                      "falling back to simulated", flush=True)
+                engine, label = None, "simulated"
+        endpoint = aip_stdio.default_endpoint(action_engine=engine,
+                                              label=label)
+        print(f"  >> AIP WIRE SERVER on stdin/stdout ({label} mode; "
+              "EXECUTE fail-closed until permissions granted)", flush=True)
+        return int(aip_stdio.serve(endpoint=endpoint))
 
     # ═══ v15.1 release commands (setup / doctor / test / verify / privacy) ═══
     if args.command == "doctor":
@@ -646,7 +685,44 @@ def main():
                     print(f"    {k2}: {v2}")
             elif val:
                 print(f"    {val}")
+        # v16: the real storage manifest — every artifact AirMouse can
+        # persist, with purpose + lifecycle owners (audit P0-3 fix).
+        try:
+            from .privacy import privacy_manifest
+            entries = privacy_manifest()
+            print(f"  storage manifest ({len(entries)} artifacts):")
+            for e in entries:
+                print(f"    - {e.get('name')}: {e.get('purpose')}"
+                      f" [{e.get('data_type')}] -> {e.get('location')}"
+                      f" (exists={e.get('exists')})")
+        except Exception as _me:
+            print(f"  (manifest unavailable: {_me})")
         return 0
+
+    # ═══ v16 Gesture Academy — teach MOVE/CLICK/DRAG/... with live feedback ═══
+    if args.command == "academy":
+        from .academy import run_academy
+        return int(run_academy(lesson=str(args.command_arg or "all"),
+                               camera=not args.no_cam))
+
+    # ═══ v16 Gesture Lab — live readout: gesture/confidence/target/action ═══
+    if args.command == "gesture-lab":
+        from .gesture_lab import run_gesture_lab
+        return int(run_gesture_lab(camera=not args.no_cam,
+                                   seconds=float(args.command_arg) if
+                                   (args.command_arg or "").isdigit() else 0.0))
+
+    # ═══ v16 gesture interaction profiles ═══
+    if args.command == "profile":
+        from .gesture_profiles import apply_profile, list_profiles
+        name = str(args.command_arg or "").strip().lower()
+        if not name or name in ("list", ""):
+            print("  gesture profiles:", ", ".join(list_profiles()))
+            print("  apply one:  airmouse profile <name>")
+            return 0
+        ok, msg = apply_profile(name)
+        print(f"  {msg}")
+        return 0 if ok else 1
 
     # ═══ v15.1 memory lifecycle (§10): status | export | reset | delete ═══
     mem_arg = str(args.command_arg or "").strip().lower()
@@ -705,7 +781,17 @@ def main():
                     print(f"    - {n}: {s.get('error', 'not cleared')}")
                 print("  (check directory permissions; backups are under <home>/backups/)")
                 return 1
-            print("  reset complete — backups saved under <home>/backups/")
+            _arts = res.get("artifacts", [])
+            _done = sum(1 for _a in _arts if _a.get("cleared"))
+            print(f"  reset complete — stores: {len(res.get('stores', {}))}, "
+                  f"learning artifacts cleared: {_done}/{len(_arts)} "
+                  "(intelligence, calibration, gestures, macros, notes)")
+            print("  backups saved under <home>/backups/")
+            try:
+                _v = persistence.deletion_verifies()
+                print(f"  verification: {'CLEAN' if _v.get('clean') else 'REMAINS: ' + str(_v.get('remaining', [])[:3])}")
+            except Exception:
+                pass
         else:
             res = persistence.memory_delete()
             failed = sorted(n for n, s in res.get("stores", {}).items()
@@ -716,7 +802,10 @@ def main():
                     print(f"    - {n}")
                 print("  (check directory permissions; backups are under <home>/backups/)")
                 return 1
-            print("  deleted store files — backups kept under <home>/backups/")
+            _arts = res.get("artifacts", [])
+            _done = sum(1 for _a in _arts if _a.get("deleted"))
+            print(f"  deleted store files + {_done}/{len(_arts)} learning "
+                  "artifacts — backups kept under <home>/backups/")
         return 0
 
     # ═══ v11.5 subcommands (print + exit) ═══
@@ -1080,10 +1169,41 @@ def main():
         camera_index=config.camera_index,
         detection_confidence=config.detection_confidence,
         tracking_confidence=config.tracking_confidence,
+        max_hands=(2 if config.two_hand else 1),
     )
 
     mouse = MouseController(screen_w=screen_w, screen_h=screen_h)
     audio = AudioFeedback(enabled=config.audio_enabled)
+
+    # ═══ v16 EXECUTION SPINE — one authoritative gate for every gesture
+    # action (audit #4/#7/#20): estop > confidence > risk > policy >
+    # rate-limit > dispatch. Cursor movement stays continuous (gated by
+    # spine.gate_continuous for estop only).
+    from .gesture_spine import GestureActionRouter
+    spine = GestureActionRouter(
+        mouse=mouse,
+        kb_getter=lambda: _kb(),
+        zoom_fn=zoom_scroll,
+        min_confidence={
+            "SAFE": config.gesture_min_confidence_safe,
+            "CAUTION": config.gesture_min_confidence_caution,
+        },
+        allow_destructive=bool(config.gesture_allow_destructive),
+    )
+
+    # ═══ v16 two-hand interaction (config.two_hand) ═══
+    two_hand_engine = None
+    if config.two_hand:
+        try:
+            from .two_hand import TwoHandGestureRecognizer
+            two_hand_engine = TwoHandGestureRecognizer()
+            print("  >> v16 TWO-HAND TRACKING ONLINE — "
+                  "both hands pinched to engage; hold=state, "
+                  "zoom/rotate/drag=geometry")
+        except Exception as _th:
+            two_hand_engine = None
+            print(f"  !! two-hand engine unavailable ({_th}) — "
+                  "single-hand mode continues")
 
     # Tutorial check
     tutorial_done_file = os.path.join(os.path.expanduser("~"), ".airmouse", "tutorial_done")
@@ -1268,7 +1388,6 @@ def main():
     transcription_engine = None
     voice_typing_engine = None
     text_controller = None
-    fusion2_engine = None
     modes_controller = None
     v115_state = {"intel": "", "mode": "", "sug": "", "transcript": ""}
     try:
@@ -1308,8 +1427,10 @@ def main():
                   "commands (command/dictation/hybrid)")
         from .text_control import TextController
         text_controller = TextController()
-        from .fusion2 import FusionEngine2
-        fusion2_engine = FusionEngine2()
+        # v16 §19 decision: fusion2 is REMOVED from the shipped wiring
+        # (constructed-but-never-called decorative architecture, audit
+        # finding #10). fusion.py is the one authoritative fusion engine;
+        # fusion2.py remains an optional library, not advertised.
         for flag, mid in ((args.teacher, "teacher"), (args.student, "student"),
                           (args.office, "office"), (args.meeting, "meeting"),
                           (args.research, "research")):
@@ -1364,11 +1485,27 @@ def main():
             print(f"  >> V10 OFFLINE VOICE ONLINE — mode: "
                   f"{voice_engine10.mode.value.upper()} (deterministic local grammar)")
         # browser subsystem
-        if args.browser or args.browser_bridge:
+        if args.launch_browser:
+            # v16 browser last mile (audit #16): launch Chrome/Chromium/
+            # Edge with --remote-debugging-port, then connect to it.
+            from .browser import launch_browser
+            _lb = launch_browser(port=int(args.browser_port))
+            if _lb.get("ok"):
+                print(f"  >> v16 BROWSER LAUNCHED — CDP on 127.0.0.1:{_lb['port']}"
+                      f" ({_lb.get('browser', 'chrome')})")
+            else:
+                print(f"  !! browser launch failed: {_lb.get('error')} — "
+                      "start it manually with --remote-debugging-port="
+                      f"{args.browser_port}")
+        if args.browser or args.browser_bridge or args.launch_browser:
             from .browser import BrowserController
+            _bcfg = {"enabled": True, "bridge": "auto",
+                     "offline": bool(args.offline)}
+            if args.launch_browser:
+                _bcfg.update({"bridge": "cdp",
+                              "cdp_port": int(args.browser_port)})
             browser_ctrl = BrowserController(
-                config={"enabled": True, "bridge": "auto",
-                        "offline": bool(args.offline)},
+                config=_bcfg,
                 context_engine=context_engine, bus=event_bus)
             started = browser_ctrl.start()
             if args.browser_bridge:
@@ -1455,7 +1592,6 @@ def main():
                 "transcription": transcription_engine,
                 "voice_typing": voice_typing_engine,
                 "text_controller": text_controller,
-                "fusion2": fusion2_engine,
                 "modes": modes_controller,
             })
             v9_owns_actions = True
@@ -1735,6 +1871,26 @@ def main():
             hand_data = tracker.read()
             gesture_result = {"gesture": Gesture.NONE, "landmarks": None, "confidence": 0.0}
 
+            # v16 TWO-HAND: the recognizer owns zoom/rotate/drag geometry
+            # while both hands are engaged; single-hand actions freeze via
+            # the ownership gate below. Zoom maps to real ctrl+wheel ticks.
+            two_hand_report = None
+            two_hand_active = False
+            if two_hand_engine is not None:
+                try:
+                    two_hand_report = two_hand_engine.update(
+                        hand_data.get("hands", []), now)
+                    two_hand_active = bool(two_hand_report.get("active"))
+                    if two_hand_active:
+                        _scale = float(two_hand_report.get("scale") or 1.0)
+                        _ticks = int(round((_scale - 1.0) * 40.0))
+                        if _ticks and spine.gate_continuous(now):
+                            zoom_scroll(_ticks)
+                            audio.scroll_tick()
+                except Exception:
+                    two_hand_report = None
+                    two_hand_active = False
+
             if hand_data["hand_found"] and hand_data["landmarks"] is not None:
                 hand_absent_frames = 0  # Reset absent counter
                 if hand_was_lost:
@@ -1771,7 +1927,27 @@ def main():
                         gesture = Gesture.NONE  # owned by the action engine
                     # fusion WITHOUT gaze: keep v5 gesture actions as the
                     # functional fallback (confirmed clicks need a gaze target)
+                # v16 two-hand ownership: when both hands are engaged the
+                # two-hand engine owns interaction — single-hand action
+                # gestures freeze so exactly ONE owner acts (no double-fire).
+                if two_hand_report is not None and two_hand_report.get("active") \
+                        and gesture in (Gesture.PINCH, Gesture.PEACE,
+                                        Gesture.PALM, Gesture.FIST,
+                                        Gesture.THUMBS_UP, Gesture.THREE,
+                                        Gesture.PINKY):
+                    gesture = Gesture.NONE  # owned by the two-hand engine
                 gesture_changed = (gesture != prev_gesture)
+
+                # v16: drain pinch lifecycle events from the state machine
+                # (PINCH_HOLD / PINCH_RELEASE / DOUBLE_PINCH now emitted live)
+                for _pev in gsm.poll_pinch_events():
+                    if _pev == Gesture.DOUBLE_PINCH and not two_hand_active:
+                        if spine.dispatch("double_click",
+                                          confidence=gesture_confidence,
+                                          now=now)["executed"]:
+                            audio.click()
+                            last_click_time = now
+                            _mrec("double_click")
 
                 # Sound feedback on gesture confirmation
                 if gesture_changed and gesture != Gesture.NONE:
@@ -1837,12 +2013,23 @@ def main():
                     swipe_gesture = swipe.update(filtered_pos, prev_pos, now)
                     prev_pos = filtered_pos.copy()
 
+                # v16: swipes route through the execution spine (CAUTION
+                # class: reversible navigation, estop + rate-limit gated).
                 if swipe_gesture == Gesture.SWIPE_LEFT:
-                    _safe_kb_action(_kb(), "browser_back")
-                    audio.click()
+                    if spine.dispatch("browser_back", confidence=1.0, now=now)["executed"]:
+                        audio.click()
                 elif swipe_gesture == Gesture.SWIPE_RIGHT:
-                    _safe_kb_action(_kb(), "browser_forward")
-                    audio.click()
+                    if spine.dispatch("browser_forward", confidence=1.0, now=now)["executed"]:
+                        audio.click()
+                elif swipe_gesture == Gesture.SWIPE_UP:
+                    # v16 motion gestures: vertical swipe = discrete scroll
+                    if spine.gate_continuous(now):
+                        mouse.scroll(10)
+                        audio.scroll_tick()
+                elif swipe_gesture == Gesture.SWIPE_DOWN:
+                    if spine.gate_continuous(now):
+                        mouse.scroll(-10)
+                        audio.scroll_tick()
 
                 # ═══ GESTURE ACTIONS ═══
                 # (works for both direct and ironman modes)
@@ -1880,25 +2067,25 @@ def main():
                             # Pinch held — check if we should start dragging
                             pinch_duration = now - pinch_start_time
                             if pinch_duration > PINCH_HOLD_MIN and not trackpad_dragging and not dragging:
-                                mouse.start_drag()
-                                trackpad_dragging = True
-                                dragging = True
-                                audio.drag_start()
+                                if spine.dispatch("start_drag", confidence=gesture_confidence, now=now)["executed"]:
+                                    trackpad_dragging = True
+                                    dragging = True
+                                    audio.drag_start()
                     else:
                         # Pinch released
                         if pinch_was_active:
                             pinch_duration = now - pinch_start_time
                             if pinch_duration < PINCH_TAP_MAX:
-                                # Quick tap = left click
+                                # Quick tap = left click (v16: via spine)
                                 if now - last_click_time > config.pinch_cooldown:
-                                    mouse.left_click()
-                                    audio.click()
-                                    last_click_time = now
+                                    if spine.dispatch("left_click", confidence=gesture_confidence, now=now)["executed"]:
+                                        audio.click()
+                                        last_click_time = now
                             # End drag if was dragging
                             if trackpad_dragging:
-                                mouse.stop_drag()
-                                trackpad_dragging = False
-                                dragging = False
+                                if spine.dispatch("stop_drag", confidence=1.0, now=now)["executed"]:
+                                    trackpad_dragging = False
+                                    dragging = False
                             pinch_was_active = False
 
                     # --- PEACE: tap=right click, hold+move=scroll ---
@@ -1932,16 +2119,16 @@ def main():
                             if peace_duration < PEACE_TAP_MAX:
                                 # Quick tap = right click
                                 if now - last_click_time > config.pinch_cooldown:
-                                    mouse.right_click()
-                                    audio.right_click()
-                                    last_click_time = now
+                                    if spine.dispatch("right_click", confidence=gesture_confidence, now=now)["executed"]:
+                                        audio.right_click()
+                                        last_click_time = now
                             peace_was_active = False
                         scrolling = False
 
                     # --- THREE: show desktop (3-finger swipe up on trackpad) ---
                     if gesture == Gesture.THREE and gesture_changed:
-                        _safe_kb_action(_kb(), "show_desktop")
-                        audio.click()
+                        if spine.dispatch("show_desktop", confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
 
                     # --- FIST: freeze cursor ---
                     if gesture == Gesture.FIST and gesture_changed:
@@ -1950,33 +2137,33 @@ def main():
 
                     # --- THUMBS_UP: double click ---
                     if gesture == Gesture.THUMBS_UP and gesture_changed:
-                        mouse.double_click()
-                        audio.click()
-                        last_click_time = now
+                        if spine.dispatch("double_click", confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
+                            last_click_time = now
 
                     # --- PINKY: middle click ---
                     if gesture == Gesture.PINKY and gesture_changed:
-                        try:
-                            mouse.mouse.click(mouse._button.middle, 1)
-                        except Exception:
-                            pass
-                        audio.right_click()
-                        last_click_time = now
+                        if spine.dispatch("middle_click", confidence=gesture_confidence, now=now)["executed"]:
+                            audio.right_click()
+                            last_click_time = now
 
-                    # --- OK: close window ---
+                    # --- OK: close window (DESTRUCTIVE class — refused by
+                    # default; policy gate in the spine, audit #4/#20) ---
                     if gesture == Gesture.OK and gesture_changed:
-                        _safe_kb_action(_kb(), "close_window")
-                        audio.click()
+                        if spine.dispatch("close_window", confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
+                        else:
+                            audio.mode_exit()  # audible "blocked" cue
 
-                    # --- SIX: task switcher ---
+                    # --- SIX: task switcher (CAUTION) ---
                     if gesture == Gesture.SIX and gesture_changed:
-                        _safe_kb_action(_kb(), "switch_window")
-                        audio.click()
+                        if spine.dispatch("task_switch", confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
 
-                    # --- ROCK: minimize ---
+                    # --- ROCK: minimize (CAUTION) ---
                     if gesture == Gesture.ROCK and gesture_changed:
-                        _safe_kb_action(_kb(), "minimize_window")
-                        audio.click()
+                        if spine.dispatch("minimize_window", confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
 
                 else:
                     # ═══ CLASSIC GESTURE MODE ═══
@@ -1987,7 +2174,7 @@ def main():
                                 classic_pinch_held = True
                                 classic_pinch_start = now
                             zticks = pinch_zoom.update(True, filtered_pos[1], now)
-                            if zticks != 0:
+                            if zticks != 0 and spine.gate_continuous(now):
                                 zoom_scroll(zticks)
                                 zoom_ticks_total += zticks
                                 _mrec("zoom", ticks=zticks)
@@ -1998,70 +2185,70 @@ def main():
                             if not pinch_zoom.active \
                                and (now - classic_pinch_start) < config.zoom_engage_hold + 0.1 \
                                and now - last_click_time > config.pinch_cooldown:
-                                mouse.left_click()
-                                audio.click()
-                                last_click_time = now
-                                _mrec("click")
+                                if spine.dispatch("left_click", confidence=gesture_confidence, now=now)["executed"]:
+                                    audio.click()
+                                    last_click_time = now
+                                    _mrec("click")
 
                     # PINCH -> Left click (immediate when zoom is off)
                     if gesture == Gesture.PINCH and gesture_changed \
                        and not (zoom_enabled and pinch_zoom is not None):
                         if now - last_click_time > config.pinch_cooldown:
-                            mouse.left_click()
-                            audio.click()
-                            last_click_time = now
-                            _mrec("click")
+                            if spine.dispatch("left_click", confidence=gesture_confidence, now=now)["executed"]:
+                                audio.click()
+                                last_click_time = now
+                                _mrec("click")
 
                     # PEACE -> Right click
                     elif gesture == Gesture.PEACE and gesture_changed:
                         if now - last_click_time > config.pinch_cooldown:
-                            mouse.right_click()
-                            audio.right_click()
-                            last_click_time = now
-                            _mrec("right_click")
+                            if spine.dispatch("right_click", confidence=gesture_confidence, now=now)["executed"]:
+                                audio.right_click()
+                                last_click_time = now
+                                _mrec("right_click")
 
                     # THUMBS_UP -> Double click
                     elif gesture == Gesture.THUMBS_UP and gesture_changed:
-                        mouse.double_click()
-                        audio.click()
-                        last_click_time = now
-                        _mrec("double_click")
+                        if spine.dispatch("double_click", confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
+                            last_click_time = now
+                            _mrec("double_click")
 
                     # PINKY -> Middle click
                     elif gesture == Gesture.PINKY and gesture_changed:
-                        try:
-                            mouse.mouse.click(mouse._button.middle, 1)
-                        except Exception:
-                            pass
-                        audio.right_click()
-                        last_click_time = now
-                        _mrec("middle_click")
+                        if spine.dispatch("middle_click", confidence=gesture_confidence, now=now)["executed"]:
+                            audio.right_click()
+                            last_click_time = now
+                            _mrec("middle_click")
 
                     # FIST -> Toggle freeze
                     elif gesture == Gesture.FIST and gesture_changed:
                         cursor_frozen = not cursor_frozen
                         audio.freeze()
 
-                    # OK -> Close window (Alt+F4)
+                    # OK -> Close window (Alt+F4) — DESTRUCTIVE class:
+                    # refused by default (spine policy gate, audit #4/#20)
                     elif gesture == Gesture.OK and gesture_changed:
-                        _safe_kb_action(_kb(), "close_window")
-                        audio.click()
+                        if spine.dispatch("close_window", confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
+                        else:
+                            audio.mode_exit()  # audible "blocked" cue
 
-                    # SIX -> Task switcher (Alt+Tab)
+                    # SIX -> Task switcher (Alt+Tab, CAUTION)
                     elif gesture == Gesture.SIX and gesture_changed:
-                        _safe_kb_action(_kb(), "switch_window")
-                        audio.click()
+                        if spine.dispatch("task_switch", confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
 
                     # PALM -> Drag mode
                     if gesture == Gesture.PALM and not dragging:
-                        mouse.start_drag()
-                        dragging = True
-                        audio.drag_start()
-                        _mrec("drag_start")
+                        if spine.dispatch("start_drag", confidence=gesture_confidence, now=now)["executed"]:
+                            dragging = True
+                            audio.drag_start()
+                            _mrec("drag_start")
                     elif gesture != Gesture.PALM and dragging and not trackpad_dragging:
-                        mouse.stop_drag()
-                        dragging = False
-                        _mrec("drag_stop")
+                        if spine.dispatch("stop_drag", confidence=1.0, now=now)["executed"]:
+                            dragging = False
+                            _mrec("drag_stop")
 
                     # THREE -> Scroll mode
                     if gesture == Gesture.THREE:
@@ -2072,7 +2259,7 @@ def main():
                         if prev_index_y is not None:
                             sd = (filtered_pos[1] - prev_index_y) * 80
                             scroll_accum += sd
-                            if abs(scroll_accum) > 0.5:
+                            if abs(scroll_accum) > 0.5 and spine.gate_continuous(now):
                                 scroll_amount = int(scroll_accum)
                                 if scroll_amount != 0:
                                     mouse.scroll(scroll_amount)
@@ -2083,15 +2270,82 @@ def main():
                     else:
                         scrolling = False
 
-                    # GUN -> Show desktop (Win+D / Cmd+H)
+                    # GUN -> Show desktop (Win+D / Cmd+H, CAUTION)
                     if gesture == Gesture.GUN and gesture_changed:
-                        _safe_kb_action(_kb(), "show_desktop")
-                        audio.click()
+                        if spine.dispatch("show_desktop", confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
 
-                    # ROCK -> Minimize
+                    # ROCK -> Minimize (CAUTION)
                     if gesture == Gesture.ROCK and gesture_changed:
-                        _safe_kb_action(_kb(), "minimize_window")
-                        audio.click()
+                        if spine.dispatch("minimize_window", confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
+
+                # ═══ v16 MOTION-GESTURE ACTIONS (both modes) ═══
+                # Every new gesture: detector → confidence → spine gate →
+                # action. Circles/push/pull = zoom (SAFE, analog); SHAKE =
+                # safe cancellation; WAVE = attention cue only (no OS action).
+                if not two_hand_active:
+                    if gesture == Gesture.CIRCLE_CW and gesture_changed:
+                        if spine.dispatch("zoom", amount=2, confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
+                    elif gesture == Gesture.CIRCLE_CCW and gesture_changed:
+                        if spine.dispatch("zoom", amount=-2, confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
+                    elif gesture == Gesture.PULL and gesture_changed:
+                        if spine.dispatch("zoom", amount=3, confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
+                    elif gesture == Gesture.PUSH and gesture_changed:
+                        if spine.dispatch("zoom", amount=-3, confidence=gesture_confidence, now=now)["executed"]:
+                            audio.click()
+                    if gesture == Gesture.SHAKE and gesture_changed:
+                        # SAFE cancellation: drop drag, unfreeze, exit modes
+                        if dragging:
+                            spine.dispatch("stop_drag", confidence=1.0, now=now)
+                            dragging = False
+                            trackpad_dragging = False
+                        cursor_frozen = False
+                        audio.mode_exit()
+                    if gesture == Gesture.WAVE and gesture_changed:
+                        audio.gesture_confirm()  # attention cue; no OS action
+                    # THUMBS_DOWN / FOUR / FIVE: recognized + HUD-visible;
+                    # no risky default action — map them yourself via
+                    # airmouse gestures (registry) if wanted.
+
+                # v16: feed confirmed hand gestures to the custom-sequence
+                # registry (audit #9: the matcher finally receives hands).
+                if gesture_registry is not None and config.gesture_sequences \
+                        and gesture_changed and gesture != Gesture.NONE \
+                        and not two_hand_active:
+                    try:
+                        _ev, _rint = gesture_registry.feed(
+                            getattr(gesture, "value", str(gesture)),
+                            confidence=float(gesture_confidence or 0.8),
+                            now=now)
+                        if _rint is not None:
+                            _itype = str(getattr(getattr(_rint, "type", None),
+                                                 "value", "")).lower()
+                            _spine_map = {"click": "left_click",
+                                          "double_click": "double_click",
+                                          "right_click": "right_click",
+                                          "middle_click": "middle_click"}
+                            _si = _spine_map.get(_itype)
+                            if _si:
+                                spine.dispatch(_si, confidence=float(
+                                    getattr(_rint, "confidence", 0.8) or 0.8),
+                                    now=now)
+                    except Exception:
+                        pass
+
+                # v16: CLOSE THE PERSONALIZATION LOOP (audit #7) — observe
+                # every confirmed gesture (learning flags gate inside the
+                # plugin; prediction never executes).
+                if intelligence_plugin is not None and gesture_changed \
+                        and gesture != Gesture.NONE:
+                    try:
+                        intelligence_plugin.observe_gesture(
+                            getattr(gesture, "value", str(gesture)))
+                    except Exception:
+                        pass
 
                 # SHAKA -> Volume mode (move up/down to adjust)
                 #   With debounce — don't spam volume changes
@@ -2104,12 +2358,9 @@ def main():
                     if prev_index_y is not None:
                         vd = filtered_pos[1] - prev_index_y
                         if abs(vd) > 0.02 and (now - last_volume_time > VOLUME_COOLDOWN):
-                            k = _kb()
-                            if k:
-                                if vd > 0:
-                                    _safe_kb_action(k, "volume_down")
-                                else:
-                                    _safe_kb_action(k, "volume_up")
+                            _vi = "volume_down" if vd > 0 else "volume_up"
+                            if spine.dispatch(_vi, confidence=gesture_confidence, now=now)["executed"]:
+                                pass  # dispatch already applied the change
                             prev_index_y = filtered_pos[1]
                             last_volume_time = now
                 else:
@@ -2128,12 +2379,9 @@ def main():
                     if prev_index_y is not None:
                         bd = filtered_pos[1] - prev_index_y
                         if abs(bd) > 0.03 and (now - last_brightness_time > BRIGHTNESS_COOLDOWN):
-                            k = _kb()
-                            if k:
-                                if bd > 0:
-                                    _safe_kb_action(k, "brightness_down")
-                                else:
-                                    _safe_kb_action(k, "brightness_up")
+                            _bi = "brightness_down" if bd > 0 else "brightness_up"
+                            if spine.dispatch(_bi, confidence=gesture_confidence, now=now)["executed"]:
+                                pass
                             prev_index_y = filtered_pos[1]
                             last_brightness_time = now
                 else:
@@ -2345,7 +2593,8 @@ def main():
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):
                     running = False
-                elif key == 27:  # ESC — emergency stop in v9, quit otherwise
+                elif key == 27:  # ESC — emergency stop (v9 agent + v16 spine)
+                    spine.trip_estop("escape_key")
                     if agent is not None and not str(getattr(agent.safety, "level", "")).endswith("EMERGENCY"):
                         agent.trip_estop("escape_key")
                         print("  >> EMERGENCY STOP (ESC) — [x] to reset")
@@ -2443,6 +2692,8 @@ def main():
                     else:
                         print("  -> Fusion modes require v9 mode (--fusion / --hands-free)")
                 elif key == ord("x"):
+                    if spine.reset_estop():
+                        print("  -> spine E-STOP reset — actions re-enabled")
                     if agent is not None:
                         _lvl = str(getattr(agent.safety, "level", ""))
                         if _lvl.endswith("EMERGENCY"):

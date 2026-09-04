@@ -291,6 +291,12 @@ class Config:
 
     # ═══ v15.2 — TWO-HAND FOUNDATION ═══
     two_hand = False                 # enables two-hand tracking; requires a camera and mediapipe multi-hand
+    # v16 execution-spine flags (gesture actions route through gesture_spine.py)
+    gesture_min_confidence_safe = 0.45      # confidence floor for SAFE actions
+    gesture_min_confidence_caution = 0.60   # confidence floor for CAUTION actions
+    gesture_allow_destructive = False       # NEVER true by default: Alt+F4 / macro replay stay refused
+    gesture_sequences = True                # feed hand gestures to the custom-sequence registry
+    selftune_apply = False                  # opt-in: let SelfTuner apply bounded parameter proposals
 
     def save_defaults(self):
         """Save current config as TOML (creates template for user editing)."""
@@ -436,6 +442,11 @@ class Config:
             f"telemetry_enabled = {str(self.telemetry_enabled).lower()}      # §21 privacy: OFF by default; nothing phones home",
             f"perf_report_enabled = {str(self.perf_report_enabled).lower()}      # local-only perf report on shutdown",
             f"two_hand = {str(self.two_hand).lower()}               # v15.2 two-hand tracking (camera + mediapipe multi-hand)",
+            f"gesture_min_confidence_safe = {float(self.gesture_min_confidence_safe)}",
+            f"gesture_min_confidence_caution = {float(self.gesture_min_confidence_caution)}",
+            f"gesture_allow_destructive = {str(self.gesture_allow_destructive).lower()}",
+            f"gesture_sequences = {str(self.gesture_sequences).lower()}",
+            f"selftune_apply = {str(self.selftune_apply).lower()}",
         ]
         with open(CONFIG_PATH, "w") as f:
             f.write("\n".join(lines) + "\n")
@@ -605,6 +616,11 @@ class Config:
                 # v15.2 two-hand foundation (same boolean pattern as the
                 # neighboring v9/v10 flags)
                 self.two_hand = v10.get("two_hand", self.two_hand)
+                self.gesture_min_confidence_safe = float(v10.get("gesture_min_confidence_safe", self.gesture_min_confidence_safe))
+                self.gesture_min_confidence_caution = float(v10.get("gesture_min_confidence_caution", self.gesture_min_confidence_caution))
+                self.gesture_allow_destructive = bool(v10.get("gesture_allow_destructive", self.gesture_allow_destructive))
+                self.gesture_sequences = bool(v10.get("gesture_sequences", self.gesture_sequences))
+                self.selftune_apply = bool(v10.get("selftune_apply", self.selftune_apply))
 
             # ═══ v11.5 sections (§40) — all backward compatible ═══
             if "intelligence" in data:
