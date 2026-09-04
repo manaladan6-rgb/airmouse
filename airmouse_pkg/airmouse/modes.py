@@ -674,7 +674,10 @@ MODE_REGISTRY: Dict[str, ModeDefinition] = {
         "mark important": "mark_important",
         "add action item": "add_action_item",
         "add note": "add_note",
+        "add decision": "add_decision",
+        "add question": "add_question",
         "bookmark moment": "bookmark",
+        "search transcript": "search_transcript",
         "export transcript": "export_summary",
     }),
     "research": ModeDefinition("research", "Research", {
@@ -711,6 +714,7 @@ class ModeController:
         self.research = ResearchMode()
         self.developer = DeveloperMode(dispatcher)
         self._last_note = ""
+        self._search_results = []
 
     @property
     def available(self) -> bool:
@@ -806,6 +810,14 @@ class ModeController:
             self.meeting.resume_transcription(now)
         elif action == "add_action_item":
             self.meeting.add_action_item(p, now)
+        elif action == "add_decision":
+            self.meeting.add_decision(p, now)
+        elif action == "add_question":
+            self.meeting.add_question(p, now)
+        elif action == "search_transcript":
+            self._search_results = self.meeting.timeline.by_kind(
+                "note") if not p else [
+                e for e in self.meeting.timeline.entries if p.lower() in e.text.lower()]
         elif action == "bookmark":
             self.meeting.bookmark_moment(p, now)
         elif action == "meeting_stop":
