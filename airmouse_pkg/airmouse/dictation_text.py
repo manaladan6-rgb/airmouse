@@ -140,14 +140,18 @@ class VoiceTypingEngine:
         return [DictationOp(op="insert", text=fresh)]
 
     def _apply_edit(self, op: str) -> List[DictationOp]:
-        self._push_undo()
         if op == "undo":
-            self._pop_undo()
+            # undo/redo must NOT push first (they move state between stacks)
+            if self._undo:
+                self._redo.append(self._committed)
+                self._committed = self._undo.pop()
             return [DictationOp(op="undo")]
         if op == "redo":
             if self._redo:
+                self._undo.append(self._committed)
                 self._committed = self._redo.pop()
             return [DictationOp(op="redo")]
+        self._push_undo()
         if op == "new_line":
             self._committed += "\n"
             return [DictationOp(op="edit_command", text="\n")]
