@@ -188,3 +188,28 @@ Stage Summary:
 - Baseline = v10.0.0 tag (0a6a7b3), 630 green tests measured in this sandbox
 - v11.5 is ADDITIVE: new airmouse/intelligence/ subpackage + transcription/dictation/text-control/world-model/modes modules; existing v10 modules get guarded integration points only
 - Plugin-optional contract: IntelligencePlugin facade NEVER raises; states AVAILABLE/DISABLED/UNAVAILABLE/CORRUPTED/INCOMPATIBLE/OUT_OF_MEMORY/PRIVACY_PAUSED
+
+---
+Task ID: 2-9 (v11.5)
+Agent: main coordinator
+Task: v11.5 core implementation (stages 1-8)
+
+Work Log:
+- intelligence/ subpackage: model.py (PersonalInteractionModel: NGram+ActionMarkov+CommandModel+EmojiModel+FeatureWeights, ~30MB capacity budget, quantized packed binary artifact, deterministic), memory.py (PatternRecord §6 schema, sensitive-data scrubbing fail-closed, bounded, privacy lifecycle), vocabulary.py (terms + corrections HydraLink, import/export validated), prediction.py (Predictor with explainability reasons, EMOJI_KEYWORDS baseline), selftune.py (TUNABLES with hard [min,max] bands + min-samples gates), personalization.py (Gesture/Gaze/Voice profiles incl. voice aliases "launch browser"->"open browser"), workflows.py (WorkflowDiscovery approval-gated, WorkflowStore, WorkflowRunner preview+destructive-confirm gates, ProactiveAssistant PREDICTION!=EXECUTION), plugin.py (IntelligencePlugin facade: DISABLED/AVAILABLE/CORRUPTED/INCOMPATIBLE/OUT_OF_MEMORY/PRIVACY_PAUSED, never raises, profile export/import validated)
+- transcription.py: LiveTranscriptionEngine (streaming partials/finals, VAD auto-finalize, spoken punctuation, discourse commas, capitalization, spell numbers, vocab pipeline, bounded history + txt/json/md export + search, WER evaluator), StreamingProviderAdapter + SimulatedStreamingProvider
+- dictation_text.py: VoiceTypingEngine (COMMAND/DICTATION/HYBRID, §9 spoken formatting incl. spec example "hello bro how are you question mark" -> "Hello bro, how are you?", edit commands, undo/redo), TextPredictor (§10), EmojiSuggester (§11 rate-limited)
+- text_control.py: TextController 16 ops (§12) with keyboard fallback, op_from_phrase mapping
+- world_model.py: WorldModel (§13 bounded snapshot + explainable likely-intent, never surfaces destructive), ContextualCommandResolver (§14 12 utterance families, ask-don't-guess)
+- modes.py: teacher/student/office/meeting/research/developer ModeController + phrase tables, presentation control via generic hotkeys, TimelineSession, StudyTimer, NotesStore, SourceCapture (§19 honest), MeetingMode structured summary (no speaker-ID claims), AccessibilityProfiles fallback chains (§22)
+- fusion2.py: FusionEngine2 9-signal weighted consensus (§24), ConflictResolver (conflicts -> confirm; destructive never from prediction), RFExtendedProvider + RFNoHardware honest default (§30)
+- privacy.py: PrivacyDashboard flags + delete/reset/clear/export/import + OFFLINE/ONLINE/PRIVACY state (cloud structurally impossible)
+- selftest.py: run_self_test 15 components, PASS/FAIL/OPTIONAL/HARDWARE honest statuses
+- agent.py: guarded intelligence/world_model/fusion2/modes wiring, _learn_from_report (learning events from verified actions, never raises)
+- config.py: 14 v11.5 TOML sections backward compatible; __main__.py: --intelligence/--no-intelligence/--dictation/--transcribe/--teacher/--student/--office/--meeting/--research + intelligence/memory/vocabulary/workflows/self-test subcommands + HUD AI:/MODE:/SUG:/transcript badges; version 11.5.0
+- offline.py: selftest extended 13 -> 18 checks (intelligence/memory/vocabulary/transcription/fusion2 all verified under real socket-level network isolation)
+- Bugs found+fixed during dev: ngram stream u32/u64 alignment; dictation segment bookkeeping on replace; undo/redo stack order; mode dispatch routing shared phrases; _learn_from_report variable shadowing
+
+Stage Summary:
+- 15 new modules + agent/config/CLI/HUD/offline integration, all additive; version 11.5.0
+- Full v10 regression suite stays green (630 passed) at every commit
+- Offline selftest 18/18 (network truly blocked)
