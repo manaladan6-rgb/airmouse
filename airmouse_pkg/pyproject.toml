@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "airmouse"
-version = "9.0.0"
+version = "10.0.0"
 description = "AirMouse v9.0 Multimodal Intelligence Edition — webcam eye/gaze tracking with dwell + blink control, 14-gesture hand mouse, 30-phrase voice + natural-language control, multimodal fusion engine (gaze x hand x voice), screen understanding, intent engine, verified action execution with recovery, safety system (e-stop, rate limits, confirmations), semantic macros, hybrid One Euro + Kalman filtering, adaptive calibration, and single-file simple mode"
 license = "MIT"
 requires-python = ">=3.9"

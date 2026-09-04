@@ -105,7 +105,7 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
               precision_mode, gsm_progress, gesture_confidence,
               voice_caption=None, voice_active=False, zoom_active=False,
               recording=False, kalman_on=False, cal_ready=False,
-              v9_state=None):
+              v9_state=None, v10_state=None):
     """Draw Iron Man HUD overlay with v3.1 enhancements."""
     if frame is None:
         return
@@ -190,6 +190,27 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
             pass
     if voice_active:
         badges.append(("VOICE", (0, 255, 180)))
+    # v10 badges: voice mode, live command + confidence, RF, browser, verify
+    if v10_state:
+        try:
+            if v10_state.get("voice_mode"):
+                badges.append((f"V10:{str(v10_state['voice_mode'])[:4].upper()}",
+                               (0, 255, 180)))
+            if v10_state.get("command"):
+                conf = v10_state.get("conf") or ""
+                badges.append((f"CMD:{str(v10_state['command'])[:12].upper()}"
+                               + (f" {conf}" if conf else ""),
+                               (0, 230, 200)))
+            if v10_state.get("rf"):
+                badges.append(("RF", (180, 100, 255)))
+            if v10_state.get("br"):
+                badges.append(("BROWSER", (90, 200, 255)))
+            if v10_state.get("verify"):
+                vcol = (140, 255, 140) if v10_state["verify"] == "passed" \
+                    else (255, 170, 80)
+                badges.append((f"VER:{str(v10_state['verify'])[:6].upper()}", vcol))
+        except Exception:
+            pass
     if kalman_on:
         badges.append(("KALMAN", (180, 255, 0)))
     if cal_ready:
@@ -405,8 +426,11 @@ def main():
     parser.add_argument("--settings", action="store_true", help="Open settings GUI")
     # ═══ v5.0 flags ═══
     parser.add_argument("--voice", action="store_true", help="Enable voice commands (SpeechRecognition + pyaudio)")
-    parser.add_argument("--voice-mode", type=str, choices=["normal", "high", "turbo"], default=None,
-                        help="Voice sensitivity: normal | high | turbo (turbo = MAD nonstop listening)")
+    parser.add_argument("--voice-mode", type=str,
+                        choices=["normal", "high", "turbo",
+                                 "command", "dictation", "hybrid"],
+                        default=None,
+                        help="v5 sensitivities (normal/high/turbo) or v10 modes (command/dictation/hybrid)")
     parser.add_argument("--mic", type=int, default=None, help="Microphone index (default: system default)")
     parser.add_argument("--no-kalman", action="store_true", help="Disable hybrid One Euro + Kalman filter (pure One Euro)")
     parser.add_argument("--no-zoom", action="store_true", help="Disable pinch-to-zoom gesture")
@@ -428,11 +452,92 @@ def main():
                         help="v9 interaction mode (overrides --fusion/--hands-free/--assist)")
     parser.add_argument("--no-voice", action="store_true", help="Disable voice control")
     parser.add_argument("--version", action="store_true", help="Print version and exit")
+    # ═══ v10.0 flags — Universal Offline Interaction Engine ═══
+    parser.add_argument("--offline", action="store_true",
+                        help="v10 TRUE OFFLINE mode: block network features, local ASR/grammar only")
+    parser.add_argument("--browser", action="store_true",
+                        help="v10 enable local browser bridge control (semantic page targets)")
+    parser.add_argument("--browser-bridge", action="store_true",
+                        help="v10 start the localhost browser-bridge server (extension endpoint)")
+    parser.add_argument("--gesture", action="store_true",
+                        help="v10 enable the gesture registry (custom gesture mappings)")
+    parser.add_argument("--rf", action="store_true",
+                        help="v10 enable the RF-sensing modality (optional hardware; idles without it)")
+    parser.add_argument("command", nargs="?", default=None,
+                        choices=["voice-status", "gestures", "commands",
+                                 "browser", "offline-test", "diagnostics"],
+                        help="v10 info/diagnostic subcommand (prints and exits)")
     args = parser.parse_args()
 
     if args.version:
-        print(f"AirMouse v{_pkg.__version__} — Multimodal Intelligence Edition")
+        print(f"AirMouse v{_pkg.__version__} — Universal Offline Interaction Edition")
         return
+
+    # ═══ v10.0 subcommands (print + exit) ═══
+    if args.command == "commands":
+        from .voice_commands import commands_by_namespace
+        print("  v10 voice command registry (deterministic grammar, fully offline):")
+        for ns, names in commands_by_namespace().items():
+            print(f"    [{ns}] " + ", ".join(names))
+        return
+    if args.command == "gestures":
+        from .gesture_registry import GestureRegistry
+        reg = GestureRegistry()
+        reg.load()
+        info = reg.list_gestures()
+        print("  v10 built-in gesture mappings:")
+        for g, intent in info["builtin"].items():
+            print(f"    {g:<14} -> {intent}")
+        if info["custom"]:
+            print("  custom mappings (~/.airmouse/gestures.json):")
+            for name, m in info["custom"].items():
+                print(f"    {name}: {' -> '.join(m['pattern'])} => "
+                      f"{m['intent']} {m['params']}")
+        else:
+            print("  no custom mappings (define: see docs §custom gestures)")
+        return
+    if args.command == "voice-status":
+        from .offline_voice import OfflineVoiceEngine, detect_providers
+        eng = OfflineVoiceEngine({})
+        print(f"  mode: {eng.mode.value}  wake_word_required: {eng.wake_word_required}")
+        print(f"  offline ASR providers: {detect_providers()}")
+        print("  live engine status requires a running session (HUD / diagnostics)")
+        return
+    if args.command == "browser":
+        from .browser import CDPBrowserBridge
+        cdp = CDPBrowserBridge(port=9222)
+        print(f"  CDP bridge on :9222 -> available: {cdp.available()}")
+        print("  start Chrome/Edge with:  --remote-debugging-port=9222")
+        print("  or install the bundled extension (airmouse/browser_extension/)")
+        return
+    if args.command == "offline-test":
+        from .offline import run_offline_selftest
+        print("  running the FULL v10 stack with networking disabled ...")
+        report = run_offline_selftest()
+        for c in report.checks:
+            print(f"    [{'PASS' if c['passed'] else 'FAIL'}] {c['name']} {c['detail'][:60]}")
+        print(f"  {report.summary()}")
+        sys.exit(0 if report.ok else 1)
+    if args.command == "diagnostics":
+        from .offline import run_offline_selftest
+        from .offline_voice import detect_providers
+        print("  ══ AirMouse v10 diagnostics ══")
+        print(f"  version: {_pkg.__version__}")
+        print(f"  offline ASR providers: {detect_providers()}")
+        rep = run_offline_selftest()
+        print(f"  offline selftest: {rep.summary()}")
+        try:
+            import importlib
+            for mod in ("cv2", "mediapipe", "pynput", "speech_recognition",
+                        "vosk", "whisper"):
+                try:
+                    importlib.import_module(mod)
+                    print(f"  optional dep {mod}: OK")
+                except Exception:
+                    print(f"  optional dep {mod}: not installed")
+        except Exception:
+            pass
+        sys.exit(0 if rep.ok else 1)
 
     # Handle --settings
     if args.settings:
@@ -500,6 +605,22 @@ def main():
     if args.hands_free: config.fusion_mode = "hands_free"
     if args.assist: config.fusion_mode = "assist"
     if args.interaction: config.fusion_mode = args.interaction.replace("-", "_")
+    # ═══ v10.0 flag overrides ═══
+    offline_gate = None
+    if args.offline:
+        try:
+            from .offline import OfflineGate
+            offline_gate = OfflineGate.global_gate()
+            offline_gate.engage()
+            print("  >> V10 TRUE OFFLINE MODE — network-dependent features blocked")
+        except Exception as e:
+            print(f"  !! offline gate unavailable ({e})")
+    v10_voice_mode = (args.voice_mode in ("command", "dictation", "hybrid")) \
+        if args.voice_mode else False
+    if args.offline and args.voice and not v10_voice_mode:
+        # offline voice forces a v10 voice mode (cloud ASR is blocked)
+        v10_voice_mode = True
+        config.voice_sensitivity = "command"
     # Handle --gaze-calibrate (v9.0) — runs the guided (or simulated) flow,
     # saves the fit to ~/.airmouse/gaze_calibration.json and exits.
     if args.gaze_calibrate:
@@ -641,8 +762,28 @@ def main():
     utterance_queue = []          # raw transcript strings from voice
 
     def _on_transcript(transcript, command="", score=0.0):
-        """Voice engine callback: feed raw text to the v9 NL pipeline."""
+        """Voice engine callback: route transcripts to the v10 offline
+        engine when active (deterministic grammar), else the v9 NL tap."""
         try:
+            if not transcript:
+                return
+            if voice_engine10 is not None:
+                # v10: the offline voice engine owns grammar resolution;
+                # the agent drains its events via poll_events().
+                voice_engine10.feed_transcript(
+                    transcript, float(score) if score else 0.9)
+                if browser_ctrl is not None and browser_ctrl.running:
+                    # semantic browser utterances (§12) resolve first
+                    try:
+                        from .browser import SemanticBrowserResolver
+                        resolver = SemanticBrowserResolver(browser_ctrl.mapper)
+                        res = resolver.resolve(transcript)
+                        if res.matched and res.action:
+                            browser_ctrl.execute(res)
+                            return
+                    except Exception:
+                        pass
+                return
             if agent is not None and transcript:
                 utterance_queue.append((transcript, time.perf_counter()))
         except Exception:
@@ -652,7 +793,8 @@ def main():
     voice = None
     voice_caption = ""        # last transcript for HUD
     voice_caption_until = 0.0 # show transcript for 2s
-    if config.voice_enabled:
+    if config.voice_enabled and voice_engine10 is None:
+        # v10 offline voice replaces the v5 cloud engine when active
         sensitivity = config.voice_sensitivity if config.voice_sensitivity in SENSITIVITY_PROFILES else "high"
         mic_index = config.voice_mic_index if isinstance(config.voice_mic_index, int) and config.voice_mic_index >= 0 else None
         voice = VoiceCommandEngine(sensitivity=sensitivity, mic_index=mic_index,
@@ -665,6 +807,100 @@ def main():
             print("  >> Voice requested but SpeechRecognition/pyaudio unavailable.")
             print("     Install:  pip install SpeechRecognition pyaudio")
             voice = None
+
+    # ═══ v10.0 — Universal Offline Interaction Engine components ═══
+    # All optional, all degrade gracefully; the v5/v9 behaviour above is
+    # unchanged when these are off.
+    event_bus = None
+    context_engine = None
+    voice_engine10 = None
+    gesture_registry = None
+    rf_bridge = None
+    browser_ctrl = None
+    browser_bridge_server = None
+    system_executor = None
+    file_executor = None
+    browser_executor = None
+    v10_state = {"voice_mode": "", "command": "", "conf": "",
+                 "rf": False, "br": False, "verify": ""}
+    try:
+        from .eventbus import EventBus
+        from .context import ContextEngine
+        from .actions import ActionEngine as _AE  # noqa (contract anchor)
+        from .system_actions import (SystemActionExecutor, FileActionExecutor)
+        event_bus = EventBus(history_size=512)
+        context_engine = ContextEngine()
+        system_executor = SystemActionExecutor()
+        file_executor = FileActionExecutor()
+        # gesture registry (custom mappings from ~/.airmouse/gestures.json)
+        if args.gesture or args.rf:
+            from .gesture_registry import GestureRegistry
+            gesture_registry = GestureRegistry()
+            loaded = gesture_registry.load()
+            if loaded:
+                print(f"  >> V10 GESTURE REGISTRY — {loaded} custom mapping(s) loaded")
+        # RF modality — only with --rf; idles honestly without hardware
+        if args.rf:
+            from .rf import RFBridge
+            rf_bridge = RFBridge(config={"enabled": True}, bus=event_bus)
+            if not rf_bridge.available():
+                print("  >> V10 RF modality enabled — no RF hardware/provider "
+                      "detected (modality idle; system continues)")
+        # offline voice engine (v10 modes)
+        if v10_voice_mode or args.offline:
+            from .offline_voice import OfflineVoiceEngine
+            voice_engine10 = OfflineVoiceEngine(
+                {"mode": (args.voice_mode or "command")},
+                bus=event_bus, context=context_engine)
+            # deterministic transcript injection hook for CI (AIRMOUSE_VOICE_TEXT)
+            print(f"  >> V10 OFFLINE VOICE ONLINE — mode: "
+                  f"{voice_engine10.mode.value.upper()} (deterministic local grammar)")
+        # browser subsystem
+        if args.browser or args.browser_bridge:
+            from .browser import BrowserController
+            browser_ctrl = BrowserController(
+                config={"enabled": True, "bridge": "auto",
+                        "offline": bool(args.offline)},
+                context_engine=context_engine, bus=event_bus)
+            started = browser_ctrl.start()
+            if args.browser_bridge:
+                from .browser_bridge import BrowserBridgeServer
+                browser_bridge_server = BrowserBridgeServer()
+                if browser_bridge_server.start():
+                    print(f"  >> V10 BROWSER BRIDGE SERVER — {browser_bridge_server.url} "
+                          "(localhost only; load the bundled extension)")
+                else:
+                    browser_bridge_server = None
+            if started:
+                print("  >> V10 BROWSER CONTROL ONLINE — "
+                      "'click the login button', 'new tab', 'go back' ...")
+            else:
+                print("  >> V10 browser control unavailable (no bridge) — continuing")
+        # browser action executor shim: lets the ACTION ENGINE perform
+        # semantic browser ops through the controller (§10/§13)
+        if browser_ctrl is not None:
+            class _BrowserExecutorShim:
+                """Adapts BrowserController to the action-engine contract."""
+
+                def __init__(self, controller):
+                    self.controller = controller
+
+                def perform(self, op, params=None):
+                    try:
+                        from .browser import BrowserResolution
+                        res = BrowserResolution(
+                            matched=True, action=str(op or "navigate"),
+                            element=None, params=dict(params or {}),
+                            confidence=0.9, text="")
+                        out = self.controller.execute(res)
+                        return {"ok": out.get("status") == "executed",
+                                **out}
+                    except Exception as exc:
+                        return {"ok": False, "message": repr(exc)}
+
+            browser_executor = _BrowserExecutorShim(browser_ctrl)
+    except Exception as e:
+        print(f"  !! v10 components partially unavailable ({e}) — continuing")
 
     # ═══ v9.0 — Interaction Agent (multimodal intelligence) ═══
     # Wires gaze + hand + voice + screen understanding into one pipeline:
@@ -696,6 +932,16 @@ def main():
                                   "min_click_interval": config.min_click_interval,
                                   "confirmation_timeout": config.confirmation_timeout,
                                   "stream_loss_grace": config.stream_loss_grace},
+                # ═══ v10 component injection (all optional) ═══
+                "event_bus": event_bus,
+                "context_engine": context_engine,
+                "voice_engine": voice_engine10,
+                "gesture_registry": gesture_registry,
+                "rf": rf_bridge,
+                "browser": browser_ctrl,
+                "system_executor": system_executor,
+                "file_executor": file_executor,
+                "browser_executor": browser_executor,
             })
             v9_owns_actions = True
             print(f"  >> V9 MULTIMODAL ONLINE — mode: {config.fusion_mode.upper()}"
@@ -1495,6 +1741,10 @@ def main():
                             v9_summary["action"] = (
                                 (f"{_lr.plan.action.value}" if _lr.plan else "?")
                                 + (":ok" if _lr.ok else f":{_lr.status.value}"))
+                            # v10 HUD: verification state of the last report
+                            v10_state["verify"] = (
+                                getattr(getattr(_lr, "verification", None),
+                                        "value", "") or "")
                         else:
                             v9_summary["action"] = ""
                         _dec = v9_out.get("decision")
@@ -1511,6 +1761,19 @@ def main():
                         _nin = v9_out.get("intents", [])
                         v9_summary["intent"] = _nin[-1].type.value if _nin else ""
                         v9_summary["mode"] = str(getattr(agent, "mode", "") or "")
+                        # v10 per-frame HUD state
+                        v10_state["voice_mode"] = \
+                            voice_engine10.mode.value if voice_engine10 else ""
+                        v10_state["command"] = \
+                            voice_engine10.last_command if voice_engine10 else ""
+                        v10_state["conf"] = (
+                            f"{int(voice_engine10.last_confidence * 100)}%"
+                            if voice_engine10 and
+                            voice_engine10.last_confidence > 0 else "")
+                        v10_state["rf"] = bool(
+                            rf_bridge is not None and rf_bridge.available())
+                        v10_state["br"] = bool(
+                            browser_ctrl is not None and browser_ctrl.running)
                         _gs = v9_out.get("gaze_state")
                         v9_summary["gaze_conf"] = (
                             float(getattr(_gs, "confidence", 0.0) or 0.0)
@@ -1528,12 +1791,13 @@ def main():
                           volume_mode, brightness_mode, precision_mode,
                           gsm.progress, gesture_confidence,
                           voice_caption=voice_caption,
-                          voice_active=(voice is not None and voice.listening),
+                          voice_active=(voice is not None and voice.listening) or (voice_engine10 is not None),
                           zoom_active=(pinch_zoom.active if pinch_zoom else False),
                           recording=recording_macro,
                           kalman_on=(is_direct and config.kalman_enabled),
                           cal_ready=calib.is_ready,
-                          v9_state=v9_summary)
+                          v9_state=v9_summary,
+                          v10_state=v10_state)
                 cv2.imshow("AirMouse", hand_data["frame"])
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):

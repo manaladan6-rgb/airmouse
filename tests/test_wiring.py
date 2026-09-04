@@ -25,10 +25,12 @@ def _cli(*args: str, timeout: float = 60.0) -> subprocess.CompletedProcess:
 
 # ── CLI surface ──────────────────────────────────────────────────────────────
 
-def test_cli_version_reports_9():
+def test_cli_version_reports_version():
+    # v10: version bumped 9.0.0 -> 10.0.0 (Universal Offline Interaction
+    # Edition); the CLI must report the CURRENT version.
     r = _cli("--version")
     assert r.returncode == 0
-    assert "9.0.0" in (r.stdout + r.stderr)
+    assert "10.0.0" in (r.stdout + r.stderr)
     assert "AirMouse" in (r.stdout + r.stderr)
 
 
