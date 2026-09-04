@@ -260,3 +260,34 @@ Stage Summary:
 - v11.5.0 COMPLETE and PUBLISHED: https://github.com/manaladan6-rgb/airmouse/releases/tag/v11.5.0
 - Simulation-verified only; webcam/mic/gaze/RF/real-Chrome-CDP/live-ASR honestly reported HARDWARE-UNVERIFIED
 - ACTION ITEM FOR USER: the PAT ghp_3c0y... was pasted in chat and momentarily committed locally; it was NEVER pushed (push protection), but it is exposed in conversation history — REVOKE/ROTATE it
+
+---
+Task ID: v15-AUDIT
+Agent: main coordinator
+Task: AIR MOUSE v12.0 -> v15.0 audit — baseline measurement before any code change
+
+Work Log:
+- Cloned github.com/manaladan6-rgb/airmouse (branch main, clean tree)
+- Tags verified on remote: v3.1.0, v3.2.0, v4.0.0, v4.1.0, v4.2.0, v5.0.0, v9.0.0, v10.0.0, v11.5.0
+- HEAD: 1da246c10eb8eda59bda7cb94061e9cf8f6ed593 (docs worklog commit on top of release 07658c8)
+- PYTHON_VERSION: 3.12.14 (/home/z/.venv)
+- PACKAGE_VERSION: 11.5.0 (airmouse_pkg/pyproject.toml)
+- BASELINE TEST RUN (measured, not claimed): pytest tests/ -q -> 786 passed, 0 failed, 0 skipped, 11.19s
+- Core contracts re-read before design: interfaces.py (Modality/EventKind 14 kinds/Intent/ActionPlan/ActionReport/VerificationResult/RecoveryStrategy/SafetyDecision), verification.py (ActionVerifier + RecoveryManager already present), world_model.py (v11.5 bounded WorldState snapshot + ContextualCommandResolver), safety.py (e-stop/confirmations/rate limits), intelligence/plugin.py (never-raises plugin facade, 8 states)
+
+OLD_TESTS: 786
+PASSED: 786
+FAILED: 0
+SKIPPED: 0
+PYTHON_VERSION: 3.12.14
+PACKAGE_VERSION: 11.5.0
+GIT_HEAD: 1da246c10eb8eda59bda7cb94061e9cf8f6ed593
+
+IMPLEMENTATION PLAN (v11.5.0 -> v15.0.0, additive, no rewrites):
+- STAGE 1 -> v12.0.0: (a) airmouse/intelligence/twin/ PersonalInteractionTwin — interaction-behavior model (preferences/habits/gesture patterns/gaze behavior/voice vocabulary/command+application+workflow preferences/confirmation+correction behavior/timing patterns/success+failure/modality preferences); every fact = source/confidence/context/timestamp/frequency/success_rate/provenance; learning/forgetting/confidence-decay/correction/export/import/reset/inspection/explainability; OPTIONAL by contract (core never imports at module scope); (b) airmouse/world_model_temporal.py TemporalInteractionWorldModel — HUMAN/COMPUTER/TASK sections, current+previous+transitions+causality+expected-vs-observed mismatch detection, observe()/snapshot()/diff()/history()/explain()/predict_state(), bounded, immutable snapshots out.
+- STAGE 2 -> v13.0.0: (a) airmouse/goals.py COMMAND->INTENT->TASK->GOAL hierarchy with deterministic parsing + optional interpretation assist; every interpretation exposes intent/confidence/context/proposed_plan/risk/required_permissions/required_confirmations; PREDICTION != PERMISSION != EXECUTION; (b) airmouse/tasks.py bounded TaskEngine — create/decompose/dependency-graph/progress/pause/resume/cancel/retry/checkpoint/rollback/human-approval/verification; TaskStep = objective/action/target/preconditions/expected/verification/risk/permission/timeout/retry_policy.
+- STAGE 3 -> v13.5.0: airmouse/skills.py InteractionCompression + Skill + PersonalSkillLibrary — repeated behavior + confidence threshold + semantic clustering + user notification + preview + approval (never silent); semantic targets (accessibility/DOM/OCR/visual/coordinate-fallback); skills inspectable/editable/exportable/importable/versioned/permission-aware/revocable.
+- STAGE 4 -> v14.0.0: (a) airmouse/recovery2.py RecoveryEngine upgrade — PRECONDITION->EXECUTE->OBSERVE->VERIFY->RECOVER loop; strategies retry/re-observe/re-target/alternate-modality/alternate-semantic-target/alternate-execution/request-human; bounded retries, never bypass safety, never silent privilege escalation, destructive recovery needs confirmation; (b) airmouse/target_resolver.py UniversalTargetResolver — chain accessibility/DOM/semantic-API/OCR/vision/geometry/coordinate; resolve_target()/explain_target()/verify_target().
+- STAGE 5 -> v14.5.0: (a) airmouse/aip/ AirMouse Interaction Protocol — DISCOVER/OBSERVE/TARGET/REQUEST/AUTHORIZE/EXECUTE/VERIFY/RESULT; JSON schemas for capability/observation/target/intent/action/task/permission/confirmation/verification/error/recovery/result; version negotiation; capability discovery; tiny/deterministic/local-first/permission-aware; (b) airmouse/agent_sdk.py Python Agent SDK — connect/capabilities/observe/targets/execute/verify/task/stop/status; hides all internals; (c) agent-core/ standalone airmouse-agent-core package — stdlib-only, lazy, no ML deps, performance-budgeted; (d) agent-sdk-js/ TypeScript SDK — dependency-free.
+- STAGE 6 -> v15.0.0: (a) airmouse/agents.py multi-agent registry — identity/permissions/capabilities/task-ownership/leases/priority/budgets/audit; registration/discovery/handoff/agent-communication/conflict-resolution/resource-locking/human-override/e-stop; (b) airmouse/permissions.py AgentPermissionEngine — granular perms, ALLOW/DENY/ASK/ALLOW_ONCE/ALLOW_SESSION/ALLOW_PATTERN; hierarchy E-STOP > HUMAN OVERRIDE > SAFETY POLICY > PERMISSION > AGENT > PREDICTION; (c) airmouse/ditm.py DO IT WITH ME — goal/plan/sources/state/risks/actions/approval + START/EDIT/PAUSE/STOP/CHANGE_DIRECTION; (d) airmouse/onboarding.py progressive first-run (voice/hands/eyes/keyboard/automatic/all; INSTALL->LAUNCH->USE); (e) airmouse/licensing.py capability/licensing infra FREE/PRO/DEVELOPER/ENTERPRISE/SDK/MARKETPLACE/HARDWARE — transparent, local, testable, revocable, no dark patterns, no crippling; (f) airmouse/simulator.py deterministic computer simulator (windows/apps/browser/buttons/forms/text/files/clipboard/navigation/failures/UI-changes); (g) airmouse/failure_injection.py 12 failure classes -> OBSERVE/DIAGNOSE/RECOVER/VERIFY or safe-stop; (h) airmouse/explain.py structured decision traces (why predicted/why target/why confirm/why fail/why recover/which preference) without sensitive leakage; (i) shared interaction model wiring: humans and agents through the SAME world model/target resolver/permissions/action/verification/recovery; (j) HUD: agent-controlling badge, task/verification/recovery status; (k) CLI: status/capabilities/observe/world/twin/skills/agents/permissions/tasks/workflows/protocol/self-test/benchmark.
+- STAGE 7 hardening: tests/test_v12.py..test_v15.py full matrix + adversarial (malicious agents, protocol fuzz, malicious skills, hostile webpage text = DATA never instruction); security audit greps + fuzz surfaces; performance budgets enforced in tests; docs (README/CHANGELOG/VERIFICATION_REPORT/AIP_SPEC/AGENT_SDK/MULTI_AGENT/SKILLS/DEVELOPER_GUIDE/USER_GUIDE/V12_V15_ARCHITECTURE); wheel + clean-venv install; commits+push per stage; annotated tags v12.0.0/v12.5.0/v13.0.0/v13.5.0/v14.0.0/v14.5.0/v15.0.0; remote verification before any release claim.
