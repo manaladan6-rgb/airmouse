@@ -470,30 +470,37 @@ def match_command_grammar(text: str,
 
     Pure + total: accepts anything, never raises.  Returns a
     :class:`VoiceCommandMatch` whose ``is_command`` tells whether a
-    command resolved.  Order of resolution:
+    command resolved.  Resolution order (deterministic):
 
     1. exact full-match against every compiled template
-    2. prefer the longest matched utterance (specificity)
-    3. ties → ambiguity flag + reduced confidence
+    2. prefer the most literal (specific) template
+    3. ties → namespace priority (ENGINE > MOUSE > … > BROWSER)
+    4. same-priority ties → ambiguity flag + reduced confidence
     """
     norm = _normalize(text)
     if not norm:
         return VoiceCommandMatch(text=str(text or ""))
-    candidates: List[Tuple[CommandSpec, Dict[str, str], float]] = []
+    ns_priority = {ns: i for i, ns in enumerate(CommandNamespace)}
+    candidates: List[Tuple[CommandSpec, Dict[str, str], float, int]] = []
     for attempt in _fuzzy_fixup(norm):
-        for spec in REGISTRY:
+        for idx, spec in enumerate(REGISTRY):
             hit = spec.match(attempt)
             if hit is None:
                 continue
             entities, specificity = hit
-            candidates.append((spec, entities, specificity))
+            candidates.append((spec, entities, specificity, idx))
     if not candidates:
         return VoiceCommandMatch(text=str(text or ""))
-    top = max(c[2] for c in candidates)
-    best = [c for c in candidates if c[2] == top]
-    spec, entities, _ = best[0]
-    ambiguous = len({b[0].name for b in best}) > 1
-    # synonyms rewrite (e.g. "shut firefox" entities.app stays "firefox")
+    # sort: literal specificity desc, namespace priority asc, registry order
+    candidates.sort(key=lambda c: (-c[2], ns_priority.get(c[0].namespace, 99),
+                                   c[3]))
+    spec, entities, top, _ = candidates[0]
+    ambiguous = any(
+        c[0].name != spec.name and c[2] == top
+        and ns_priority.get(c[0].namespace, 99)
+        == ns_priority.get(spec.namespace, 99)
+        for c in candidates[1:])
+    # synonyms rewrite (post-parse entity normalization)
     for wrong, right in spec.synonyms.items():
         if entities.get(wrong):
             entities[wrong] = right
