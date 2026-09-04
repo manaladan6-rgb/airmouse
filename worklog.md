@@ -337,3 +337,10 @@ Work Log:
 Stage Summary:
 - v12→v15 evolution complete: 270 new tests, 786 preserved, all green at every milestone commit (825→865→884→917→951→1026→1056)
 - Honest scope: everything SIMULATION-VERIFIED; camera/mic/gaze/RF/real-CDP/live-ASR remain NOT PHYSICALLY VERIFIED
+
+## v15.1.0 HARDENING BASELINE AUDIT (mission: final release hardening, packaging, real-world validation)
+- Fresh clone; HEAD 1ae1087; tags v3.1.0..v15.0.0 intact; tree clean
+- Python 3.12.14 / Linux x86_64 headless / pytest 9.0.2 / mediapipe 0.10.35 / opencv 5.0.0 / numpy 2.1.3
+- FULL SUITE: 1056 passed / 0 failed / 0 skipped / 11.70s
+- Defects found: stale pyproject description (v10 text), stale --help banner (v5 text), missing doctor/setup/test/verify/privacy commands, no release artifacts
+- Decision: hardened release = v15.1.0 (v15.0.0 tag preserved, never retagged)
