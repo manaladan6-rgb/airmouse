@@ -356,6 +356,62 @@ def _run_checks(report: OfflineReport) -> None:
     report.record("offline_gate", not gate.check("cloud_asr")
                   and gate.check("local_grammar"), "gate routing")
 
+    # ═══ v11.5: the adaptive intelligence must work fully offline (§31) ═══
+    try:
+        import tempfile
+        from .intelligence.plugin import IntelligencePlugin
+        plug = IntelligencePlugin({"enabled": True},
+                                  base_dir=tempfile.mkdtemp())
+        _ok = plug.state.value == "available"
+        if _ok:
+            # learn "click" tends to follow "open_app", then ask for the
+            # next action after open_app — a pure offline prediction
+            for i in range(5):
+                plug.record_action("click", history=["open_app"])
+            plug.record_command("open browser", hour=9)
+            plug.record_text("hello bro how are you")
+            _pred = plug.predict_next_action(["open_app"])
+            _ok = _pred is not None and _pred.value == "click"
+        report.record("intelligence_offline", _ok,
+                      f"state={plug.state.value} pred={_pred.value if _pred else None}")
+
+        from .intelligence.memory import InteractionMemory
+        mem = InteractionMemory()
+        report.record("memory_offline",
+                      mem.record("chrome -> vscode") is not None
+                      and mem.record("password=x") is None,
+                      f"patterns={mem.size()} scrubbed={mem.rejected_sensitive}")
+
+        from .intelligence.vocabulary import PersonalVocabulary
+        voc = PersonalVocabulary()
+        voc.learn_correction("Hydra Link", "HydraLink")
+        _txt, _n = voc.apply_corrections("connect to Hydra Link")
+        report.record("vocabulary_offline", _n == 1 and "HydraLink" in _txt,
+                      f"corrections={voc.correction_count}")
+
+        from .transcription import (LiveTranscriptionEngine,
+                                    SimulatedStreamingProvider)
+        _eng = LiveTranscriptionEngine(
+            provider=SimulatedStreamingProvider(), history_enabled=False)
+        _eng.start()
+        _eng.provider.push_utterance("hello bro question mark", 0.9)
+        for _i in range(8):
+            _eng.feed_audio(b"\x10\x27" * 1000, now=_i * 0.05)
+        _seg = _eng.finalize(now=0.5)
+        report.record("transcription_offline",
+                      _seg is not None and "Hello bro?" == _seg.text,
+                      f"final={_seg.text if _seg else None}")
+
+        from .fusion2 import FusionEngine2, FusionSignal, SignalKind
+        _f = FusionEngine2()
+        _c = _f.fuse([FusionSignal(SignalKind.GAZE, "click", None, 0.9),
+                      FusionSignal(SignalKind.VOICE, "click", None, 0.9)])
+        report.record("fusion2_offline",
+                      _c.intent == "click" and _c.executable,
+                      f"conf={_c.confidence}")
+    except Exception as exc:
+        report.record("intelligence_offline", False, repr(exc))
+
 
 class _StubExecutor:
     """Minimal executor for the pipeline check inside the selftest."""

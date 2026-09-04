@@ -150,6 +150,10 @@ class AgentConfig:
     intent_config: Dict[str, Any] = field(default_factory=dict)
     safety_config: Dict[str, Any] = field(default_factory=dict)
     action_config: Dict[str, Any] = field(default_factory=dict)
+    # v11.5: optional adaptive intelligence (disabled by default at the
+    # agent level — the CLI/config layer opts in explicitly)
+    intelligence_enabled: bool = False
+    intelligence_config: Dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
     def from_mapping(data: Optional[Dict[str, Any]]) -> "AgentConfig":
@@ -327,6 +331,9 @@ class InteractionAgent:
         "event_bus", "context_engine", "browser", "gesture_registry", "rf",
         "voice_engine", "system_executor", "file_executor",
         "browser_executor",
+        # v11.5: optional adaptive intelligence
+        "intelligence", "text_controller", "voice_typing",
+        "transcription", "fusion2", "world_model", "modes",
     })
 
     def __init__(self,
@@ -390,6 +397,28 @@ class InteractionAgent:
         self.browser = overrides.get("browser")
         self.voice_engine = overrides.get("voice_engine")
         self._injected: List[Intent] = []
+        # -- v11.5 OPTIONAL adaptive intelligence (guarded: never breaks core) --
+        self.intelligence = overrides.get("intelligence")
+        if self.intelligence is None and cfg.intelligence_enabled:
+            try:
+                from .intelligence.plugin import IntelligencePlugin
+                self.intelligence = IntelligencePlugin(
+                    cfg.intelligence_config)
+            except Exception:
+                self.intelligence = None   # plugin unavailable → core fine
+        self.world_model = overrides.get("world_model")
+        if self.world_model is None:
+            try:
+                from .world_model import WorldModel
+                self.world_model = WorldModel(self.context_engine,
+                                              self.intelligence)
+            except Exception:
+                self.world_model = None
+        self.text_controller = overrides.get("text_controller")
+        self.voice_typing = overrides.get("voice_typing")
+        self.transcription = overrides.get("transcription")
+        self.fusion2 = overrides.get("fusion2")
+        self.modes_controller = overrides.get("modes")
         # -- telemetry ------------------------------------------------------------
         self.telemetry = Telemetry(cfg.perf_window)
         # -- hands-free controller (built now when starting in that mode) --------
@@ -405,6 +434,8 @@ class InteractionAgent:
         self._last_gaze_wall: Optional[float] = None
         self._closed: bool = False
         self._lock = threading.RLock()
+        # v11.5: recent verified-action history for the learning loop
+        self._learned_actions: List[str] = []
 
     # -- construction helpers ------------------------------------------------------
 
@@ -864,6 +895,34 @@ class InteractionAgent:
         latency = float(getattr(report, "latency", 0.0) or 0.0)
         if latency > 0.0:
             self.telemetry.record("latency_action_ms", latency * 1000.0)
+        # v11.5: verified actions become learning events (guarded no-op
+        # when the optional intelligence plugin is absent)
+        self._learn_from_report(report, status)
+
+    def _learn_from_report(self, report: ActionReport,
+                           status: ActionStatus) -> None:
+        """LEARNING EVENT → PERSONAL MEMORY (§46 loop).  Never raises."""
+        try:
+            success = status is ActionStatus.SUCCESS
+            plan = getattr(report, "plan", None)
+            itype = getattr(getattr(plan, "intent", None), "type", None)
+            name = getattr(itype, "value", "") or ""
+            if not name:
+                action = getattr(plan, "action", None)
+                name = getattr(action, "value", "") if action is not None else ""
+            if not name:
+                return
+            if self.intelligence is not None:
+                hist = [a for a in self._learned_actions[-2:]]
+                self.intelligence.record_action(name, history=hist,
+                                                success=success)
+            if self.world_model is not None:
+                self.world_model.record_action(name)
+            self._learned_actions.append(name)
+            if len(self._learned_actions) > 32:
+                del self._learned_actions[:16]
+        except Exception:
+            pass   # learning must NEVER break the action pipeline
 
     def _make_observe_fn(self, t0: float):
         """Build the verification observer over the screen model.

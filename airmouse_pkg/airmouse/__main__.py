@@ -105,7 +105,7 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
               precision_mode, gsm_progress, gesture_confidence,
               voice_caption=None, voice_active=False, zoom_active=False,
               recording=False, kalman_on=False, cal_ready=False,
-              v9_state=None, v10_state=None):
+              v9_state=None, v10_state=None, v115_state=None):
     """Draw Iron Man HUD overlay with v3.1 enhancements."""
     if frame is None:
         return
@@ -209,6 +209,23 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
                 vcol = (140, 255, 140) if v10_state["verify"] == "passed" \
                     else (255, 170, 80)
                 badges.append((f"VER:{str(v10_state['verify'])[:6].upper()}", vcol))
+        except Exception:
+            pass
+    # v11.5 badges: intelligence, interaction mode, suggestions, transcript
+    if v115_state:
+        try:
+            if v115_state.get("intel"):
+                badges.append((f"AI:{str(v115_state['intel'])[:6].upper()}",
+                               (255, 190, 90)))
+            if v115_state.get("mode"):
+                badges.append((f"MODE:{str(v115_state['mode'])[:8].upper()}",
+                               (255, 150, 220)))
+            if v115_state.get("sug"):
+                badges.append((f"SUG:{str(v115_state['sug'])[:14].upper()}",
+                               (255, 220, 130)))
+            if v115_state.get("transcript"):
+                badges.append((f"\"{str(v115_state['transcript'])[-18:]}\"",
+                               (200, 230, 255)))
         except Exception:
             pass
     if kalman_on:
@@ -463,14 +480,92 @@ def main():
                         help="v10 enable the gesture registry (custom gesture mappings)")
     parser.add_argument("--rf", action="store_true",
                         help="v10 enable the RF-sensing modality (optional hardware; idles without it)")
+    # ── v11.5 flags ──
+    parser.add_argument("--intelligence", action="store_true",
+                        help="v11.5 enable the adaptive intelligence plugin (local + offline)")
+    parser.add_argument("--no-intelligence", action="store_true",
+                        help="v11.5 disable the adaptive intelligence plugin")
+    parser.add_argument("--dictation", action="store_true",
+                        help="v11.5 voice typing / dictation formatting session")
+    parser.add_argument("--transcribe", action="store_true",
+                        help="v11.5 live transcription session (streaming, local)")
+    parser.add_argument("--teacher", action="store_true", help="v11.5 teacher mode")
+    parser.add_argument("--student", action="store_true", help="v11.5 student mode")
+    parser.add_argument("--office", action="store_true", help="v11.5 office mode")
+    parser.add_argument("--meeting", action="store_true", help="v11.5 meeting mode")
+    parser.add_argument("--research", action="store_true", help="v11.5 research mode")
     parser.add_argument("command", nargs="?", default=None,
                         choices=["voice-status", "gestures", "commands",
-                                 "browser", "offline-test", "diagnostics"],
-                        help="v10 info/diagnostic subcommand (prints and exits)")
+                                 "browser", "offline-test", "diagnostics",
+                                 "intelligence", "memory", "vocabulary",
+                                 "workflows", "self-test"],
+                        help="v10/v11.5 info/diagnostic subcommand (prints and exits)")
     args = parser.parse_args()
 
     if args.version:
-        print(f"AirMouse v{_pkg.__version__} — Universal Offline Interaction Edition")
+        print(f"AirMouse v{_pkg.__version__} — Adaptive Human-Computer Intelligence Edition")
+        return
+
+    # ═══ v11.5 subcommands (print + exit) ═══
+    if args.command == "intelligence":
+        from .intelligence.plugin import IntelligencePlugin
+        plug = IntelligencePlugin({"enabled": not args.no_intelligence})
+        st = plug.status()
+        print("  v11.5 adaptive intelligence")
+        for k in ("state", "enabled", "learning_enabled", "privacy_mode"):
+            print(f"    {k}: {st.get(k)}")
+        m = st.get("model") or {}
+        if m:
+            print(f"    model: {m.get('size_bytes', 0)/1024:.1f} KB of "
+                  f"{m.get('capacity_bytes', 0)/1024/1024:.0f} MB budget "
+                  f"| words: {m.get('ngram_words', 0)} | actions: {m.get('action_steps', 0)}")
+        print(f"    memory patterns: {st.get('memory_patterns', 0)} | "
+              f"vocab terms: {st.get('vocabulary_terms', 0)} | "
+              f"workflows: {st.get('workflows', 0)}")
+        return
+    if args.command == "memory":
+        from .intelligence.memory import InteractionMemory
+        mem = InteractionMemory.load(os.path.join(
+            os.path.expanduser("~"), ".airmouse", "intelligence", "memory.json"))
+        rows = mem.top(15)
+        print(f"  interaction memory — {mem.size()} pattern(s), "
+              f"learning {'active' if mem.learning_active else 'paused'}")
+        for r in rows:
+            print(f"    {r.pattern[:40]:<40} x{r.frequency:<5} "
+                  f"succ {r.success_rate:.0%} corr {r.correction_count}")
+        if not rows:
+            print("    (empty — patterns appear as you use airmouse)")
+        return
+    if args.command == "vocabulary":
+        from .intelligence.vocabulary import PersonalVocabulary
+        v = PersonalVocabulary.load(os.path.join(
+            os.path.expanduser("~"), ".airmouse", "intelligence", "vocabulary.json"))
+        print(f"  personal vocabulary — {v.size} term(s), "
+              f"{v.correction_count} correction(s)")
+        for e in v.top(15):
+            print(f"    {e.term[:36]:<36} x{e.frequency}")
+        for key, e in sorted(v._corrections.items())[:10]:
+            print(f"    correction: '{e.raw}' -> '{e.preferred}' (x{e.count})")
+        if v.size == 0 and v.correction_count == 0:
+            print("    (empty — corrections appear when you fix dictation)")
+        return
+    if args.command == "workflows":
+        from .intelligence.workflows import WorkflowStore
+        store = WorkflowStore.load(os.path.join(
+            os.path.expanduser("~"), ".airmouse", "intelligence", "workflows.json"))
+        rows = store.all()
+        print(f"  learned workflows — {len(rows)}")
+        for w in rows:
+            print(f"    {w.name[:44]:<44} steps={len(w.steps)} "
+                  f"succ={w.success_count} fail={w.failure_count} "
+                  f"{'[destructive]' if w.destructive else ''}")
+        if not rows:
+            print("    (none — discovered workflows ask for your approval first)")
+        return
+    if args.command == "self-test":
+        from .selftest import run_self_test, format_self_test
+        print(format_self_test(run_self_test(
+            intelligence=not args.no_intelligence)))
         return
 
     # ═══ v10.0 subcommands (print + exit) ═══
@@ -823,6 +918,65 @@ def main():
     browser_executor = None
     v10_state = {"voice_mode": "", "command": "", "conf": "",
                  "rf": False, "br": False, "verify": ""}
+    # ═══ v11.5 optional adaptive intelligence (guarded) ═══
+    intelligence_plugin = None
+    transcription_engine = None
+    voice_typing_engine = None
+    text_controller = None
+    fusion2_engine = None
+    modes_controller = None
+    v115_state = {"intel": "", "mode": "", "sug": "", "transcript": ""}
+    try:
+        intelligence_wanted = (not args.no_intelligence)
+        if intelligence_wanted:
+            from .intelligence.plugin import IntelligencePlugin
+            intelligence_plugin = IntelligencePlugin({
+                "enabled": True,
+                "learning": bool(config.learning_enabled),
+                "memory_enabled": bool(config.memory_enabled),
+                "privacy_mode": bool(config.privacy_mode),
+                "model_capacity_bytes": int(getattr(config,
+                    "intelligence_model_capacity", 0) or 0)})
+            if intelligence_plugin.state.value == "available":
+                print("  >> V11.5 ADAPTIVE INTELLIGENCE ONLINE — local, offline, "
+                      "personal (learning "
+                      f"{'ON' if config.learning_enabled else 'PAUSED'})")
+            else:
+                print(f"  >> V11.5 intelligence plugin state: "
+                      f"{intelligence_plugin.state.value} — core unaffected")
+                if intelligence_plugin.state.value in ("corrupted", "incompatible"):
+                    intelligence_plugin = None   # fail safe: run without it
+        if args.transcribe:
+            from .transcription import LiveTranscriptionEngine, \
+                SimulatedStreamingProvider
+            transcription_engine = LiveTranscriptionEngine(
+                provider=SimulatedStreamingProvider(),
+                history_enabled=bool(config.transcription_history))
+            transcription_engine.start()
+            print("  >> V11.5 LIVE TRANSCRIPTION ENGINE ready (simulated provider "
+                  "— install vosk/whisper for real local ASR)")
+        if args.dictation:
+            from .dictation_text import VoiceTypingEngine
+            from .interfaces import VoiceMode as _VM
+            voice_typing_engine = VoiceTypingEngine(_VM.HYBRID)
+            print("  >> V11.5 VOICE TYPING ready — spoken punctuation + edit "
+                  "commands (command/dictation/hybrid)")
+        from .text_control import TextController
+        text_controller = TextController()
+        from .fusion2 import FusionEngine2
+        fusion2_engine = FusionEngine2()
+        for flag, mid in ((args.teacher, "teacher"), (args.student, "student"),
+                          (args.office, "office"), (args.meeting, "meeting"),
+                          (args.research, "research")):
+            if flag:
+                from .modes import ModeController
+                modes_controller = ModeController(mid)
+                v115_state["mode"] = mid
+                print(f"  >> V11.5 {mid.upper()} MODE active — "
+                      "say 'help' style commands (see TEACHER/STUDENT guides)")
+                break
+    except Exception as e:
+        print(f"  !! v11.5 intelligence partially unavailable ({e}) — continuing")
     try:
         from .eventbus import EventBus
         from .context import ContextEngine
@@ -942,6 +1096,13 @@ def main():
                 "system_executor": system_executor,
                 "file_executor": file_executor,
                 "browser_executor": browser_executor,
+                # ═══ v11.5 optional adaptive intelligence ═══
+                "intelligence": intelligence_plugin,
+                "transcription": transcription_engine,
+                "voice_typing": voice_typing_engine,
+                "text_controller": text_controller,
+                "fusion2": fusion2_engine,
+                "modes": modes_controller,
             })
             v9_owns_actions = True
             print(f"  >> V9 MULTIMODAL ONLINE — mode: {config.fusion_mode.upper()}"
@@ -1781,6 +1942,27 @@ def main():
                         v9_summary["estop"] = bool(
                             getattr(agent.safety, "level", None) is not None
                             and str(getattr(agent.safety, "level", "")) .endswith("EMERGENCY"))
+                        # v11.5 per-frame HUD state (guarded)
+                        try:
+                            if intelligence_plugin is not None \
+                                    and intelligence_plugin.available:
+                                v115_state["intel"] = "ON"
+                                _sug = intelligence_plugin.suggestions(
+                                    getattr(agent, "_learned_actions", []))
+                                v115_state["sug"] = \
+                                    _sug[0].text if _sug else ""
+                            else:
+                                v115_state["intel"] = \
+                                    (intelligence_plugin.state.value[:4].upper()
+                                     if intelligence_plugin is not None else "OFF")
+                            if voice_typing_engine is not None:
+                                v115_state["transcript"] = \
+                                    voice_typing_engine.text[-30:]
+                            elif transcription_engine is not None:
+                                v115_state["transcript"] = \
+                                    transcription_engine._partial[-30:]
+                        except Exception:
+                            pass
                         if v9_out.get("estop"):
                             v9_summary["intent"] = "EMERGENCY_STOP"
                     except Exception as _v9e:
@@ -1797,7 +1979,8 @@ def main():
                           kalman_on=(is_direct and config.kalman_enabled),
                           cal_ready=calib.is_ready,
                           v9_state=v9_summary,
-                          v10_state=v10_state)
+                          v10_state=v10_state,
+                          v115_state=v115_state)
                 cv2.imshow("AirMouse", hand_data["frame"])
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):

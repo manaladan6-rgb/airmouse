@@ -27,10 +27,14 @@ def _cli(*args: str, timeout: float = 60.0) -> subprocess.CompletedProcess:
 
 def test_cli_version_reports_version():
     # v10: version bumped 9.0.0 -> 10.0.0 (Universal Offline Interaction
-    # Edition); the CLI must report the CURRENT version.
+    # Edition); v11.5: bumped again -> 11.5.0 (Adaptive Human-Computer
+    # Intelligence).  The CLI must report the CURRENT package version —
+    # checked against airmouse.__version__ so this stays correct across
+    # future bumps.
+    import airmouse as _am
     r = _cli("--version")
     assert r.returncode == 0
-    assert "10.0.0" in (r.stdout + r.stderr)
+    assert _am.__version__ in (r.stdout + r.stderr)
     assert "AirMouse" in (r.stdout + r.stderr)
 
 

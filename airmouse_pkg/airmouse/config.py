@@ -64,6 +64,45 @@ class Config:
     rf_enabled = False                 # RF-sensing modality (§16, optional HW)
     rf_min_confidence = 0.4
 
+    # ═══ v11.5 — Adaptive Human-Computer Intelligence (§40) ═══
+    # [intelligence]
+    intelligence_enabled = True        # optional plugin master switch
+    intelligence_model_capacity = 30 * 1024 * 1024   # ~30 MB budget (§5)
+    # [learning]
+    learning_enabled = True
+    self_tuning_enabled = True         # bounded threshold adaptation
+    # [memory]
+    memory_enabled = True
+    memory_max_patterns = 5000
+    # [transcription]
+    transcription_enabled = False      # live transcription session
+    transcription_history = True       # keep local transcript history
+    transcription_language = "en"
+    # [dictation]
+    dictation_enabled = False          # live voice-typing session
+    dictation_auto_punctuation = True
+    # [prediction]
+    prediction_enabled = True          # suggestions only — never execution
+    prediction_min_confidence = 0.5
+    # [emoji]
+    emoji_enabled = True
+    emoji_max_suggestions = 3
+    # [teacher] / [student] / [office] / [meeting]
+    teacher_mode = False
+    student_mode = False
+    office_mode = False
+    meeting_mode = False
+    research_mode = False
+    developer_mode = False
+    # [accessibility]
+    accessibility_profile = "hands-free"
+    # [workflow]
+    workflow_learning = True
+    workflow_max_count = 200
+    # [privacy]
+    privacy_mode = False               # pause learning + history, wipe nothing
+    telemetry_enabled = False          # OFF by default; nothing phones home
+
     # Physics (Ironman mode)
     mass = 0.8
     stiffness_min = 120.0
@@ -497,6 +536,58 @@ class Config:
                 self.rf_min_confidence = v10.get("rf_min_confidence", self.rf_min_confidence)
                 self.macro_max_steps = v9.get("macro_max_steps", self.macro_max_steps)
                 self.telemetry_enabled = v9.get("telemetry_enabled", self.telemetry_enabled)
+
+            # ═══ v11.5 sections (§40) — all backward compatible ═══
+            if "intelligence" in data:
+                i = data["intelligence"]
+                self.intelligence_enabled = i.get("enabled", self.intelligence_enabled)
+                cap = i.get("model_capacity_mb", None)
+                if cap is not None:
+                    try:
+                        self.intelligence_model_capacity = int(float(cap) * 1024 * 1024)
+                    except Exception:
+                        pass
+            if "learning" in data:
+                l = data["learning"]
+                self.learning_enabled = l.get("enabled", self.learning_enabled)
+                self.self_tuning_enabled = l.get("self_tuning", self.self_tuning_enabled)
+            if "memory" in data:
+                m = data["memory"]
+                self.memory_enabled = m.get("enabled", self.memory_enabled)
+                self.memory_max_patterns = m.get("max_patterns", self.memory_max_patterns)
+            if "transcription" in data:
+                t = data["transcription"]
+                self.transcription_enabled = t.get("enabled", self.transcription_enabled)
+                self.transcription_history = t.get("history", self.transcription_history)
+                self.transcription_language = t.get("language", self.transcription_language)
+            if "dictation" in data:
+                dd = data["dictation"]
+                self.dictation_enabled = dd.get("enabled", self.dictation_enabled)
+                self.dictation_auto_punctuation = dd.get("auto_punctuation", self.dictation_auto_punctuation)
+            if "prediction" in data:
+                pr = data["prediction"]
+                self.prediction_enabled = pr.get("enabled", self.prediction_enabled)
+                self.prediction_min_confidence = pr.get("min_confidence", self.prediction_min_confidence)
+            if "emoji" in data:
+                em = data["emoji"]
+                self.emoji_enabled = em.get("enabled", self.emoji_enabled)
+                self.emoji_max_suggestions = em.get("max_suggestions", self.emoji_max_suggestions)
+            for _sec, _attr in (("teacher", "teacher_mode"), ("student", "student_mode"),
+                                ("office", "office_mode"), ("meeting", "meeting_mode"),
+                                ("research", "research_mode"), ("developer", "developer_mode")):
+                if _sec in data:
+                    setattr(self, _attr, bool(data[_sec].get("enabled", getattr(self, _attr))))
+            if "accessibility" in data:
+                a = data["accessibility"]
+                self.accessibility_profile = a.get("profile", self.accessibility_profile)
+            if "workflow" in data:
+                wf = data["workflow"]
+                self.workflow_learning = wf.get("learning", self.workflow_learning)
+                self.workflow_max_count = wf.get("max_count", self.workflow_max_count)
+            if "privacy" in data:
+                pv = data["privacy"]
+                self.privacy_mode = pv.get("mode", self.privacy_mode)
+                self.telemetry_enabled = pv.get("telemetry", self.telemetry_enabled)
 
         except Exception as e:
             print(f"  Warning: Config load error: {e}, using defaults")
