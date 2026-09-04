@@ -1,2 +1,2 @@
 """AirMouse — Physics-driven webcam finger mouse. v5.0 VOICE + KALMAN edition."""
-__version__ = "13.5.0"
+__version__ = "14.0.0"

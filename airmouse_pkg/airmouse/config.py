@@ -123,6 +123,14 @@ class Config:
     skills_min_confidence = 0.6
     skills_max_count = 100
 
+    # ═══ v14 — Self-Healing Recovery + Target Resolution (§7/§8) ═══
+    # [recovery]
+    recovery_max_rounds = 6
+    recovery_max_retries = 2
+    # [target_resolution]
+    target_resolution_min_confidence = 0.35
+    target_resolution_coordinate_fallback = False   # explicit flag (§6/§8)
+
     # [privacy]
     privacy_mode = False               # pause learning + history, wipe nothing
     telemetry_enabled = False          # OFF by default; nothing phones home
