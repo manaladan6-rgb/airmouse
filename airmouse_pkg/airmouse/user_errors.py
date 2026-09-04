@@ -221,13 +221,13 @@ def run_cli_guarded(main_fn: Callable[[], int]) -> int:
     try:
         result = main_fn()
     except AirMouseUserError as err:
-        print(format_user_error(err), file=sys.stderr)
+        print(format_user_error(err, debug="--debug" in sys.argv), file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
         return 130
     except Exception as err:  # noqa: BLE001 — deliberate last-resort guard
-        print(format_user_error(err, debug=False), file=sys.stderr)
+        print(format_user_error(err, debug="--debug" in sys.argv), file=sys.stderr)
         return 1
     return 0 if result is None else result
 

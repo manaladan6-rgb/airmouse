@@ -121,10 +121,13 @@ class DoctorReport:
             if ComponentState(c.state) in blocking and \
                     c.category in required:
                 return "[BLOCKED]"
-        for c in comps:
-            if ComponentState(c.state) in blocking or \
-                    ComponentState(c.state) is ComponentState.WARNING:
-                return "[PARTIAL — fix FAILED items]"
+        has_failed = any(ComponentState(c.state) in blocking for c in comps)
+        has_warning = any(ComponentState(c.state) is ComponentState.WARNING
+                          for c in comps)
+        if has_failed:
+            return "[PARTIAL — fix FAILED items]"
+        if has_warning:
+            return "[PARTIAL — review WARNING items]"
         return "[READY FOR TESTING]"
 
     def remediations(self) -> List[str]:

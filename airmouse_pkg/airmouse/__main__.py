@@ -1,5 +1,5 @@
 """
-AirMouse v9.0.0 — MULTIMODAL INTELLIGENCE EDITION
+AirMouse v15.1.0 — ADAPTIVE HUMAN-COMPUTER INTELLIGENCE EDITION (hardened release)
 
     airmouse              # Start with tutorial (first run)
     airmouse --skip       # Skip tutorial
@@ -50,6 +50,7 @@ Keyboard shortcuts (in camera window):
 
 import os
 import sys
+import json
 import time
 import argparse
 
@@ -439,10 +440,41 @@ def _run_gaze_calibration(config, simulated: bool = False) -> bool:
         return False
 
 
+def _confirm(prompt: str) -> bool:
+    """Explicit-y consent gate; fail-closed on any doubt (non-TTY = no)."""
+    try:
+        if not sys.stdin.isatty():
+            return False
+        return input(prompt + " [y/N] ").strip().lower() in ("y", "yes")
+    except Exception:
+        return False
+
+
 def main():
+    # ═══ first-run menu: plain `airmouse` on a fresh machine (§9) ═══
+    try:
+        from .cli_menu import should_show_menu, run_menu
+        if should_show_menu():
+            chosen = run_menu(_pkg.__version__.split(".")[0])
+            if chosen is None:
+                return 0
+            if chosen:
+                sys.argv = [sys.argv[0]] + chosen
+    except Exception:
+        pass  # the menu must never block the app
+
     parser = argparse.ArgumentParser(
         prog="airmouse",
-        description="AirMouse v5.0.0 - Voice + Kalman Edition",
+        description=f"AirMouse v{_pkg.__version__} — Adaptive Human-Computer "
+                    f"Intelligence Edition",
+        epilog="getting started:\n"
+               "  airmouse setup              guided setup wizard\n"
+               "  airmouse doctor             environment diagnostics\n"
+               "  airmouse test --guided      interactive validation lab\n"
+               "  airmouse verify             automated checks + remaining physical tests\n"
+               "  airmouse privacy            local-first privacy report\n"
+               "  airmouse memory status      local memory stores\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--skip", action="store_true", help="Skip tutorial")
     parser.add_argument("--tutorial", action="store_true", help="Force tutorial")
@@ -512,6 +544,17 @@ def main():
     parser.add_argument("--office", action="store_true", help="v11.5 office mode")
     parser.add_argument("--meeting", action="store_true", help="v11.5 meeting mode")
     parser.add_argument("--research", action="store_true", help="v11.5 research mode")
+    # ═══ v15.1 release flags ═══
+    parser.add_argument("--guided", action="store_true",
+                        help="test: run the interactive guided laboratory")
+    parser.add_argument("--verbose", action="store_true",
+                        help="doctor: show per-section detail and fixes")
+    parser.add_argument("--json", action="store_true",
+                        help="doctor/privacy: machine-readable output")
+    parser.add_argument("--to", type=str, default=None,
+                        help="memory export: destination file path")
+    parser.add_argument("--debug", action="store_true",
+                        help="show technical details when something fails")
     parser.add_argument("command", nargs="?", default=None,
                         choices=["voice-status", "gestures", "commands",
                                  "browser", "offline-test", "diagnostics",
@@ -520,13 +563,145 @@ def main():
                                  "status", "capabilities", "observe",
                                  "world", "twin", "skills", "agents",
                                  "permissions", "tasks", "protocol",
-                                 "benchmark"],
-                        help="v10/v11.5/v15 info/diagnostic subcommand (prints and exits)")
+                                 "benchmark",
+                                 "setup", "doctor", "test", "verify",
+                                 "privacy"],
+                        help="info/diagnostic subcommand (prints and exits)")
+    parser.add_argument("command_arg", nargs="?", default=None,
+                        help="optional subcommand argument "
+                             "(memory: status|export|reset|delete)")
     args = parser.parse_args()
 
     if args.version:
         print(f"AirMouse v{_pkg.__version__} — Adaptive Human-Computer Intelligence Edition")
         return
+
+    # ═══ v15.1 release commands (setup / doctor / test / verify / privacy) ═══
+    if args.command == "doctor":
+        from .capabilities import detect_all
+        from .doctor import run_doctor, format_doctor_report
+        verbose = bool(args.verbose) or str(args.command_arg or "").strip().lower() in (
+            "verbose", "-v", "--verbose")
+        if args.json:
+            print(json.dumps(detect_all().to_machine(), indent=2))
+            return 0
+        report = run_doctor(verbose=verbose)
+        print(format_doctor_report(report, verbose=verbose))
+        verdict = report.overall()
+        if "BLOCKED" in verdict:
+            return 2
+        return 0 if "READY" in verdict else 1
+
+    if args.command == "setup":
+        from .setup_wizard import run_setup
+        try:
+            interactive = sys.stdin.isatty()
+        except Exception:
+            interactive = False
+        report = run_setup(interactive=interactive, out=sys.stdout)
+        print()
+        print(report.format())
+        return 0
+
+    if args.command == "test":
+        from .guided_test import run_guided
+        guided = bool(args.guided) or str(args.command_arg or "").strip().lower() in (
+            "guided", "--guided")
+        try:
+            interactive = guided and sys.stdin.isatty()
+        except Exception:
+            interactive = False
+        report = run_guided(interactive=interactive, out=sys.stdout)
+        failed = [r for r in report.results if r.status.value == "FAIL"]
+        return 1 if failed else 0
+
+    if args.command == "verify":
+        from .verify import run_verify
+        rep = run_verify()
+        print(rep.format())
+        return 1 if any(i.status == "FAIL" for i in rep.automated) else 0
+
+    if args.command == "privacy":
+        from .privacy import privacy_report
+        pr = privacy_report()
+        if args.json:
+            print(json.dumps(pr, indent=2, default=str))
+            return 0
+        print("AirMouse Privacy — LOCAL-FIRST / OFFLINE BY DEFAULT")
+        for key in ("telemetry_state", "network_state", "model_state"):
+            print(f"  {key.replace('_', ' '):<10}: {pr.get(key)}")
+        storage = pr.get("storage")
+        if isinstance(storage, dict):
+            print(f"  storage   : {storage.get('home', '(default ~/.airmouse)')}")
+            for name, s in (storage.get("stores") or {}).items():
+                if isinstance(s, dict):
+                    print(f"    {name:<12} exists={s.get('exists')} "
+                          f"records={s.get('records', 0)} "
+                          f"schema=v{s.get('schema_version')}")
+        for key in ("learned_data", "controls"):
+            val = pr.get(key)
+            print(f"  {key}:")
+            if isinstance(val, dict):
+                for k2, v2 in val.items():
+                    print(f"    {k2}: {v2}")
+            elif val:
+                print(f"    {val}")
+        return 0
+
+    # ═══ v15.1 memory lifecycle (§10): status | export | reset | delete ═══
+    mem_arg = str(args.command_arg or "").strip().lower()
+    if args.command == "memory" and mem_arg in ("status", "export", "reset", "delete"):
+        from . import persistence
+        from . import user_errors as _ue
+        if mem_arg == "status":
+            st = persistence.memory_status()
+            print(f"  local memory stores — {st['home']}")
+            for name, s in st["stores"].items():
+                if not s.get("exists"):
+                    state = "empty"
+                elif s.get("checksum_ok", True) and not s.get("corrupted_last_load"):
+                    state = "ok"
+                else:
+                    state = "CORRUPT"
+                print(f"    {name:<12} {state:<7} schema=v{s.get('schema_version')} "
+                      f"records={s.get('records', 0)}")
+            print("  lifecycle: airmouse memory export|reset|delete "
+                  "(local-only; nothing leaves this machine)")
+            return 0
+        if mem_arg == "export":
+            dest = args.to
+            if not dest:
+                dest = os.path.join(
+                    persistence.ensure_dirs(), "exports",
+                    f"airmouse-memory-{int(time.time())}.json")
+            try:
+                res = persistence.memory_export(dest, overwrite=bool(args.to is None))
+            except Exception as exc:
+                raise _ue.AirMouseUserError(
+                    title="export your local memory",
+                    reason=f"could not write the export file: {exc}",
+                    fixes=["choose a different path: airmouse memory export --to <path>",
+                           "or remove/rename the existing file first",
+                           "check that the folder exists and is writable"]) from exc
+            print(f"  exported local memory -> {res.get('path', dest)}")
+            print("  (local file only — nothing is sent anywhere)")
+            return 0
+        if mem_arg == "reset":
+            question = ("This BACKS UP then CLEARS all local memory stores "
+                        "(twin, vocabulary, skills, workflows, preferences). Continue?")
+        else:
+            question = ("This PERMANENTLY DELETES local memory store files "
+                        "(backups are kept). Continue?")
+        if not _confirm(question):
+            print("  cancelled — nothing changed")
+            return 0
+        if mem_arg == "reset":
+            persistence.memory_reset()
+            print("  reset complete — backups saved under <home>/backups/")
+        else:
+            persistence.memory_delete()
+            print("  deleted store files — backups kept under <home>/backups/")
+        return 0
 
     # ═══ v11.5 subcommands (print + exit) ═══
     if args.command == "intelligence":
@@ -2313,4 +2488,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    from .user_errors import run_cli_guarded
+    raise SystemExit(run_cli_guarded(main))
