@@ -112,14 +112,18 @@ def test_fusion_intent_action_roundtrip_latency():
     WITHOUT camera inference (perception is measured separately)."""
     from airmouse.agent import InteractionAgent
     from airmouse.actions import MockExecutor
+    from airmouse.interfaces import GazeState
 
     ex = MockExecutor()
-    agent = InteractionAgent({"mode": "fusion", "gaze_enabled": False},
+    agent = InteractionAgent({"mode": "fusion", "gaze_enabled": True},
                              executor=ex)
     n = 300
     t0 = time.perf_counter()
     for i in range(n):
         agent.process_frame(
+            gaze_state=GazeState(x=0.5, y=0.5, screen_x=960.0, screen_y=540.0,
+                                 screen_valid=True, confidence=0.9,
+                                 timestamp=1.0 + i * 0.033),
             hand_data={"gesture": "pinch", "point": (960.0, 540.0),
                        "confidence": 0.9} if i % 30 == 0 else None,
             utterance="click that" if i % 90 == 0 else "",

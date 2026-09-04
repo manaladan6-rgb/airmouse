@@ -995,10 +995,16 @@ def main():
                 if v9_owns_actions:
                     if config.fusion_mode in ("hands_free", "gaze", "assist"):
                         gesture = Gesture.NONE  # hands-free: hands ignored
-                    elif gesture in (Gesture.PINCH, Gesture.PEACE, Gesture.PALM,
-                                     Gesture.FIST, Gesture.THUMBS_UP, Gesture.THREE,
-                                     Gesture.PINKY):
+                    elif config.gaze_enabled and gesture in (Gesture.PINCH,
+                                                             Gesture.PEACE,
+                                                             Gesture.PALM,
+                                                             Gesture.FIST,
+                                                             Gesture.THUMBS_UP,
+                                                             Gesture.THREE,
+                                                             Gesture.PINKY):
                         gesture = Gesture.NONE  # owned by the action engine
+                    # fusion WITHOUT gaze: keep v5 gesture actions as the
+                    # functional fallback (confirmed clicks need a gaze target)
                 gesture = gsm.update(raw_gesture, now=now, hand_stable=hand_stable)
                 gesture_changed = (gesture != prev_gesture)
 
