@@ -40,7 +40,9 @@ def engine():
 @pytest.mark.parametrize("src,action,keys", [
     (IntentType.CLICK, ActionType.CLICK, None),
     (IntentType.OPEN, ActionType.CLICK, None),
-    (IntentType.SELECT, ActionType.CLICK, None),
+    # v10 (§10): SELECT is a first-class action (point-select); SELECT-all
+    # is normalized to HOTKEY ctrl+a during planning.
+    (IntentType.SELECT, ActionType.SELECT, None),
     (IntentType.PLAY, ActionType.CLICK, None),
     (IntentType.CONFIRM, ActionType.CLICK, None),
     (IntentType.DOUBLE_CLICK, ActionType.DOUBLE_CLICK, None),

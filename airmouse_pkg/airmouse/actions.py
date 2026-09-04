@@ -71,6 +71,21 @@ except ImportError:  # pragma: no cover - direct file execution fallback
         now_ts,
     )
 
+try:  # v10 specialized executors' contracts (§10)
+    from .system_actions import (DESTRUCTIVE_FILE_OPS,
+                                 DESTRUCTIVE_SYSTEM_OPS, FILE_OPS,
+                                 SYSTEM_OPS, validate_url)
+except ImportError:  # pragma: no cover
+    from airmouse.system_actions import (DESTRUCTIVE_FILE_OPS,
+                                         DESTRUCTIVE_SYSTEM_OPS, FILE_OPS,
+                                         SYSTEM_OPS, validate_url)
+
+#: allowlist for generic browser operations (§12/§26)
+BROWSER_OP_ALLOW = frozenset({
+    "click", "focus", "type", "navigate", "new_tab", "close_tab",
+    "switch_tab", "back", "forward", "refresh", "scroll", "search",
+})
+
 __all__ = [
     "DEFAULT_ACTION_CONFIG",
     "INTENT_TO_ACTION",
@@ -104,7 +119,7 @@ INTENT_TO_ACTION: Dict[IntentType, ActionType] = {
     IntentType.MIDDLE_CLICK: ActionType.MIDDLE_CLICK,
     # click-equivalent semantics
     IntentType.OPEN: ActionType.CLICK,
-    IntentType.SELECT: ActionType.CLICK,
+    IntentType.SELECT: ActionType.SELECT,
     IntentType.PLAY: ActionType.CLICK,
     IntentType.CONFIRM: ActionType.CLICK,
     IntentType.DROP: ActionType.CLICK,     # release-at-point == click
@@ -117,15 +132,39 @@ INTENT_TO_ACTION: Dict[IntentType, ActionType] = {
     # text + keys
     IntentType.TYPE: ActionType.TYPE,
     IntentType.HOTKEY: ActionType.HOTKEY,
+    IntentType.KEY_PRESS: ActionType.KEY_PRESS,
     IntentType.COPY: ActionType.HOTKEY,
     IntentType.PASTE: ActionType.HOTKEY,
+    IntentType.UNDO: ActionType.HOTKEY,
+    IntentType.REDO: ActionType.HOTKEY,
     IntentType.CLOSE: ActionType.HOTKEY,
     IntentType.MINIMIZE: ActionType.HOTKEY,
     IntentType.MAXIMIZE: ActionType.HOTKEY,
+    IntentType.RESTORE: ActionType.HOTKEY,
     IntentType.SWITCH_WINDOW: ActionType.HOTKEY,
+    IntentType.SNAP: ActionType.HOTKEY,
+    IntentType.NEW_TAB: ActionType.HOTKEY,
+    IntentType.CLOSE_TAB: ActionType.HOTKEY,
+    IntentType.SWITCH_TAB: ActionType.HOTKEY,
+    IntentType.REFRESH: ActionType.HOTKEY,
+    IntentType.FOCUS: ActionType.HOTKEY,
     IntentType.BACK: ActionType.HOTKEY,
     IntentType.FORWARD: ActionType.HOTKEY,
     IntentType.CANCEL: ActionType.KEY_PRESS,
+    # v10 system / file / browser / media families (§10)
+    IntentType.VOLUME: ActionType.SYSTEM_OPERATION,
+    IntentType.BRIGHTNESS: ActionType.SYSTEM_OPERATION,
+    IntentType.BLUETOOTH: ActionType.SYSTEM_OPERATION,
+    IntentType.LOCK: ActionType.SYSTEM_OPERATION,
+    IntentType.SLEEP: ActionType.SYSTEM_OPERATION,
+    IntentType.SHUTDOWN: ActionType.SYSTEM_OPERATION,
+    IntentType.RESTART: ActionType.SYSTEM_OPERATION,
+    IntentType.MEDIA: ActionType.SYSTEM_OPERATION,
+    IntentType.SYSTEM_OP: ActionType.SYSTEM_OPERATION,
+    IntentType.FILE_OP: ActionType.FILE_OPERATION,
+    IntentType.OPEN_URL: ActionType.OPEN_URL,
+    IntentType.NAVIGATE: ActionType.NAVIGATE,
+    IntentType.BROWSER_OP: ActionType.BROWSER_OPERATION,
     # REPEAT is handled specially in plan(); EMERGENCY_STOP/PAUSE/... have no
     # direct computer action (the safety/agent layers own them).
 }
@@ -134,12 +173,29 @@ INTENT_TO_ACTION: Dict[IntentType, ActionType] = {
 HOTKEY_DEFAULTS: Dict[IntentType, List[str]] = {
     IntentType.COPY: ["ctrl", "c"],
     IntentType.PASTE: ["ctrl", "v"],
+    IntentType.UNDO: ["ctrl", "z"],
+    IntentType.REDO: ["ctrl", "y"],
     IntentType.CLOSE: ["alt", "f4"],
     IntentType.MINIMIZE: ["win", "down"],
     IntentType.MAXIMIZE: ["win", "up"],
+    IntentType.RESTORE: ["win", "down"],
     IntentType.SWITCH_WINDOW: ["alt", "tab"],
+    IntentType.SNAP: ["win", "left"],        # direction param overrides
+    IntentType.NEW_TAB: ["ctrl", "t"],
+    IntentType.CLOSE_TAB: ["ctrl", "w"],
+    IntentType.REFRESH: ["f5"],
+    IntentType.FOCUS: ["alt", "tab"],
     IntentType.BACK: ["alt", "left"],
     IntentType.FORWARD: ["alt", "right"],
+    # SELECT_ALL is SELECT with what=all; keys come from params in plan()
+}
+
+#: context-neutral defaults for KEY_PRESS-family intents (cursor moves…)
+KEY_DEFAULTS: Dict[str, List[str]] = {
+    "page_up": ["pageup"],
+    "page_down": ["pagedown"],
+    "home": ["home"],
+    "end": ["end"],
 }
 
 #: Actions that act on a screen point.
@@ -195,11 +251,19 @@ class ActionEngine:
         executor: Any = None,
         safety: Any = None,
         config: Optional[Dict[str, Any]] = None,
+        system_executor: Any = None,
+        file_executor: Any = None,
+        browser_executor: Any = None,
     ) -> None:
         cfg = dict(DEFAULT_ACTION_CONFIG)
         cfg.update(config or {})
         self.executor = executor
         self.safety = safety
+        # v10 specialized executors (§10) — optional; missing ones make the
+        # corresponding action family fail gracefully (never crash).
+        self.system_executor = system_executor
+        self.file_executor = file_executor
+        self.browser_executor = browser_executor
         self.plan_timeout: float = float(cfg["plan_timeout"])
         self.max_retries: int = max(0, int(cfg["max_retries"]))
         self.zoom_ticks: int = int(cfg["zoom_ticks"])
@@ -267,7 +331,21 @@ class ActionEngine:
         if action == ActionType.DRAG:
             params.setdefault("duration", self.drag_duration)
 
+        # ── v10 param normalization (§10) ─────────────────────────────
+        params, action = self._normalize_v10_params(
+            intent.type, action, params)
+
         expected = self._build_expected(action, point, params)
+        # destructive families require confirmation (§18)
+        sensitive = bool(intent.requires_confirmation)
+        if action is ActionType.SYSTEM_OPERATION and \
+                params.get("op") in DESTRUCTIVE_SYSTEM_OPS:
+            sensitive = True
+        if action is ActionType.FILE_OPERATION and \
+                params.get("op") in DESTRUCTIVE_FILE_OPS:
+            sensitive = True
+        if intent.type is IntentType.CLOSE_TAB:
+            sensitive = True
         planv = ActionPlan(
             action=action,
             point=point,
@@ -280,7 +358,7 @@ class ActionEngine:
             max_retries=max(0, int(getattr(intent, "params", {}).get("max_retries", self.max_retries)))
             if isinstance(getattr(intent, "params", None), dict)
             else self.max_retries,
-            requires_confirmation=bool(intent.requires_confirmation),
+            requires_confirmation=sensitive,
             intent=intent,
         )
         if action != ActionType.NONE:
@@ -310,6 +388,82 @@ class ActionEngine:
         if action in (ActionType.HOTKEY, ActionType.TYPE, ActionType.KEY_PRESS):
             return {"type": "key"}
         return {}
+
+    @staticmethod
+    def _normalize_v10_params(intent_type: IntentType, action: ActionType,
+                              params: Dict[str, Any]
+                              ) -> Tuple[Dict[str, Any], ActionType]:
+        """v10 (§10): normalize params per action family (pure).
+
+        May REMAP the action when a family resolves to a simpler
+        primitive (e.g. SELECT-all → HOTKEY ctrl+a; NAVIGATE page
+        targets → KEY_PRESS).  Never raises.
+        """
+        try:
+            if intent_type is IntentType.SELECT and \
+                    str(params.get("what", "")) == "all":
+                params["keys"] = ["ctrl", "a"]
+                return params, ActionType.HOTKEY
+            if intent_type is IntentType.SNAP and \
+                not params.get("keys"):
+                params["keys"] = ["win",
+                                  str(params.get("direction", "left"))]
+                return params, ActionType.HOTKEY
+            if intent_type is IntentType.SWITCH_TAB and \
+                    not params.get("keys"):
+                idx = params.get("index") or params.get("entities", {}).get("number")
+                try:
+                    n = int(idx)
+                except Exception:
+                    n = 1
+                n = max(1, min(8, n))
+                params["keys"] = ["ctrl", str(n)]
+                return params, ActionType.HOTKEY
+            if intent_type is IntentType.NAVIGATE:
+                target = str(params.get("target", "") or "")
+                if target in KEY_DEFAULTS:
+                    params["keys"] = list(KEY_DEFAULTS[target])
+                    return params, ActionType.KEY_PRESS
+                return params, ActionType.NAVIGATE
+            if action is ActionType.SYSTEM_OPERATION:
+                op = params.get("op")
+                if not op:
+                    op_map = {
+                        IntentType.VOLUME: {
+                            "up": "volume_up", "down": "volume_down",
+                            "mute": "mute", "unmute": "unmute"}.get(
+                            str(params.get("direction", "up")), "volume_up"),
+                        IntentType.BRIGHTNESS: "brightness_up"
+                        if str(params.get("direction", "up")) == "up"
+                        else "brightness_down",
+                        IntentType.BLUETOOTH: "bluetooth_on"
+                        if str(params.get("state", "on")) == "on"
+                        else "bluetooth_off",
+                        IntentType.LOCK: "lock",
+                        IntentType.SLEEP: "sleep",
+                        IntentType.SHUTDOWN: "shutdown",
+                        IntentType.RESTART: "restart",
+                        IntentType.MEDIA: {
+                            "play": "media_play", "pause": "media_pause",
+                            "next": "media_next",
+                            "previous": "media_previous"}.get(
+                            str(params.get("action", "play")), "media_play"),
+                    }
+                    op = op_map.get(intent_type)
+                params["op"] = str(op or "")
+                return params, action
+            if action is ActionType.FILE_OPERATION and not params.get("op"):
+                params["op"] = "open"
+                return params, action
+            if intent_type is IntentType.OPEN_URL and params.get("url"):
+                ok, cleaned = validate_url(params.get("url"))
+                params["url"] = cleaned
+                if not ok:
+                    params["url_invalid"] = True
+                return params, action
+            return params, action
+        except Exception:
+            return params, action
 
     # -- execution --------------------------------------------------------------
 
@@ -452,6 +606,29 @@ class ActionEngine:
         if action == ActionType.DRAG:
             if plan.target_point is None or plan.params.get("end") is None:
                 return "missing_drag_endpoints"
+        # ── v10 preconditions (§10) ──────────────────────────────────
+        if action == ActionType.SYSTEM_OPERATION:
+            op = plan.params.get("op")
+            if not isinstance(op, str) or op not in SYSTEM_OPS:
+                return "system_op_not_allowed"
+        if action == ActionType.FILE_OPERATION:
+            op = plan.params.get("op")
+            if not isinstance(op, str) or op not in FILE_OPS:
+                return "file_op_not_allowed"
+        if action == ActionType.OPEN_URL:
+            if plan.params.get("url_invalid") or not plan.params.get("url"):
+                return "invalid_url"
+        if action == ActionType.NAVIGATE:
+            has_url = bool(plan.params.get("url")) and \
+                not plan.params.get("url_invalid")
+            has_query = bool(plan.params.get("query"))
+            has_keys = bool(plan.params.get("keys"))
+            if not (has_url or has_query or has_keys):
+                return "invalid_navigate"
+        if action == ActionType.BROWSER_OPERATION:
+            op = plan.params.get("op")
+            if not isinstance(op, str) or op not in BROWSER_OP_ALLOW:
+                return "browser_op_not_allowed"
         return ""
 
     def _dispatch(self, plan: ActionPlan) -> Any:
@@ -492,6 +669,55 @@ class ActionEngine:
             end = params["end"]
             return ex.drag(pt[0], pt[1], end[0], end[1],
                            float(params.get("duration", self.drag_duration)))
+        # ── v10 dispatch (§10) ─────────────────────────────────────
+        if a in (ActionType.SELECT,):
+            if str(params.get("what", "")) == "all":
+                return ex.hotkey("ctrl", "a")
+            if pt is None:
+                raise RuntimeError("missing_point")
+            return ex.click(pt[0], pt[1])
+        if a is ActionType.SYSTEM_OPERATION:
+            sex = self.system_executor
+            if sex is None:
+                raise RuntimeError("no_system_executor")
+            result = sex.execute(str(params.get("op", "")), params)
+            return {"system_op": str(params.get("op", "")),
+                    "ok": bool(getattr(result, "ok", False)),
+                    "message": str(getattr(result, "message", ""))}
+        if a is ActionType.FILE_OPERATION:
+            fex = self.file_executor
+            if fex is None:
+                raise RuntimeError("no_file_executor")
+            result = fex.execute(str(params.get("op", "")), params)
+            return {"file_op": str(params.get("op", "")),
+                    "ok": bool(getattr(result, "ok", False)),
+                    "message": str(getattr(result, "message", ""))}
+        if a in (ActionType.OPEN_URL, ActionType.NAVIGATE,
+                 ActionType.BROWSER_OPERATION):
+            bex = self.browser_executor
+            url = str(params.get("url", "") or "")
+            query = str(params.get("query", "") or "")
+            op = str(params.get("op", "") or "")
+            if bex is not None:
+                if a is ActionType.OPEN_URL or (a is ActionType.NAVIGATE
+                                                and url):
+                    result = bex.perform("navigate", {"url": url})
+                elif a is ActionType.NAVIGATE and query:
+                    result = bex.perform("search", {"query": query})
+                else:
+                    result = bex.perform(op, dict(params))
+                return {"browser_op": op or "navigate",
+                        **(dict(result) if isinstance(result, dict) else
+                           {"ok": bool(result)})}
+            # deterministic fallback without a bridge: focus the address
+            # bar and type (safe, no shell, no eval)
+            if url or query:
+                text = url or query
+                r1 = ex.hotkey("ctrl", "l")
+                r2 = ex.type_text(text)
+                r3 = ex.hotkey("enter")
+                return {"browser_op": "navigate", "ok": bool(r1 and r2 and r3)}
+            raise RuntimeError("no_browser_executor")
         raise RuntimeError(f"unsupported_action:{a}")
 
     @staticmethod
