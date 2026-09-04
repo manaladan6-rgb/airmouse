@@ -282,7 +282,7 @@ class EventBus:
             kind=EventKind.VOICE_COMMAND, modality=Modality.VOICE,
             confidence=confidence, source=source,
             payload={"command": str(command), "text": str(text)},
-            now=now), now=now)
+            timestamp=now), now=now)
 
     def publish_text(self, text: str, confidence: float,
                      source: str = "offline_voice",
@@ -291,7 +291,7 @@ class EventBus:
         return self.publish(Event(
             kind=EventKind.VOICE_TEXT, modality=Modality.VOICE,
             confidence=confidence, source=source,
-            payload={"text": str(text)}, now=now), now=now)
+            payload={"text": str(text)}, timestamp=now), now=now)
 
 
 class MultiSubscriber:

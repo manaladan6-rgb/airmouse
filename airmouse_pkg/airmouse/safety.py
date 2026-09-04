@@ -62,7 +62,7 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from typing import Any, Deque, Dict, Optional, Union
+from typing import Any, Deque, Dict, Optional, Tuple, Union
 
 try:  # package-relative (normal import path)
     from .interfaces import (
@@ -88,6 +88,7 @@ __all__ = [
     "CLICK_CLASS",
     "SAFE_MODE_WHITELIST",
     "SENSITIVE_TYPES",
+    "DESTRUCTIVE_OP_PARAMS",
     "RATE_WINDOW_S",
     "SafetySystem",
 ]
@@ -127,7 +128,40 @@ SENSITIVE_TYPES: set = {
     IntentType.HOTKEY,
     IntentType.MAXIMIZE,
     IntentType.SWITCH_WINDOW,
+    # v10 (§18): destructive system / file / browser families.  FILE_OP
+    # and SYSTEM_OP are refined by _intent_destructive() below (only the
+    # destructive op params demand confirmation — opening a file does not).
+    IntentType.SHUTDOWN,
+    IntentType.RESTART,
+    IntentType.LOCK,
+    IntentType.SLEEP,
+    IntentType.CLOSE_TAB,
 }
+
+#: v10: FILE_OP/SYSTEM_OP ops that are destructive at the PARAM level
+DESTRUCTIVE_OP_PARAMS: Dict[str, Tuple[str, ...]] = {
+    "file_op": ("delete", "move", "rename"),
+    "system_op": ("shutdown", "restart", "sleep", "lock"),
+}
+
+
+def _intent_destructive(intent: Intent) -> bool:
+    """Param-level destructive check for FILE_OP / SYSTEM_OP intents.
+
+    Reads ONLY the intent params (data, never executable content).
+    """
+    try:
+        params = getattr(intent, "params", {}) or {}
+        op = str(params.get("op", "") or "")
+        if not op:
+            return True  # unknown op → treat as dangerous
+        for key, ops in DESTRUCTIVE_OP_PARAMS.items():
+            if op in ops:
+                return True
+        # op not in any destructive list → not destructive
+        return False
+    except Exception:
+        return True
 
 #: Sliding window length of the rate limiter (seconds).
 RATE_WINDOW_S: float = 1.0
@@ -278,8 +312,13 @@ class SafetySystem:
             # 7. sensitive types need explicit confirmation (one-shot:
             #    a stored confirmation is CONSUMED by the next approval so
             #    an identical follow-up intent re-arms the flow).
+            #    v10: FILE_OP / SYSTEM_OP are sensitive only when their
+            #    op param is destructive (delete file ≠ open file).
             sig = self._signature(intent)
-            if itype in self.sensitive_types:
+            sensitive_hit = itype in self.sensitive_types
+            if itype in (IntentType.FILE_OP, IntentType.SYSTEM_OP):
+                sensitive_hit = _intent_destructive(intent)
+            if sensitive_hit:
                 if sig in self._confirmed_sigs:
                     try:
                         self._confirmed_sigs.remove(sig)
