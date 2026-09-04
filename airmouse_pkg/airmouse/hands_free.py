@@ -89,6 +89,8 @@ __all__ = [
     "run_intent_through_safety",
     "debounce_key",
     "HandsFreeController",
+    # v10 §19 combos
+    "SensorHealth", "HANDS_FREE_COMBOS", "effective_combo",
 ]
 
 # ---------------------------------------------------------------------------
@@ -488,3 +490,96 @@ class HandsFreeController:
         """Clear dedup/debounce state (does NOT reset the safety latch)."""
         self._last_fire.clear()
         self.nl.reset()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# v10 §19 — hands-free combos with graceful degradation
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+#: modality → last-seen timestamps kept by :class:`SensorHealth`
+HEALTH_MODALITIES = ("gaze", "voice", "hand", "rf")
+
+#: named sensor combos (§19).  Each maps to the modalities it WANTS;
+#: the effective combo downgrades when a wanted modality is stale.
+HANDS_FREE_COMBOS: Dict[str, frozenset] = {
+    "voice_only": frozenset({"voice"}),
+    "gaze_voice": frozenset({"gaze", "voice"}),
+    "voice_hand": frozenset({"voice", "hand"}),
+    "gaze_hand": frozenset({"gaze", "hand"}),
+    "voice_gaze_hand": frozenset({"voice", "gaze", "hand"}),
+    "rf_voice": frozenset({"rf", "voice"}),
+    "rf_gaze": frozenset({"rf", "gaze"}),
+    "full_fusion": frozenset({"voice", "gaze", "hand", "rf"}),
+}
+
+
+class SensorHealth:
+    """Tracks per-modality freshness for graceful degradation (§19).
+
+    ``mark(name, now)`` on every observation; ``available(name, now)``
+    is False once a modality has been silent for ``timeout`` seconds.
+    Deterministic given the (name, now) feed order.
+    """
+
+    def __init__(self, timeout: float = 2.0) -> None:
+        self.timeout = float(max(0.1, timeout))
+        self._last: Dict[str, float] = {m: -1e9 for m in HEALTH_MODALITIES}
+
+    def mark(self, name: str, now: Optional[float] = None) -> None:
+        n = str(name or "")
+        if n in self._last:
+            self._last[n] = float(now if now is not None else now_ts())
+
+    def available(self, name: str, now: Optional[float] = None) -> bool:
+        now = float(now if now is not None else now_ts())
+        last = self._last.get(str(name or ""), -1e9)
+        return (now - last) <= self.timeout
+
+    def snapshot(self, now: Optional[float] = None) -> Dict[str, bool]:
+        return {m: self.available(m, now) for m in HEALTH_MODALITIES}
+
+
+def effective_combo(wanted: str, health: SensorHealth,
+                    now: Optional[float] = None) -> str:
+    """Resolve the EFFECTIVE combo given sensor health (pure).
+
+    Deterministic downgrade ladder: prefer the LARGEST alive subset of
+    the wanted combo (§19) — full combo when everything is fresh,
+    degrading stepwise as sensors go stale.  A modality that is simply
+    off (never marked) counts as absent.
+    """
+    alive = health.snapshot(now)
+    want = HANDS_FREE_COMBOS.get(str(wanted or ""))
+    if want is None:
+        return "voice_only" if alive.get("voice") else ""
+    best = ""
+    for candidate in HANDS_FREE_COMBOS:
+        cand = HANDS_FREE_COMBOS[candidate]
+        # must not REQUIRE modalities the wanted combo doesn't have…
+        if not cand or not cand.issubset(want):
+            continue
+        # …and every wanted modality it needs must be alive
+        if all(alive.get(m) for m in cand):
+            if len(cand) > len(HANDS_FREE_COMBOS.get(best, frozenset())):
+                best = candidate
+    return best
+
+
+class _ComboTracker:
+    """Runtime combo state on the controller (degradation + recovery)."""
+
+    def __init__(self, wanted: str, health: SensorHealth) -> None:
+        self.wanted = wanted
+        self.health = health
+        self.effective = wanted
+        self.downgraded = False
+
+    def tick(self, now: float) -> Dict[str, Any]:
+        eff = effective_combo(self.wanted, self.health, now)
+        changed = eff != self.effective
+        self.downgraded = bool(eff) and eff != self.wanted
+        self.effective = eff
+        return {"wanted": self.wanted, "effective": eff,
+                "changed": changed, "downgraded": self.downgraded,
+                "health": self.health.snapshot(now)}
