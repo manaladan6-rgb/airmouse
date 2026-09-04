@@ -285,7 +285,9 @@ class Config:
     confirmation_timeout = 5.0       # sensitive-action confirmation expiry
     stream_loss_grace = 2.0          # camera/mic loss before SAFE_MODE
     macro_max_steps = 200            # semantic macro program guard
-    telemetry_enabled = True         # rolling perf stats (fps/latency/counters)
+    perf_report_enabled = True       # LOCAL perf stats report on shutdown
+                                     # (§21: network telemetry stays OFF —
+                                     #  telemetry_enabled below is authoritative)
 
     def save_defaults(self):
         """Save current config as TOML (creates template for user editing)."""
@@ -428,7 +430,8 @@ class Config:
             f"rf_enabled = {str(self.rf_enabled).lower()}              # RF modality (idles without hardware)",
             f"rf_min_confidence = {self.rf_min_confidence}",
             f"macro_max_steps = {self.macro_max_steps}        # semantic macro guard",
-            f"telemetry_enabled = {str(self.telemetry_enabled).lower()}      # perf stats on shutdown",
+            f"telemetry_enabled = {str(self.telemetry_enabled).lower()}      # §21 privacy: OFF by default; nothing phones home",
+            f"perf_report_enabled = {str(self.perf_report_enabled).lower()}      # local-only perf report on shutdown",
         ]
         with open(CONFIG_PATH, "w") as f:
             f.write("\n".join(lines) + "\n")
@@ -589,7 +592,12 @@ class Config:
                 self.rf_enabled = v10.get("rf_enabled", self.rf_enabled)
                 self.rf_min_confidence = v10.get("rf_min_confidence", self.rf_min_confidence)
                 self.macro_max_steps = v9.get("macro_max_steps", self.macro_max_steps)
-                self.telemetry_enabled = v9.get("telemetry_enabled", self.telemetry_enabled)
+                # v9 perf-report flag moved off the privacy telemetry name
+                # (§21 defect fix: the two flags collided; perf stats are
+                # LOCAL and must not control the privacy telemetry flag)
+                self.perf_report_enabled = v9.get(
+                    "perf_report_enabled", v9.get("telemetry_enabled",
+                                                  self.perf_report_enabled))
 
             # ═══ v11.5 sections (§40) — all backward compatible ═══
             if "intelligence" in data:

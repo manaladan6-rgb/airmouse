@@ -2288,7 +2288,9 @@ def main():
         # ═══ v9.0 shutdown: agent teardown + performance report ═══
         if agent is not None:
             try:
-                if config.telemetry_enabled:
+                if getattr(config, "perf_report_enabled", True):
+                    # §21: this is a LOCAL report; network telemetry
+                    # (telemetry_enabled) is a separate, OFF-by-default flag.
                     t = agent.telemetry.snapshot()
                     print("  ── v9 performance report ──")
                     print(f"     camera {t.fps_camera:.1f} fps | gaze {t.fps_gaze:.1f} fps"
