@@ -1,5 +1,5 @@
 """
-airmouse.interfaces — AirMouse v9.0.0 shared contracts.
+airmouse.interfaces — AirMouse v9.0.0/v10.0.0 shared contracts.
 
 This module is the SINGLE SOURCE OF TRUTH for the data structures and
 enums exchanged between the v9 subsystems:
@@ -44,18 +44,23 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Protocol, Callabl
 # ─────────────────────────────────────────────────────────────────────────────
 
 VERSION_V9 = "9.0.0"
+VERSION_V10 = "10.0.0"
 
 __all__ = [
-    "VERSION_V9",
+    "VERSION_V9", "VERSION_V10",
     # enums
     "Modality", "FusionMode", "IntentType", "ActionType", "ActionStatus",
     "VerificationStatus", "RecoveryStrategy", "ScreenTargetType", "AppContext",
     "GazeEventKind", "SafetyLevel", "MacroOp",
+    # v10 enums
+    "EventKind", "VoiceMode", "CommandNamespace",
     # dataclasses
     "GazeSample", "GazeState", "ScreenTarget", "ScreenModel", "FusionEvent",
     "FusionDecision", "Intent", "ActionPlan", "ActionReport",
     "VerificationResult", "SafetyDecision", "NLUResult", "MacroStep",
     "MacroProgram", "TelemetryStats",
+    # v10 dataclasses
+    "Event", "ContextState",
     # protocols
     "TargetProvider", "ScreenProvider", "ActionExecutor", "LandmarkProvider",
     "now_ts", "UNKNOWN_TARGET",
@@ -77,7 +82,11 @@ def now_ts() -> float:
 
 
 class Modality(enum.Flag):
-    """Input modalities participating in fusion."""
+    """Input modalities participating in fusion.
+
+    v10 adds RF (rf-sensing abstraction, optional hardware) and BROWSER
+    (local browser bridge context).  ``ANY`` includes every modality.
+    """
 
     NONE = 0
     HAND = enum.auto()      # 🖐️ hand gestures
@@ -86,7 +95,9 @@ class Modality(enum.Flag):
     MOUSE = enum.auto()     # 🖱️ physical mouse state
     KEYBOARD = enum.auto()  # ⌨️ physical keyboard state
     SCREEN = enum.auto()    # 🖥️ screen-understanding context
-    ANY = HAND | GAZE | VOICE | MOUSE | KEYBOARD | SCREEN
+    RF = enum.auto()        # 📡 RF-sensing abstraction (v10, optional)
+    BROWSER = enum.auto()   # 🌐 local browser bridge (v10, optional)
+    ANY = HAND | GAZE | VOICE | MOUSE | KEYBOARD | SCREEN | RF | BROWSER
 
 
 class FusionMode(enum.Enum):
@@ -131,6 +142,31 @@ class IntentType(enum.Enum):
     CONFIRM = "confirm"          # explicit user confirmation (safety flow)
     REPEAT = "repeat"            # repeat last successful action
     EMERGENCY_STOP = "emergency_stop"
+    # ── v10 canonical intent vocabulary ─────────────────────────────────
+    UNDO = "undo"
+    REDO = "redo"
+    KEY_PRESS = "key_press"
+    RESTORE = "restore"
+    FOCUS = "focus"              # focus window/app/tab (params: what)
+    SNAP = "snap"                # snap window (params: left|right)
+    VOLUME = "volume"            # params: direction up|down|mute|unmute
+    MEDIA = "media"              # params: action next|prev|play|pause
+    LOCK = "lock"
+    SLEEP = "sleep"
+    SHUTDOWN = "shutdown"        # sensitive (confirmation required)
+    RESTART = "restart"          # sensitive (confirmation required)
+    BRIGHTNESS = "brightness"    # params: direction up|down
+    BLUETOOTH = "bluetooth"      # params: state on|off (where supported)
+    NAVIGATE = "navigate"        # params: url|query|target home|end|page_up…
+    OPEN_URL = "open_url"        # params: url (validated downstream)
+    NEW_TAB = "new_tab"
+    CLOSE_TAB = "close_tab"      # sensitive when browser state dirty
+    SWITCH_TAB = "switch_tab"
+    REFRESH = "refresh"
+    FILE_OP = "file_op"          # params: op + paths (safety-gated)
+    SYSTEM_OP = "system_op"      # params: op (safety-gated)
+    BROWSER_OP = "browser_op"    # params: op (bridge-mediated)
+    DICTATE = "dictate"          # committed dictation text (params: text)
 
 
 class ActionType(enum.Enum):
@@ -149,6 +185,26 @@ class ActionType(enum.Enum):
     TYPE = "type"
     HOTKEY = "hotkey"
     KEY_PRESS = "key_press"
+    # ── v10 canonical action vocabulary (§10) ───────────────────────────
+    SELECT = "select"
+    COPY = "copy"
+    PASTE = "paste"
+    UNDO = "undo"
+    REDO = "redo"
+    OPEN_APP = "open_app"
+    CLOSE_APP = "close_app"
+    FOCUS_WINDOW = "focus_window"
+    SWITCH_WINDOW = "switch_window"
+    OPEN_URL = "open_url"
+    NEW_TAB = "new_tab"
+    CLOSE_TAB = "close_tab"
+    SWITCH_TAB = "switch_tab"
+    NAVIGATE = "navigate"
+    FILE_OPERATION = "file_operation"
+    SYSTEM_OPERATION = "system_operation"
+    BROWSER_OPERATION = "browser_operation"
+    VOLUME = "volume"
+    MEDIA = "media"
 
 
 class ActionStatus(enum.Enum):
@@ -666,3 +722,169 @@ class ActionExecutor(Protocol):
 # Type alias for verification observation callbacks (used by the observer to
 # diff screen state around the action point).
 ObserveFn = Callable[[Optional[Tuple[float, float]]], Dict[str, Any]]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# v10.0.0 — UNIVERSAL OFFLINE INTERACTION ENGINE contracts
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class EventKind(enum.Enum):
+    """Normalized event kinds emitted on the universal local event bus (§3).
+
+    Every perception system publishes its observations as ``Event`` objects
+    with one of these kinds.  Events are the ONLY cross-modality currency:
+    voice/hand/gaze/RF/keyboard/mouse/screen/browser producers and the
+    fusion/intent/action consumers all speak this one vocabulary.
+    """
+
+    NONE = "none"
+    # voice
+    VOICE_COMMAND = "voice_command"     # resolved deterministic command
+    VOICE_TEXT = "voice_text"           # raw/dictated transcript
+    # hand
+    HAND_GESTURE = "hand_gesture"       # discrete gesture (pinch, fist, …)
+    HAND_MOTION = "hand_motion"         # continuous motion (cursor point)
+    # gaze
+    GAZE_TARGET = "gaze_target"         # gaze screen point (+ optional target)
+    GAZE_FIXATION = "gaze_fixation"     # fixation start/end/dwell
+    # RF sensing (v10 abstraction)
+    RF_GESTURE = "rf_gesture"           # classified RF gesture
+    RF_MOTION = "rf_motion"             # RF motion energy/movement
+    # desktop input
+    KEYBOARD_EVENT = "keyboard_event"
+    MOUSE_EVENT = "mouse_event"
+    # screen / browser understanding
+    SCREEN_TARGET = "screen_target"
+    BROWSER_TARGET = "browser_target"
+    # engine lifecycle
+    SYSTEM_NOTICE = "system_notice"     # mode changes, sensor loss, e-stop…
+
+
+@dataclass
+class Event:
+    """A normalized, bus-routed interaction event (v10 §3).
+
+    Contract (every event MUST carry all of these):
+
+    - ``kind``       : EventKind — what happened
+    - ``modality``   : Modality  — which sensor/producer family
+    - ``timestamp``  : perf_counter seconds
+    - ``confidence`` : float 0..1
+    - ``payload``    : dict of kind-specific data (never executable content)
+    - ``source``     : producer identifier, e.g. "offline_voice:vad",
+                       "gesture_registry", "browser_bridge:cdp"
+    - ``target``     : optional ScreenTarget for target-bearing events
+    - ``context``    : optional free-form context snapshot reference
+
+    Events are DATA.  A payload never carries shell commands, code, or
+    URLs to execute — the intent/safety layers decide what an event means.
+    """
+
+    kind: EventKind = EventKind.NONE
+    modality: Modality = Modality.NONE
+    timestamp: float = field(default_factory=now_ts)
+    confidence: float = 0.0
+    payload: Dict[str, Any] = field(default_factory=dict)
+    source: str = ""
+    target: Optional[ScreenTarget] = None
+    context: Optional[Dict[str, Any]] = None
+
+    def as_fusion_event(self) -> FusionEvent:
+        """Bridge a bus Event into the v7 fusion input vocabulary."""
+        kind_map = {
+            EventKind.VOICE_COMMAND: "utterance",
+            EventKind.VOICE_TEXT: "utterance",
+            EventKind.HAND_GESTURE: str(self.payload.get("gesture", "")),
+            EventKind.HAND_MOTION: "point",
+            EventKind.GAZE_TARGET: "target",
+            EventKind.MOUSE_EVENT: str(self.payload.get("kind", "move")),
+            EventKind.KEYBOARD_EVENT: "key",
+        }
+        return FusionEvent(
+            modality=self.modality,
+            kind=kind_map.get(self.kind, self.kind.value),
+            payload=dict(self.payload or {}),
+            confidence=float(self.confidence),
+            timestamp=self.timestamp,
+        )
+
+
+class VoiceMode(enum.Enum):
+    """v10 §5 voice operating modes."""
+
+    COMMAND = "command"      # deterministic command parsing only
+    DICTATION = "dictation"  # speech → text
+    HYBRID = "hybrid"        # auto-distinguish command vs dictation
+
+
+class CommandNamespace(enum.Enum):
+    """v10 §6 voice-command namespaces (registry grouping + docs)."""
+
+    ENGINE = "engine"          # airmouse control (modes, e-stop, macro)
+    MOUSE = "mouse"            # buttons / cursor
+    SYSTEM = "system"          # volume, mute, lock, sleep, display…
+    WINDOW = "window"          # minimize/maximize/restore/close/snap…
+    APPLICATION = "application"  # open/close/focus/switch apps
+    FILES = "files"            # open/create/rename/copy/move/delete…
+    TEXT = "text"              # select all, undo/redo, delete word/line…
+    NAVIGATION = "navigation"  # scroll, page, home/end, arrows
+    MEDIA = "media"            # play/pause/next/prev/volume
+    BROWSER = "browser"        # tabs, URL, semantic page targets
+
+
+@dataclass
+class ContextState:
+    """v10 §8 local context engine state.
+
+    Everything the context engine knows about "where the user is right
+    now".  Contextual commands ("click that", "close it", "open this")
+    resolve against this state.  Populated from screen perception, the
+    browser bridge, gaze, and the action engine's own recent history.
+    """
+
+    focused_application: str = ""
+    focused_window: str = ""
+    active_browser: str = ""
+    active_tab_title: str = ""
+    current_url: str = ""
+    current_screen: Tuple[int, int] = (0, 0)
+    current_gaze_target: Optional[ScreenTarget] = None
+    recent_action: str = ""
+    recent_target: Optional[ScreenTarget] = None
+    active_mode: str = "hand"
+    selected_object: Optional[ScreenTarget] = None
+    browser_targets: List[ScreenTarget] = field(default_factory=list)
+    app_context: AppContext = AppContext.UNKNOWN
+    timestamp: float = field(default_factory=now_ts)
+
+    def resolve_reference(self,
+                          ref: str) -> Optional[ScreenTarget]:
+        """Resolve a deictic reference against the context state.
+
+        "that"/"this"/"it" → current gaze target, falling back to the
+        selection, then the recent target.  Deterministic and pure.
+        """
+        r = (ref or "").strip().lower()
+        if r in ("that", "this", "it", "here", "there", "the"):
+            if self.current_gaze_target is not None:
+                return self.current_gaze_target
+            if self.selected_object is not None:
+                return self.selected_object
+            return self.recent_target
+        if r in ("selected", "selection"):
+            return self.selected_object
+        if r in ("window", "focused", "active"):
+            # synthetic window target from the focused-window title
+            if self.focused_window:
+                return ScreenTarget(
+                    id="context:window",
+                    type=ScreenTargetType.WINDOW,
+                    text=self.focused_window,
+                    confidence=0.7,
+                    application=self.focused_application,
+                    actionable=True,
+                    source="context",
+                )
+            return None
+        return None

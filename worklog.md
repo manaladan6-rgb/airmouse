@@ -71,3 +71,23 @@ Work Log:
 
 Stage Summary:
 - v5.0.0: 4 new modules + 1 single-file mode + full wiring; all tests green; wheel airmouse-5.0.0-py3-none-any.whl built
+
+---
+Task ID: 1 (v10)
+Agent: main coordinator
+Task: AirMouse v10.0 AUDIT BEFORE CODING — establish true baseline
+
+Work Log:
+- Cloned github.com/manaladan6-rgb/airmouse (branch main, clean tree, 457 files)
+- Git history verified: v4.2.0 → v5.0.0 (3b11b14) → v9.0.0 progression with 7 commits; tags v3.1.0…v5.0.0,v9.0.0 ALL present on remote (git ls-remote verified)
+- v9.0.0 stack confirmed real: 33 modules in airmouse_pkg/airmouse/ (15,881 LOC): interfaces contracts, gaze+gaze_filter+gaze_calibration, fusion, screen_perception, intent, actions, verification, safety, context, macros v1+v2, nl_control, hands_free, agent, voice_control(v5)
+- BASELINE TEST COUNT (measured): pytest tests/ -q → 497 passed, 0 failed, 0 skipped (9.05s)
+- v5 VoiceCommandEngine (30 commands, Google Web API) intact; NL parser (fullmatch regex table) intact
+- CLI flags inventoried (33 existing); MISSING for v10: --offline, --browser, --browser-bridge, --gesture, --rf, --voice-mode command|dictation|hybrid, subcommands voice-status/gestures/commands/browser/offline-test/diagnostics
+- NO RF module exists (mission's "v9.2 RF abstraction" must be CREATED)
+- No README.md at repo root (only airmouse_pkg/README.md)
+
+Stage Summary:
+- Baseline = v9.0.0 tag a33e3c1, 497 green tests, full multimodal stack verified real
+- v10 must ADD (not rewrite): event bus, offline voice (providers/VAD/modes), command grammar+registry, context engine v10, gesture registry+custom mappings, universal action vocab, browser bridge+semantic control+verification, RF abstraction, camera-independent degradation, --offline + network-isolated tests, safety destructive-confirmations, hands-free combos, CLI/HUD/config, docs, packaging, release
+- Strategy: pure-headless deterministic core (stdlib-only), hardware adapters guarded+optional, everything simulation-testable
