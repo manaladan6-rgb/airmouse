@@ -99,6 +99,15 @@ class Config:
     # [workflow]
     workflow_learning = True
     workflow_max_count = 200
+    # ═══ v12 — Personal Interaction Twin + Temporal World Model (§2/§3) ═══
+    # [twin]
+    twin_enabled = True                # optional; core works perfectly without it
+    twin_max_facts = 2000
+    twin_decay_half_life_hours = 720.0  # 30 days
+    # [temporal_world]
+    temporal_world_enabled = True
+    temporal_world_max_history = 128
+
     # [privacy]
     privacy_mode = False               # pause learning + history, wipe nothing
     telemetry_enabled = False          # OFF by default; nothing phones home

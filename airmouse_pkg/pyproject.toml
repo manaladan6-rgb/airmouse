@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "airmouse"
-version = "11.5.0"
+version = "12.0.0"
 description = "AirMouse v10.0 Universal Offline Interaction Edition — everything from v9 plus: universal local event bus, offline voice engine (pluggable local ASR, VAD, command/dictation/hybrid modes), 75-command deterministic grammar, context engine, full gesture registry with custom mappings, RF-sensing abstraction, system/file action executors, local browser bridge with semantic control + verification, true offline mode, hands-free combos; plus — webcam eye/gaze tracking with dwell + blink control, 14-gesture hand mouse, 30-phrase voice + natural-language control, multimodal fusion engine (gaze x hand x voice), screen understanding, intent engine, verified action execution with recovery, safety system (e-stop, rate limits, confirmations), semantic macros, hybrid One Euro + Kalman filtering, adaptive calibration, and single-file simple mode"
 license = "MIT"
 requires-python = ">=3.9"
