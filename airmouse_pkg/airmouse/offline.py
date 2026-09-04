@@ -153,26 +153,42 @@ def network_isolation(block_localhost: bool = False):
     orig_connect_ex = socket.socket.connect_ex
     orig_create = socket.create_connection
 
-    def _refuse(addr, *a, **kw):
+    def _refuse(sock, addr, *a, **kw):
+        # NOTE: assigned to socket.socket.connect, so the FIRST arg is the
+        # socket instance and the second is the address (bug found by the
+        # v10 test suite — the loopback passthrough previously never fired).
         host = ""
         try:
             host = str(addr[0]) if isinstance(addr, (tuple, list)) else str(addr)
         except Exception:
             pass
         if not block_localhost and host in ("127.0.0.1", "localhost", "::1"):
-            return orig_connect(addr, *a, **kw)
+            return orig_connect(sock, addr, *a, **kw)
         raise _NetworkBlockedError(
             f"network disabled (offline test): connect({host!r}) refused")
 
-    def _refuse_ex(addr, *a, **kw):
+    def _refuse_ex(sock, addr, *a, **kw):
         try:
-            return _refuse(addr, *a, **kw) or 0
+            return _refuse(sock, addr, *a, **kw) or 0
         except _NetworkBlockedError as exc:
             raise exc
 
+    def _refuse_create(address, *a, **kw):
+        # module-level function: NO self — the first arg IS the address
+        host = ""
+        try:
+            host = str(address[0]) if isinstance(address, (tuple, list)) \
+                else str(address)
+        except Exception:
+            pass
+        if not block_localhost and host in ("127.0.0.1", "localhost", "::1"):
+            return orig_create(address, *a, **kw)
+        raise _NetworkBlockedError(
+            f"network disabled (offline test): connect({host!r}) refused")
+
     socket.socket.connect = _refuse                     # type: ignore
     socket.socket.connect_ex = _refuse_ex               # type: ignore
-    socket.create_connection = _refuse                  # type: ignore
+    socket.create_connection = _refuse_create           # type: ignore
     try:
         yield
     finally:

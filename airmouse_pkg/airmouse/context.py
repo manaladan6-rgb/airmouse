@@ -33,6 +33,7 @@ Copyright (c) AirMouse.  MIT License.
 from __future__ import annotations
 
 import threading
+from dataclasses import replace as _dc_replace
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:  # package-relative (normal import path)
@@ -344,9 +345,13 @@ class ContextEngine:
             return resolved
 
     def snapshot(self) -> ContextState:
-        """Thread-safe copy of the current context state."""
+        """Thread-safe INDEPENDENT copy of the current context state.
+
+        Bug fixed (v10 test suite): this previously returned the live
+        internal object, so mutating a "snapshot" mutated engine state.
+        """
         with self._lock:
-            return self._state
+            return _dc_replace(self._state)
 
     @property
     def state(self) -> ContextState:

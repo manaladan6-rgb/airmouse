@@ -91,3 +91,23 @@ Stage Summary:
 - Baseline = v9.0.0 tag a33e3c1, 497 green tests, full multimodal stack verified real
 - v10 must ADD (not rewrite): event bus, offline voice (providers/VAD/modes), command grammar+registry, context engine v10, gesture registry+custom mappings, universal action vocab, browser bridge+semantic control+verification, RF abstraction, camera-independent degradation, --offline + network-isolated tests, safety destructive-confirmations, hands-free combos, CLI/HUD/config, docs, packaging, release
 - Strategy: pure-headless deterministic core (stdlib-only), hardware adapters guarded+optional, everything simulation-testable
+
+---
+Task ID: 21-tests
+Agent: test-builder subagent
+Task: v10 test suite (§21)
+
+Work Log:
+- Studied all v10 modules first: voice_commands.py, offline_voice.py, eventbus.py, context.py (ContextEngine), gesture_registry.py, rf.py, system_actions.py, offline.py, hands_free.py (SensorHealth/effective_combo/HANDS_FREE_COMBOS), browser.py (SemanticBrowserResolver/SimulatedBrowserBridge/BrowserController/BrowserActionVerifier), plus interfaces.py/safety.py/actions.py/agent.py contracts
+- Wrote ONE new file tests/test_v10.py (no existing file touched, nothing committed): 114 tests across 14 sections — §6/§7 grammar (23), voice_match_to_intent (9), OfflineVoiceEngine modes/VAD/wake/dedup/dictation/hybrid/provider (11), EventBus (9), ContextEngine (6+1 xfail), GestureRegistry incl sequences/wildcard/save-load/override (9), RF (5), system+file executors incl sanitize/validate_url/root-refusal/traversal/dry-run (13), SafetySystem §18 (5), hands-free combos (6), offline §17 incl real run_offline_selftest + network_isolation (6), browser verifier/resolver extra (4), fusion pipeline via InteractionAgent injection/voice/RF-confirm-retry (4), bounded perf §20/§21 (4)
+- All tests: plain pytest functions, fresh engines per test, explicit now= timestamps, no cv2/mediapipe/pynput, no sleeps, no network (except the §17 isolation tests which block it), deterministic
+- Iterated 2 rounds: fixed 3 wrong test expectations (MultiSubscriber poll pops one event per sub per round and returns the globally-earliest; GestureRegistry.feed always returns the built-in mapping for partial sequence steps — completion only suppresses it), removed one unused import for pyflakes
+- Verified: python3 -m pytest tests/test_v10.py -q → 112 passed, 2 xfailed (1.8s); FULL suite → 628 passed, 2 xfailed, 0 failed (9.9s) = baseline 516 + 112 new; pyflakes tests/test_v10.py → clean
+- Product bugs found (NOT fixed, tests marked xfail strict=False):
+  1. airmouse/offline.py:156-165 (_refuse) — network_isolation() replaces the UNBOUND socket.socket.connect/connect_ex, so _refuse receives (self, addr) and treats the SOCKET INSTANCE as the address; the loopback passthrough (block_localhost=False, docstring: "Loopback stays AVAILABLE by default") can never trigger and EVERY connect — including 127.0.0.1 — raises _NetworkBlockedError. Test: test_network_isolation_allows_loopback_by_default (xfail)
+  2. airmouse/context.py:346-349 (ContextEngine.snapshot) — returns the live internal self._state, not a copy, despite the docstring "Thread-safe copy of the current context state"; mutating a "snapshot" mutates engine state. Test: test_context_snapshot_is_an_independent_copy (xfail)
+
+Stage Summary:
+- tests/test_v10.py: 114 tests added (112 passed + 2 xfail-documented product bugs), runtime 1.8s
+- Full suite: 628 passed, 2 xfailed, 0 failed (baseline 516 + 112 new passing)
+- pyflakes clean; no product code modified; nothing committed
