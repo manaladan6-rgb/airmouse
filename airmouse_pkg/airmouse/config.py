@@ -51,6 +51,19 @@ class Config:
     # Tracking mode: "direct" (1:1 finger-to-screen) or "ironman" (exponential delta)
     tracking_mode = "direct"
 
+    # ═══ v10.0 — Universal Offline Interaction Engine ═══
+    offline = False                    # TRUE OFFLINE mode: block network features
+    voice_mode10 = "command"           # command | dictation | hybrid
+    voice_command_min_confidence = 0.62
+    wake_word_required = False
+    dictation_max_chars = 500
+    browser_enabled = False            # local browser bridge control (§11)
+    browser_bridge_port = 17843        # localhost-only extension endpoint
+    browser_cdp_port = 9222            # Chrome/Edge DevTools protocol port
+    gesture_registry_enabled = False   # custom gesture mappings (§9)
+    rf_enabled = False                 # RF-sensing modality (§16, optional HW)
+    rf_min_confidence = 0.4
+
     # Physics (Ironman mode)
     mass = 0.8
     stiffness_min = 120.0
@@ -308,6 +321,19 @@ class Config:
             f"min_click_interval = {self.min_click_interval}     # seconds between clicks",
             f"confirmation_timeout = {self.confirmation_timeout}   # sensitive-action confirmation expiry",
             f"stream_loss_grace = {self.stream_loss_grace}       # camera/mic loss before SAFE_MODE",
+            "",
+            "[v10]  # v10.0 universal offline interaction engine",
+            f"offline = {str(self.offline).lower()}               # TRUE OFFLINE: block network-dependent features",
+            f"voice_mode10 = \"{self.voice_mode10}\"       # command | dictation | hybrid",
+            f"voice_command_min_confidence = {self.voice_command_min_confidence}",
+            f"wake_word_required = {str(self.wake_word_required).lower()}",
+            f"dictation_max_chars = {self.dictation_max_chars}",
+            f"browser_enabled = {str(self.browser_enabled).lower()}        # local browser bridge control",
+            f"browser_bridge_port = {self.browser_bridge_port}      # localhost-only extension endpoint",
+            f"browser_cdp_port = {self.browser_cdp_port}        # CDP port (Chrome --remote-debugging-port)",
+            f"gesture_registry_enabled = {str(self.gesture_registry_enabled).lower()}",
+            f"rf_enabled = {str(self.rf_enabled).lower()}              # RF modality (idles without hardware)",
+            f"rf_min_confidence = {self.rf_min_confidence}",
             f"macro_max_steps = {self.macro_max_steps}        # semantic macro guard",
             f"telemetry_enabled = {str(self.telemetry_enabled).lower()}      # perf stats on shutdown",
         ]
@@ -456,6 +482,19 @@ class Config:
                 self.min_click_interval = v9.get("min_click_interval", self.min_click_interval)
                 self.confirmation_timeout = v9.get("confirmation_timeout", self.confirmation_timeout)
                 self.stream_loss_grace = v9.get("stream_loss_grace", self.stream_loss_grace)
+            if "v10" in data:
+                v10 = data["v10"]
+                self.offline = v10.get("offline", self.offline)
+                self.voice_mode10 = v10.get("voice_mode10", self.voice_mode10)
+                self.voice_command_min_confidence = v10.get("voice_command_min_confidence", self.voice_command_min_confidence)
+                self.wake_word_required = v10.get("wake_word_required", self.wake_word_required)
+                self.dictation_max_chars = v10.get("dictation_max_chars", self.dictation_max_chars)
+                self.browser_enabled = v10.get("browser_enabled", self.browser_enabled)
+                self.browser_bridge_port = v10.get("browser_bridge_port", self.browser_bridge_port)
+                self.browser_cdp_port = v10.get("browser_cdp_port", self.browser_cdp_port)
+                self.gesture_registry_enabled = v10.get("gesture_registry_enabled", self.gesture_registry_enabled)
+                self.rf_enabled = v10.get("rf_enabled", self.rf_enabled)
+                self.rf_min_confidence = v10.get("rf_min_confidence", self.rf_min_confidence)
                 self.macro_max_steps = v9.get("macro_max_steps", self.macro_max_steps)
                 self.telemetry_enabled = v9.get("telemetry_enabled", self.telemetry_enabled)
 

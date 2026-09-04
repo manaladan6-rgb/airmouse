@@ -1,189 +1,291 @@
-# AirMouse v9.0.0 — MULTIMODAL INTELLIGENCE EDITION
+# AirMouse v10.0.0 — UNIVERSAL OFFLINE INTERACTION ENGINE
 
-Control your computer with your **eyes, hands, and voice** — one webcam, one microphone, zero extra hardware. AirMouse v9 evolves the gesture mouse into a **multimodal personal-computer interaction system**: perception → fusion → screen understanding → intent → action → verification → recovery.
+Voice + hand + gaze + RF + keyboard/mouse + screen + browser → one
+**event bus** → fusion → context → intent → action → verification →
+recovery. **Fully offline-capable: no LLM, no cloud AI, no network
+required for any control path.**
 
 ![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue)
 ![Platform](https://img.shields.io/badge/platform-windows%20%7C%20linux%20%7C%20macos-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
+![Offline](https://img.shields.io/badge/offline-capable-success)
 
 ```
-          HUMAN
-            │
-   ┌────────┼────────┐
-   ▼        ▼        ▼
-  👁️       🖐️       🎤
- GAZE      HAND     VOICE
-   │        │        │
-   └────────┼────────┘
-            ▼
-    MULTIMODAL FUSION
-            ▼
-      SCREEN MODEL → CONTEXT → INTENT ENGINE
-            ▼
-      ACTION PLANNER → ACTION ENGINE → COMPUTER
-            ▼
-      OBSERVER → VERIFICATION ──► SUCCESS / RECOVERY
+  🎤 VOICE   🖐 HAND   👁 GAZE   📡 RF   ⌨ KB/MOUSE   🖥 SCREEN   🌐 BROWSER
+     └────────┴────────┴────────┴─────────┴─────────────┴───────────┘
+                                   │  normalized Events
+                                   ▼
+              ╔══════════ EVENT BUS (local, bounded) ══════════╗
+              ╚═════════════════════╦══════════════════════════╝
+                        ▼                        ▼
+                 MULTIMODAL FUSION        CONTEXT ENGINE
+                 (arbitration,           (app/window/browser/
+                  confirmations)          gaze target, "that/this")
+                        └───────────┬───────────┘
+                                    ▼
+                             INTENT ENGINE  (52 intent types)
+                                    ▼
+        ┌────────────── SAFETY (e-stop · rate limits · gates · ──────────────┐
+        │                 sensitive-action confirmations)                    │
+        │  ▼                                                                 │
+        │  OFFLINE GATE ──► ACTION ENGINE (32 action types, allowlisted      │
+        │                 executors) ──► VERIFICATION ──► RECOVERY           │
+        └────────────────────────────────────────────────────────────────────┘
 ```
 
-## What's New in v9.0.0
+The **safety system** gates every action; the **offline gate** blocks
+network-dependent features while every local path keeps running.
+
+## What's New in v10.0.0
 
 | Subsystem | What it does |
 |---|---|
-| **👁️ Gaze (v6)** | Webcam iris/eye tracking (MediaPipe FaceMesh + refined iris landmarks): gaze direction, confidence scoring, blink / long-blink / double-blink / wink detection, fixation + dwell detection, dedicated filtering pipeline (outlier rejection + confidence-weighted adaptive smoothing, ~2.5x jitter reduction), affine gaze→screen calibration with quality grading and persistence |
-| **🔀 Fusion (v7)** | Multimodal arbitration across gaze 👁 / hand 🖐 / voice 🎤 / mouse 🖱 / keyboard ⌨ / screen 🖥 — six interaction modes (`hand`, `gaze`, `voice`, `fusion`, `hands-free`, `assist`), per-mode priority matrix, staleness handling, conflict resolution, confirmation patterns (`LOOK → TARGET → PINCH → CLICK`, `LOOK → "click"`) |
-| **🖥️ Screen understanding (v7)** | Layered providers (accessibility → OCR *(opt-in)* → geometry) merged into a unified target model — semantic targets (`"Submit button"`, active window) with a guaranteed coordinate fallback |
-| **🧠 Intent engine (v8)** | Turns multimodal signals into structured intents (click / open / scroll / zoom / close / move / hotkey …) with confidence propagation, uncertain-gaze click suppression, and sensitive-action marking |
-| **⚡ Action engine + verification (v8)** | Every action: preconditions → execution → observation → expected-vs-observed comparison → SUCCESS/FAILURE, with a bounded recovery ladder (retry → adjusted retry → notify). Blocked/failed actions are never blindly repeated |
-| **🛡️ Safety system (v8)** | Emergency stop (ESC / long-blink / "stop everything"), sliding-window action rate limiter, click cooldowns, confidence gates, sensitive-action voice confirmations, safe mode, camera/mic-loss auto-downgrade |
-| **📝 Semantic macros (v8)** | Macro format v2: `LOOK_FOR / WAIT_UNTIL / CLICK / TYPE / SCROLL / VERIFY / IF / RETRY / STOP` — legacy timestamp macros still replay unchanged |
-| **🗣️ Natural language (v9)** | Beyond fixed commands: *"click that"*, *"scroll down a little"*, *"close this window"*, *"move that to the left"*, *"zoom in a lot"* — "that/this" resolves to your current gaze target, never an invented coordinate. All parsing is local |
-| **🙌 Hands-free mode (v9)** | Eyes target, voice commands, dwell/blink confirm — full interaction without hand gestures. ESC is always an immediate escape |
+| **🚌 Event bus** | Every modality publishes normalized `Event`s (14 kinds); `EventBus` with bounded per-subscriber queues (drop-oldest, producers never block), history ring, stats. Pure in-process — works with networking disabled |
+| **📖 Command grammar** | 75 deterministic voice commands in 10 namespaces (engine/mouse/system/window/application/files/text/navigation/media/browser). Template grammar with `<slot>` entities, literal-specificity + namespace-priority resolution, ambiguity flags. NO LLM, NO probabilistic parsing |
+| **🎙️ Offline voice** | Pluggable local ASR (`Simulated` / `PocketSphinx` / `Vosk` / `Whisper` providers, auto-detected), energy VAD with hysteresis, wake-word gate, COMMAND / DICTATION / HYBRID modes, dictation buffer with commit markers |
+| **🧭 Context engine** | Focused app/window, browser state (tab/URL), gaze target with 2 s TTL, selection, recent action — powers deictic resolution: *"click that"*, *"close it"*, *"open this"* |
+| **🤟 Gesture registry** | Full vocabulary: v5 superset + `pinch_hold` / `pinch_release` / `double_pinch` / `grab` / `grab_move` / `circular_cw` / `circular_ccw`. Built-in + **user-defined sequence gestures** (JSON), deterministic sequence matcher, double-pinch synthesis |
+| **📡 RF sensing** | Optional `RFProvider` abstraction + simulated/dummy providers + event-bus bridge. **Never required** — idles cleanly when no RF hardware exists; system degrades via the combo ladder |
+| **🖥️ System + file actions** | 16 system ops (volume/media/lock/sleep/power/brightness/bluetooth) + 8 file ops. Shell-free argv-only subprocess, allowlisted root directories, filename sanitizing, URL scheme validation (http/https/file only) |
+| **⚡ Universal actions** | Canonical vocabulary: 52 intent types → 32 action types, v10 param normalization, destructive-op confirmation flags, executor injection (pointer/keyboard/system/file/browser) |
+| **🌐 Browser control** | Local browser control in 3 layers: transport (deterministic simulated bridge / guarded Chrome DevTools Protocol / localhost MV3-extension bridge on 127.0.0.1:17843), semantics (*"click the login button"*, *"switch to the youtube tab"*, *"search for …"*), verification (before/after state diff). Page content is data, never commands |
+| **🔌 Offline mode** | `--offline` engages a runtime gate that blocks cloud ASR/TTS, CDP, updates, telemetry — while the full local stack keeps working. `airmouse offline-test` runs the entire pipeline 13/13 checks with networking **really** disabled at socket level |
+| **🙌 Hands-free combos** | 8 named sensor combos (`voice_only` … `full_fusion`); sensor-health tracker downgrades to the largest alive subset automatically and recovers when sensors return |
+| **🛡️ Safety (extended)** | Sensitive types now include SHUTDOWN/RESTART/LOCK/SLEEP/CLOSE_TAB; FILE_OP/SYSTEM_OP get param-level destructive refinement (delete = destructive, create = not) |
 
-**Everything from v5.0.0 is still here:** 14 hand gestures, swipe navigation, hybrid One Euro + Kalman cursor filter, 30-phrase voice control (incl. TURBO/MAD mode), pinch-to-zoom, adaptive calibration, macro recording, HUD, single-file simple mode.
+**Everything from v5–v9 is preserved** — see below.
+
+## Preserved from earlier versions
+
+- **v9** — multimodal fusion (6 modes), webcam gaze tracking + calibration + filtering, screen understanding (accessibility → OCR *(opt-in)* → geometry), intent engine with confidence propagation, action engine + verification + recovery ladder, safety system (e-stop, rate limiter, confirmations), semantic macros v2, natural language ("scroll down a little"), hands-free mode, InteractionAgent with telemetry
+- **v5** — 14 hand gestures + swipes, hybrid One Euro + Kalman cursor filter, 30-phrase voice control (incl. TURBO mode), pinch-to-zoom, adaptive calibration, macro recording, HUD, single-file `airmouse_simple.py`
+- **v4/v3** — trackpad mode, direct/ironman tracking, precision mode, media keys, multi-monitor, autostart, settings GUI
+
+All 497 pre-existing v9 tests still pass unchanged (regression gate).
 
 ## Install
 
 ```bash
-pip install airmouse-9.0.0-py3-none-any.whl
+pip install airmouse-10.0.0-py3-none-any.whl
 
 # optional extras:
-pip install "airmouse[voice]"   # SpeechRecognition + pyaudio (voice control)
+pip install "airmouse[voice]"   # SpeechRecognition + pyaudio (v5 mic voice control)
 pip install "airmouse[tts]"     # spoken confirmations (pyttsx3)
 pip install "airmouse[ocr]"     # screen OCR targets (opt-in, off by default)
+
+# optional offline ASR engines (any one enables real mic → text offline):
+pip install pocketsphinx        # or: pip install vosk   or: pip install openai-whisper
 ```
 
-Requirements: Python 3.9+, webcam (any), microphone optional. All processing is **local** — camera frames, eye images, audio and screenshots are never transmitted by default. (Note: the optional Google-based speech recognizer in the voice extras sends audio to Google when enabled — that upstream behavior is documented by SpeechRecognition and can be disabled by not installing voice extras.)
+Requirements: Python 3.9+. Webcam optional (hand/gaze), microphone
+optional (voice), RF hardware optional (RF modality). **Everything else
+is stdlib.** All processing is local.
 
 ## Quick start
 
 ```bash
-airmouse                                   # v5 hand+gesture experience (unchanged)
-airmouse --voice                           # + voice commands
-airmouse --gaze                            # + eye tracking (run calibration first!)
-airmouse --fusion                          # FUSION: gaze targets, hand confirms, voice intents
-airmouse --hands-free                      # eyes target, voice commands, dwell confirm
-airmouse --assist                          # observe everything, confirm every action
-airmouse --gaze-calibrate                  # guided 9-point gaze calibration (save & exit)
-airmouse --interaction gaze                # pick a mode explicitly
-airmouse --version                         # 9.0.0
+airmouse                                        # v5 hand+gesture experience (unchanged)
+airmouse --voice-mode hybrid                    # offline voice: commands + dictation
+airmouse --offline                              # hard-offline mode (blocks cloud features)
+airmouse --browser                              # + semantic browser control
+airmouse --browser --browser-bridge             # + localhost extension bridge (:17843)
+airmouse --rf                                   # + RF modality (idles without hardware)
+airmouse --gesture                              # + full gesture registry (custom sequences)
+airmouse --offline --voice-mode hybrid --gesture --browser   # everything, offline
+
+# info & diagnostics subcommands:
+airmouse commands                               # print all 75 commands by namespace
+airmouse gestures                               # print the gesture registry
+airmouse voice-status                           # which offline ASR providers are available
+airmouse browser                                # browser bridge/controller status
+airmouse offline-test                           # 13-check full-stack selftest, network truly blocked
+airmouse diagnostics                            # event bus / modality / sensor report
 ```
 
-Legacy flags all still work: `--mode direct|ironman`, `--trackpad`, `--no-kalman`, `--no-zoom`, `--calibrate`, `--record NAME`, `--play NAME`, `--macros`, `--monitor`, `--precision`, …
+Legacy flags all still work: `--voice --gaze --fusion --hands-free
+--assist --gaze-calibrate --trackpad --calibrate --record NAME --play
+NAME --macros --monitor N --precision …`
 
-## Gaze control
+## Voice commands
 
-1. **Calibrate** (once): `airmouse --gaze-calibrate` — look at 9 dots; the fit is quality-graded (`good/fair/poor`), saved to `~/.airmouse/gaze_calibration.json`, and re-loadable. Recalibrate any time; delete the file to reset.
-2. **Targeting**: your gaze point is filtered (outlier-rejected, confidence-weighted) and mapped onto semantic screen targets when possible.
-3. **Confirmation** (never raw gaze alone):
-   - `fusion` mode — look at a target, pinch (or say "click")
-   - `hands-free` mode — hold your gaze (dwell-click, ~1 s) or say "click that"
-   - long blink (~1.2 s) = **emergency stop** (configurable)
-4. **Safety**: gaze below the confidence floor (default 0.55) can move nothing but attention. Blink-click is **off by default** because accidental blinks are real.
+75 commands, 10 namespaces, deterministic grammar (exact match → 1.00
+confidence; ambiguous → flagged 0.72; fuzzy tolerance 0.62–0.85; below
+0.62 → no match). Sensitive commands are flagged for the safety layer's
+confirmation gate.
 
-## Interaction modes
+| Namespace | Examples |
+|---|---|
+| engine | "stop everything", "switch to hands-free", "record macro", "quit" |
+| mouse | "click", "double click", "right click", "scroll up" |
+| system | "volume up", "mute", "lock screen", "shutdown" *(confirm)* |
+| window | "minimize window", "maximize", "snap left" |
+| application | "open firefox", "close this app" |
+| files | "open file notes.txt", "delete file old.txt" *(confirm)* |
+| text | "select all", "undo", "delete word" |
+| navigation | "scroll down", "go to top", "page down" |
+| media | "play music", "next track" |
+| browser | "new tab", "close tab" *(confirm)*, "go to youtube.com" |
 
-| Mode | Target | Confirm | Intent |
-|---|---|---|---|
-| `hand` | finger (v5) | gestures | gestures |
-| `gaze` | eyes | dwell / voice | voice |
-| `voice` | last stable target | — | voice |
-| `fusion` | eyes (hand moves cursor) | pinch near target | voice + gestures |
-| `hands-free` | eyes | dwell / blink / voice | voice |
-| `assist` | any modality (observed) | explicit confirmation only | voice |
+Dictation mode commits buffered speech on markers ("commit", "new
+paragraph", "submit text", "end dictation") or terminal punctuation;
+hybrid mode tries command grammar first and falls back to
+dictation when the utterance looks like prose. Deictic commands
+("click that", "close it") resolve against the context engine's gaze
+target / selection / recent action — never an invented coordinate.
 
-Switch by CLI, config (`[v9] fusion_mode`), hotkey **[f]** (cycles), or voice.
+**Full list:** `airmouse commands`.
 
-## Voice & natural language
+## Gestures
 
-30 fixed commands still work (`click`, `right click`, `scroll up`, `zoom in`, `freeze`, `precision`, `record`, `play macro`, `quit` …) — plus v9 natural phrasing resolved against your gaze target and screen context:
+The registry contains the complete vocabulary — built-in hand gestures
+plus the v10 extensions — and maps each to its intent:
 
-> "Click that." · "Open this." · "Scroll down a little." · "Zoom in a lot." · "Close this window." · "Move that to the left." · "Go back." · "Select this." · "Play this." · "Repeat that." · "Stop." · "Stop everything."
-
-## Macros
-
-```bash
-airmouse --record demo        # legacy timestamped macro (clicks/scrolls/zooms)
-airmouse --play demo          # replay
-```
-
-v2 semantic macros (JSON in `~/.airmouse/macros/`) add steps with verification:
+- **Built-in (v5 superset):** pointing, peace, three, palm, fist,
+  pinch, thumbs up, gun, swipe left/right/up/down
+- **v10 set:** `pinch_hold`, `pinch_release`, `double_pinch`
+  (synthesized from two pinches within 0.6 s), `grab`, `grab_move`,
+  `circular_cw`, `circular_ccw`, directional motion
+- **Custom sequence gestures** — define your own multi-step patterns in
+  JSON and they flow through the same intent/safety pipeline:
 
 ```json
-{"version": 2, "name": "accept_cookies",
- "steps": [
-   {"op": "look_for",   "params": {"text": "Accept"}},
-   {"op": "wait_until", "params": {"seconds": 0.4}},
-   {"op": "click"},
-   {"op": "verify",     "params": {"expected": {"type": "present"}}}
- ]}
+{
+  "name": "air_delete",
+  "pattern": ["fist", "swipe_left", "pinch_release"],
+  "intent": "hotkey",
+  "params": {"keys": ["ctrl", "backspace"]}
+}
 ```
 
-## HUD
+Saved at `~/.airmouse/gestures.json` (override with the
+`AIRMOUSE_GESTURES` env var); loaded automatically at startup.
+Print the live registry with `airmouse gestures`.
 
-Badges: gesture, `FUSION:mode`, `GAZE:confidence%`, semantic `TARGET`, current `INTENT`, last `ACTION` outcome, `E-STOP`, plus the v5 set (`VOICE/KALMAN/ZOOM/REC/CAL`). Hotkeys: `[g]` gaze, `[f]` mode, `[x]` e-stop reset, `ESC` emergency stop, `[v/k/z/m]` v5 toggles.
+## Browser control
+
+Three layers, all local:
+
+1. **Transport** — pick one:
+   - **Simulated bridge** (default, deterministic): great for tests and offline demos.
+   - **CDP bridge**: Chrome/Edge via the DevTools Protocol (stdlib-only implementation; guarded — start Chrome with `--remote-debugging-port`, set `browser_cdp_port`).
+   - **Extension bridge**: run `airmouse --browser --browser-bridge` and load the shipped MV3 extension from `airmouse/browser_extension/` (see its README). It POSTs page metadata (roles, text, normalized bounding boxes, focus; password fields masked) to `http://127.0.0.1:17843/state` — **localhost-only**, data only, never executed.
+
+2. **Semantics** — the resolver matches a fixed template grammar against the element map:
+   > "click the login button" · "switch to the youtube tab" · "search for air mouse" · "type hello into the search box" · "go back" · "refresh" · "open github.com in a new tab"
+
+3. **Verification** — every browser action is checked with a before/after state diff (`passed` / `failed` / `unknown`), mirroring the v8 verification ladder.
+
+**Security stance:** page content is **untrusted data**. A page whose
+text says "shut down the computer" can only ever be *clicked as a
+button* if you say so — page text can never become a command, and the
+CDP adapter evaluates only fixed snippets built from our parameters.
+
+## Offline mode
+
+```bash
+airmouse --offline          # runtime gate: cloud ASR/TTS, CDP, updates, telemetry blocked
+airmouse offline-test       # end-to-end proof
+```
+
+`offline-test` runs the **entire stack** — voice grammar → intent,
+voice → context → intent, gesture registry with a custom sequence, RF
+bridge, simulated browser (bridge + semantic resolution + execution +
+verification), fusion → intent → action → verify pipeline, event bus,
+offline gate semantics — inside `network_isolation()`, which really
+monkeypatches `socket.connect`/`create_connection` to raise. A final
+check proves a real connection attempt is refused. **13/13 checks.**
+
+## Safety
+
+- **Emergency stop:** ESC key, long blink (v9), "stop everything" (voice) — latches until reset (`[x]`)
+- **Rate limiting:** sliding-window actions/sec cap + click cooldowns
+- **Sensitive actions** (close, paste, hotkey, **shutdown, restart, lock, sleep, close tab**, destructive file/system ops) require an explicit spoken/typed confirmation before execution — flagged at intent level *and* refined at param level (e.g. `delete file` is destructive, `create file` is not)
+- **Confidence gates:** low-confidence gaze/voice can move nothing but attention
+- **Sensor loss:** auto-downgrade to the largest alive sensor combo; SAFE_MODE after `stream_loss_grace`; automatic recovery
+- **File/system ops:** argv-only subprocess (no shell), allowlisted base roots, traversal refused, filename sanitizing, URL schemes restricted to http/https/file
 
 ## Configuration
 
-`~/.airmouse/config.toml` — sections: `[direct] [one_euro] [physics] [ironman] [jitter] [gestures] [camera] [audio] [ui] [voice] [kalman] [zoom] [calibration]` and the v9 set:
+`~/.airmouse/config.toml` — all previous sections (`[direct] [one_euro]
+[physics] [ironman] [jitter] [gestures] [camera] [audio] [ui] [voice]
+[kalman] [zoom] [calibration] [v9]`) plus the v10 set:
 
 ```toml
-[v9]
-fusion_mode = "hand"          # hand | gaze | voice | fusion | hands_free | assist
-gaze_enabled = false
-gaze_min_confidence = 0.55    # gaze never acts below this
-gaze_dwell_time = 1.0
-gaze_blink_click = false      # off: accident-prone
-gaze_long_blink_estop = true
-screen_refresh_interval = 0.5
-screen_ocr_enabled = false    # privacy: OCR is opt-in only
-intent_min_confidence = 0.35
-action_timeout = 2.0
-action_max_retries = 1
-safety_level = "normal"       # normal | careful | safe
-max_actions_per_sec = 8
-min_click_interval = 0.15
-confirmation_timeout = 5.0
-stream_loss_grace = 2.0
-macro_max_steps = 200
-telemetry_enabled = true      # perf report on shutdown
+[v10]
+offline = false                # TRUE OFFLINE: block network-dependent features
+voice_mode10 = "hybrid"        # command | dictation | hybrid
+voice_command_min_confidence = 0.62
+wake_word_required = false
+dictation_max_chars = 2000
+browser_enabled = true         # local browser bridge control
+browser_bridge_port = 17843    # localhost-only extension endpoint
+browser_cdp_port = 9222        # Chrome --remote-debugging-port
+gesture_registry_enabled = true
+rf_enabled = true              # RF modality (idles without hardware)
+rf_min_confidence = 0.5
+telemetry_enabled = true       # LOCAL perf report on shutdown
 ```
 
 ## Privacy
 
-- Camera frames, eye/face landmarks, screen captures and audio stay **on your machine** by default.
-- Screen OCR target detection is **disabled by default** and opt-in (`screen_ocr_enabled = true` or `pip install airmouse[ocr]`).
-- No telemetry leaves the process; the shutdown "performance report" is printed locally.
-- See the voice note above for the optional SpeechRecognition extra.
+- **Local-first:** no cloud AI anywhere in the control path. Camera
+  frames, eye/face landmarks, audio, screen captures, and page metadata
+  never leave your machine.
+- Voice text is processed by the deterministic local grammar; if you
+  install an offline ASR engine (PocketSphinx/Vosk/Whisper) transcription
+  runs on-device. The optional v5 `SpeechRecognition` extra can use a
+  cloud recognizer — it is bypassed when `offline = true`.
+- Screen OCR remains **opt-in** (`screen_ocr_enabled = true`).
+- The browser extension talks only to `127.0.0.1:17843` and masks
+  password fields.
+- No telemetry leaves the process; the shutdown report is printed locally.
 
-## Testing & verification
+## Hardware requirements
+
+| Modality | Hardware | Required? |
+|---|---|---|
+| Hand gestures | webcam (MediaPipe) | optional |
+| Gaze | webcam (MediaPipe FaceMesh) | optional |
+| Voice | microphone + (optional) an offline ASR engine | optional — transcript injection / simulation otherwise |
+| RF sensing | RF hardware implementing `RFProvider` | **never required** — idles without |
+| Browser | Chrome/Edge for CDP or the MV3 extension | optional — simulated bridge otherwise |
+| Screen | any display | for screen targets/geometry |
+
+## Limitations & honest verification status
+
+- **No physical hardware was available in the build environment.** All
+  v10 behavior is **simulation-verified** via deterministic simulators.
+  Camera/eye-tracking/mic/audio-device paths on real hardware are
+  **hardware-unverified**.
+- The CDP browser bridge is guarded and stdlib-only; against a real
+  Chrome instance it is **unverified** (tests cover graceful
+  unavailability only). The MV3 extension source ships and is
+  lint-reviewed, but **loading it in a real browser is unverified**.
+- PocketSphinx/Vosk/Whisper code is present with guarded imports and
+  runtime auto-detection; none are installed in the build sandbox, so
+  the **transcript-injection path is what is verified** (not live ASR).
+- Webcam gaze accuracy (~1–3°) is a targeting aid, not pixel-precise —
+  confirmation patterns make it safe (v9 behavior, unchanged).
+- `airmouse_simple.py` remains the v5 single-file experience.
+
+## Verification methodology
 
 ```bash
-python -m pytest tests/ -q          # 497 tests
+python -m pytest tests/ -q        # 630 tests
+airmouse offline-test             # 13/13 checks with networking truly blocked
 ```
 
-The suite covers unit tests for every new module, integration tests for `gaze→target→action`, `hand→target→action`, `voice→intent→action`, fusion combinations, failure tests (camera loss, face lost, low confidence, conflicting modalities, e-stop, stream-loss downgrade), v5 regression tests, performance benchmarks, and a deterministic end-to-end simulation (`simulated user → gaze target → pinch → click → screen state → verifier → success`).
-
-**Hardware verification status:** all tests are deterministic simulations. MediaPipe FaceMesh is smoke-verified to load and run in this environment (blank-frame processing), and the calibration workflow is verified end-to-end via `--gaze-calibrate --gaze-sim` (simulated eye, quality "good", ~4 px residual). **Physical webcam/eye-tracking behavior is hardware-unverified** in this build environment — run `--gaze-calibrate` on real hardware and expect to tune `gaze_min_confidence` per user.
-
-## Troubleshooting
-
-| Symptom | Fix |
-|---|---|
-| Gaze cursor jittery | Recalibrate (`--gaze-calibrate`); raise `gaze_min_confidence`; check lighting |
-| Gaze clicks feel random | That's why blink-click is off — use pinch/voice confirmation; raise confidence floor |
-| Camera lost mid-session | Safety auto-downgrades to SAFE_MODE after `stream_loss_grace`; actions resume when camera returns |
-| "needs_confirmation" blocks | Sensitive action (close/paste/hotkey…) — say "confirm" or re-issue |
-| E-stop latched | Press `[x]` or ESC again, or restart |
-| Voice silent | `pip install SpeechRecognition pyaudio`, run with `--voice`, check mic index |
-| Gaze calibration poor | Sit 50–80 cm, steady head, even lighting; 9-point works best |
-
-## Known limitations
-
-- Webcam gaze accuracy (~1–3°) is inherently coarser than a mouse — it's a **targeting** aid, not pixel-precise pointing; confirmation patterns make this safe.
-- Head pose must stay reasonably frontal; large head rotation lowers confidence (by design).
-- Accessibility/DOM providers are platform-dependent best-effort; the geometry fallback always works.
-- `airmouse_simple.py` remains the v5 single-file experience (v9 subsystems require the package).
-- Physical-hardware claims are explicitly **unverified** in this build environment (see Testing above).
+630 passed, 0 failed, 0 skipped (Python 3.12.14, Linux sandbox):
+**497** pre-existing v9 tests (all preserved) + **19** browser tests +
+**114** v10 tests. New suites cover grammar/intents, voice modes/VAD/
+wake-word/dictation, event bus, context engine, gesture registry +
+sequences, RF degradation, system/file executors (allowlists, traversal,
+URL validation, dry-run), safety confirmations, hands-free combos,
+offline isolation, browser bridge/semantics/verification, full fusion
+pipelines, and performance budgets (grammar 50 utterances < 0.5 s,
+1000 bus events < 0.5 s, 1000 context resolves < 0.2 s — all far under
+budget in measurement). Full details: `VERIFICATION_REPORT.md`;
+architecture deep-dive: `docs/V10_ARCHITECTURE.md`.
 
 ## License
 

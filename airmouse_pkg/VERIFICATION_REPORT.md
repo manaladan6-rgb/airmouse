@@ -1,118 +1,220 @@
-# AirMouse v9.0.0 — Final Verification Report
+# AirMouse v10.0.0 — Final Verification Report
 
 Date: 2025-09-04 (build environment: Linux sandbox, Python 3.12.14)
-Scope: v5.0.0 → v9.0.0 evolution per mission spec §0–§33.
+Scope: v9.0.0 → v10.0.0 "Universal Offline Interaction Engine" per
+mission spec. Companion documents: `README.md` (user guide),
+`docs/V10_ARCHITECTURE.md` (deep dive), `CHANGELOG.md` (history).
 
-## 1. Implementation (what was added)
+---
 
-| Layer | Modules | Lines |
-|---|---|---|
-| Contracts | `interfaces.py` (enums, dataclasses, protocols) | ~600 |
-| v6 Gaze | `gaze.py`, `gaze_filter.py`, `gaze_calibration.py` | 1,586 |
-| v7 Fusion + Screen | `fusion.py`, `screen_perception.py` | ~1,560 |
-| v8 Intent/Action | `intent.py`, `actions.py`, `verification.py`, `safety.py`, `context.py` | 2,416 |
-| v8 Macro v2 | `macros.py` (appended, v1 preserved) | +350 |
-| v9 Agent | `nl_control.py`, `hands_free.py`, `agent.py` | 1,818 |
-| Wiring | `__main__.py` (v9 CLI/loop/HUD/keys), `config.py` (`[v9]`) | +300 |
+## 1. Implementation summary
 
-All 33 checklist areas addressed; see README for feature map.
+v10 adds 9 new modules and extends 8 existing ones. Line counts are
+real `wc -l` values on the final tree (docstrings included).
+
+| Module | LOC | Status | Contents |
+|---|---:|---|---|
+| `eventbus.py` | 323 | NEW | EventBus/Subscriber/MultiSubscriber, bounded queues (drop-oldest), history ring, stats |
+| `voice_commands.py` | 540 | NEW | 75-command deterministic grammar, 10 namespaces, `<slot>` entities, ambiguity flags |
+| `offline_voice.py` | 905 | NEW | OfflineSpeechProvider protocol + 4 providers, EnergyVAD hysteresis, wake-word gate, dictation buffer, COMMAND/DICTATION/HYBRID |
+| `gesture_registry.py` | 424 | NEW | Full gesture vocabulary (v5 superset + v10 set), user-defined JSON sequence mappings, sequence matcher, double-pinch synthesis |
+| `rf.py` | 228 | NEW | RFProvider protocol, Simulated/Dummy providers, RFBridge → bus; optional hardware, idles without |
+| `system_actions.py` | 643 | NEW | 16 SYSTEM_OPS + 8 FILE_OPS, argv-only subprocess, allowlisted roots, sanitize_file_name, validate_url |
+| `browser.py` | 1,948 | NEW | Bridge protocol + Simulated/CDP transports, target mapper, semantic resolver, action verifier, controller |
+| `browser_bridge.py` | 331 | NEW | Localhost-only bridge server (127.0.0.1:17843) + MV3 extension round-trip helper |
+| `offline.py` | 367 | NEW | OfflineGate, network_isolation (real socket blocking), run_offline_selftest (13 checks) |
+| `browser_extension/` | 308 | NEW | MV3 extension source: manifest.json (14), background.js (101), content.js (120), README.md (73) |
+| `interfaces.py` | 890 | EXTENDED | Event/EventKind(14)/VoiceMode/CommandNamespace(10)/ContextState; Modality +RF+BROWSER; IntentType 52, ActionType 32 |
+| `actions.py` | 1,063 | EXTENDED | Canonical §10 vocabulary, v10 param normalization, destructive-op flags, executor injection |
+| `context.py` | 364 | EXTENDED | v10 ContextEngine (browser state, gaze TTL 2 s, selection, recent action, deictic resolution) |
+| `safety.py` | 487 | EXTENDED | SENSITIVE_TYPES + SHUTDOWN/RESTART/LOCK/SLEEP/CLOSE_TAB; param-level FILE_OP/SYSTEM_OP refinement |
+| `hands_free.py` | 585 | EXTENDED | 8 named combos, SensorHealth, largest-alive-subset downgrade ladder |
+| `agent.py` | 986 | EXTENDED | inject_intent, poll_events, context integration, v10 executor overrides |
+| `__main__.py` | 1,981 | EXTENDED | v10 flags/subcommands, full wiring, HUD badges V10/CMD/RF/BROWSER/VER |
+| `config.py` | 502 | EXTENDED | `[v10]` TOML section (13 keys) |
+
+Package total: **22,781 lines** across 41 modules under `airmouse/`
+(v9 report: 15,881 lines) — net v10 growth ≈ 6,900 lines.
+All v10 core modules are stdlib-only and import with networking
+disabled.
 
 ## 2. Tests — exact numbers
 
 ```
-497 passed, 0 failed, 0 skipped   (pytest tests/ -q)
+630 passed, 0 failed, 0 skipped, 0 xfailed   (pytest tests/ -q, 10.3 s)
 ```
 
-Breakdown by suite:
-- gaze stack (unit + FaceMesh smoke): 55
-- fusion + screen: 67
-- intent / actions / verification / safety / context / macros-v2: 236
-- v9 NL / hands-free / agent E2E: 109
-- v5 regression: 10
-- CLI wiring + failure modes: 12
-- performance benchmarks: 8
+Breakdown: **497 pre-existing v9 tests (all preserved, unchanged) +
+133 new = 19 browser tests (`tests/test_browser.py`) + 114 v10 tests
+(`tests/test_v10.py`)**.
 
-Integration pipelines exercised end-to-end (deterministic):
-- gaze → target → pinch → CLICK → screen state → verifier → SUCCESS
-- gaze → voice "click that" → CLICK
-- gaze → "close this window" → sensitive intent → BLOCKED → confirm() → executed
-- voice "emergency stop" → e-stop latch → all actions blocked → reset
-- failure recovery: failing executor → retry → adjusted retry → success (recoveries counted)
-- camera loss (frame=None ticks), face lost/found cycle, mic loss → SAFE_MODE auto-downgrade + restore
-- modality conflict arbitration (deterministic winner)
-- macro v2 semantic run + legacy v1 replay
+New suite coverage:
+- `tests/test_browser.py` (19): simulated bridge state/click/verify
+  cycle, ScreenTarget mapping, target-map finders, deterministic
+  semantic resolver for the §12 utterance set, action verifier,
+  controller execute+verify pipeline incl. bus/context/offline-gate
+  wiring, CDP never-raise/unavailable behaviour, localhost bridge
+  server POST→GET round-trip
+- `tests/test_v10.py` (114, 14 sections): command grammar + §7 intent
+  mapping; OfflineVoiceEngine modes/VAD/wake-word/dedup/dictation/
+  hybrid/provider detection; EventBus publish/poll/history/stats;
+  ContextEngine incl. deictic resolution + snapshot isolation;
+  GestureRegistry incl. sequences/wildcard/save-load/override; RF
+  degradation; system+file executors incl. sanitize/validate_url/
+  root-refusal/traversal/dry-run; SafetySystem §18 confirmations;
+  hands-free combos; offline §17 incl. the real `run_offline_selftest`
+  + `network_isolation`; browser verifier/resolver extras; fusion
+  pipeline via InteractionAgent injection/voice/RF-confirm-retry;
+  performance budgets §20/§21
 
-## 3. Performance (this environment; generous CI bounds enforced in tests)
+All new tests are deterministic (explicit `now=` timestamps), headless
+(no cv2/mediapipe/pynput), and network-free except the §17 isolation
+tests, which *block* networking as the behavior under test.
+
+## 3. Offline verification (§17)
+
+**Methodology.** `offline.network_isolation()` monkeypatches
+`socket.socket.connect`, `socket.socket.connect_ex` and
+`socket.create_connection` to raise `_NetworkBlockedError` for the
+duration of its body (originals restored on exit). Loopback stays
+available by default (the 127.0.0.1-only browser bridge must keep
+working offline); `block_localhost=True` gives the strictest mode.
+Every selftest check therefore runs with network syscalls **really
+refused** — any hidden network call fails loudly. A final check
+attempts a real outbound connection and asserts it is refused.
+
+`run_offline_selftest()` — **13/13 passed** (re-run for this report):
+
+| # | Check | What it proves |
+|---|---|---|
+| 1 | `voice_grammar` | "open firefox" → deterministic OPEN intent, no network |
+| 2 | `voice_command_mode` | engine COMMAND mode: "volume up" → VOLUME intent |
+| 3 | `voice_dictation` | DICTATION mode commits buffered text ("hello there") |
+| 4 | `voice_context` | "click that" resolves against the context engine's gaze target |
+| 5 | `gesture_custom` | user-defined 3-step sequence fires a HOTKEY intent |
+| 6 | `rf_bridge` | simulated RF provider → bus events (rf_gesture) |
+| 7 | `browser_bridge` | simulated bridge produces element state offline |
+| 8 | `browser_semantic` | "click the login button" resolves to click + element |
+| 9 | `browser_execute_verify` | execute + before/after verification = passed |
+| 10 | `fusion_pipeline` | full InteractionAgent frame: fusion → intent → action executed |
+| 11 | `event_bus` | publish/poll stats flow correctly |
+| 12 | `offline_gate` | engaged gate blocks `cloud_asr`, passes `local_grammar` |
+| 13 | `network_actually_blocked` | a real `socket.create_connection(("example.com", 80))` is refused |
+
+`airmouse offline-test` runs the same selftest from the CLI.
+
+## 4. Performance (this environment; budgets enforced by tests)
 
 | Metric | Measured | Budget |
 |---|---|---|
-| Hand filter (hybrid OneEuro+Kalman) | 0.040 ms/call | < 1 ms |
-| Hand filter moving lag (max err) | 0.0056 norm | < 0.06 |
-| Still-hand jitter (0.02 noise in) | 0.0074 out (2.7×) | < input |
-| Gaze filter + calibration map | 0.011 ms/frame | < 2 ms |
-| Gaze jitter reduction (fixation) | 2.5× | > 1× |
-| Full agent tick (fusion+intent+safety+action) | 0.032 ms | < 15 ms |
-| IntentEngine.process | 0.004 ms | < 0.5 ms |
-| NL parse | 0.0055 ms | < 0.2 ms |
+| Command grammar, 50 utterances | ~5 ms | < 0.5 s |
+| OfflineVoiceEngine, 30 transcripts | ~3 ms | < 0.5 s |
+| EventBus, 1000 publishes | ~2 ms | < 0.5 s |
+| ContextEngine, 1000 resolves | ~4 ms | < 0.2 s |
 
-Camera/FaceMesh inference FPS and eye-tracking FPS on real hardware are
-**hardware-unverified** (see §5).
+Measured with wall-clock timing around the exact test-suite workloads
+(single run, this sandbox; budgets are asserted in
+`tests/test_v10.py` — all pass with ≥ 50× headroom).
 
-## 4. Packaging
+v9 performance numbers remain valid and unchanged (hand filter
+0.040 ms/call, gaze filter+map 0.011 ms, full agent tick 0.032 ms,
+NL parse 0.0055 ms — see the v9 report sections preserved in git).
 
-- Wheel: `airmouse-9.0.0-py3-none-any.whl` (183 KB, 32 modules; all
-  required files verified present, nothing omitted).
-- Clean-environment test: fresh venv → installed ONLY the wheel →
-  `airmouse --version` → `9.0.0`; `airmouse --help` OK (all v9 flags
-  listed); all core modules import; non-hardware pipeline smoke OK
-  (NL parse + InteractionAgent + emergency-stop path).
-- Standalone: `airmouse_simple.py` boots with `--help`, compiles clean
-  (v5-compatible single-file experience).
+## 5. Security / privacy audit summary
 
-## 5. Hardware verification status — EXPLICIT
+- **No `shell=True` anywhere** (re-scanned for v10): all subprocess
+  calls are fixed-argv lists with timeouts; user-derived strings are
+  passed as arguments, never interpolated into a shell line.
+- **Allowlists enforced:** 16 SYSTEM_OPS + 8 FILE_OPS are the only
+  system/file operations that execute; file paths must resolve inside
+  allowlisted base roots (traversal and outside-root paths refused);
+  `sanitize_file_name` strips hostile components; `validate_url`
+  accepts http/https/file schemes only.
+- **Browser untrusted-content policy:** page-derived text is DATA used
+  only for matching against our fixed template grammar — it can never
+  become a command; the CDP adapter evaluates only fixed JavaScript
+  snippets built from our own parameters (JSON-encoded); the bridge
+  server parses payloads with `json.loads` and stores them as plain
+  dicts; oversized (> 256 KB) or invalid payloads rejected (413/400);
+  the server is hard-bound to 127.0.0.1 (never 0.0.0.0).
+- **Offline gate** can hard-block cloud ASR/TTS/CDP/update/telemetry
+  paths; §3 proves the stack runs with sockets actually refused.
+- **Safety intact:** e-stop latch, sliding-window rate limiter, click
+  cooldowns, confidence gates, one-shot confirmation flow, and the
+  no-auto-retry rule for sensitive/blocked actions are all covered by
+  both the preserved v8/v9 suites and the new §18 tests; destructive
+  ops (shutdown/restart/lock/sleep/close_tab/destructive
+  FILE_OP/SYSTEM_OP params) require explicit confirmation.
+- No `eval`/`exec`; no secrets/tokens in tracked files (scanned);
+  OCR remains opt-in; no outbound telemetry. The extension masks
+  password fields and only talks to 127.0.0.1:17843.
 
-- **Physical webcam / eye-tracking hardware: NOT VERIFIED.** No camera
-  exists in this build environment. No physical hardware claim is made.
-- Software verified: all logic deterministic-simulated (above).
-- FaceMesh smoke verified in-sandbox: model constructs and processes a
-  blank frame (face absent → None) without error on mediapipe 0.10.21.
-- Gaze calibration pipeline verified end-to-end via the real CLI with a
-  simulated eye: `--gaze-calibrate --gaze-sim` → quality "good",
-  mean residual ≈ 4.2 px, saved atomically.
-- Recommended on first real-machine run: `airmouse --gaze-calibrate`,
-  then tune `gaze_min_confidence` per user.
+## 6. Hardware verification status — EXPLICIT
 
-## 6. Security / privacy audit
+**No physical webcam, microphone, or RF hardware exists in the build
+environment. Nothing below claims physical verification.**
 
-- No `shell=True` anywhere; all subprocess calls are fixed-argument
-  arrays with timeouts (xdotool/system_profiler probes, guarded).
-- No `eval`/`exec`. No secrets/tokens in any tracked file (scanned).
-- All executor coordinates clamped to screen bounds; action preconditions
-  validate scroll/type/hotkey/zoom params; macro steps bounded
-  (`max_steps=200`); sensitive actions never auto-retry.
-- Privacy: camera frames/eye images/audio/screenshots stay local by
-  default; OCR screen-understanding opt-in; no outbound telemetry. The
-  only network access is the documented one-time MediaPipe model
-  download in `tracker.py` (pre-existing v4/v5 behavior) and the
-  optional SpeechRecognition Google backend when the user installs
-  voice extras (documented in README).
+| Area | Status | What is verified |
+|---|---|---|
+| All v10 logic | **SIMULATION-VERIFIED** | deterministic simulators: scripted transcripts, scripted RF events, simulated browser bridge with per-tab history, simulated providers — 630 tests |
+| Camera / eye-tracking paths on real hardware | **HARDWARE-UNVERIFIED** | MediaPipe FaceMesh smoke (blank frame) from v9 remains true; no camera in sandbox |
+| Microphone / audio-device paths on real hardware | **HARDWARE-UNVERIFIED** | VAD/wake-word/dictation logic verified with synthetic buffers; no mic in sandbox |
+| PocketSphinx / Vosk / Whisper offline ASR | **CODE PRESENT, UNVERIFIED LIVE** | guarded imports + `detect_providers()` auto-detection; in the sandbox none are installed (`pocketsphinx/vosk/whisper: False`), so the **transcript-injection path is what is verified** |
+| CDP bridge against a real Chrome/Edge | **UNVERIFIED** | guarded, stdlib-only implementation; tests cover graceful unavailability only |
+| MV3 extension loaded in a real browser | **UNVERIFIED** | source ships and is lint-reviewed; bridge-server round-trip verified with a plain HTTP client |
+| RF hardware | **UNVERIFIED** | provider protocol + simulated/dummy providers verified; hardware idles cleanly by design |
 
-## 7. Git
+Recommended first real-machine checks: `airmouse voice-status`
+(which ASR engines are detected), `airmouse --gaze-calibrate`,
+`airmouse --browser` with a CDP-enabled Chrome, and
+`airmouse offline-test`.
 
-- Branch `main`, final commit: see `git log -1` (post-report commit).
-- Annotated tag: `v9.0.0` pushed to origin.
-- Release: GitHub Release v9.0.0 with wheel + `airmouse_simple.py`
-  assets.
-- Working tree clean at release; every feature landed as its own commit:
-  interfaces → gaze/fusion/screen → intent/action/safety/context/macro →
-  agent layer → wiring → docs/packaging → fixes.
+## 7. Packaging
 
-## 8. Known limitations
+- `pyproject.toml` at version **10.0.0**; package metadata, entry
+  point (`airmouse …`) and long-description unchanged in shape; the
+  wheel now additionally ships the 9 new v10 modules and the
+  `browser_extension/` source.
+- Module inventory verified: 41 modules under `airmouse/`, all
+  importable headless with networking disabled (stdlib-only core).
+- `airmouse --version` → `10.0.0 — Universal Offline Interaction
+  Edition`; all v10 flags and subcommands registered
+  (`--help` inspection).
+- `browser_extension/` ships with its own README (unpacked-load
+  instructions for chrome://extensions).
+- Wheel build/release (tag, GitHub Release) remains a release step,
+  to be performed from a tree with this report.
 
-- Webcam gaze accuracy (~1–3°) is a targeting aid, not pixel-precise;
-  confirmation patterns + confidence floors compensate (by design).
-- Head pose must stay reasonably frontal (confidence degrades otherwise).
-- Accessibility/DOM providers are platform-dependent best-effort;
-  geometry fallback always active.
+## 8. Regression gate
+
+- All **497** pre-existing v9 tests pass **unchanged** — zero
+  modifications to existing test files; v10 additions are confined to
+  two new files (`tests/test_browser.py`, `tests/test_v10.py`).
+- v5 behaviors preserved and re-proven by the regression suite: 14
+  gestures + swipes, hybrid One Euro + Kalman, 30 voice commands +
+  turbo, pinch-zoom, adaptive calibration, v1 macros, HUD.
+- v9 behaviors preserved: fusion modes, gaze stack, screen
+  perception, intent/action/verification/safety, macros v2, NL
+  control, hands-free, agent E2E, failure modes (camera loss, face
+  lost, mic loss → SAFE_MODE), performance benchmarks.
+- Product-bug fixes (see CHANGELOG "Fixed") were made *after* the new
+  suite exposed them; their tests moved from xfail to passing, giving
+  the final 630/0/0/0.
+
+## 9. Known limitations (honest)
+
+- **Simulation-first:** every claim above is simulation-verified;
+  physical webcam/mic/RF behavior, live offline-ASR engines, real-Chrome
+  CDP, and the MV3 extension in a real browser are **unverified**
+  (§6). The code is guarded and degrades gracefully, but real-hardware
+  tuning (e.g. `gaze_min_confidence`, VAD thresholds) is expected.
+- Webcam gaze accuracy (~1–3°) remains a targeting aid (v9 design,
+  unchanged); confirmation patterns compensate.
+- Accessibility/DOM providers remain platform-dependent best-effort;
+  the geometry fallback always works.
+- The command grammar is intentionally a fixed template grammar (75
+  commands) — not free-form NLU; the v9 NL pattern table remains the
+  second local layer. No LLM, by design.
+- RF sensing requires third-party hardware implementing the provider
+  protocol; without it the modality simply does not exist.
 - `airmouse_simple.py` intentionally remains the v5 single-file mode.
-- Physical-hardware behavior hardware-unverified (see §5).

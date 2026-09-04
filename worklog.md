@@ -111,3 +111,30 @@ Stage Summary:
 - tests/test_v10.py: 114 tests added (112 passed + 2 xfail-documented product bugs), runtime 1.8s
 - Full suite: 628 passed, 2 xfailed, 0 failed (baseline 516 + 112 new passing)
 - pyflakes clean; no product code modified; nothing committed
+
+---
+Task ID: 25-docs
+Agent: docs subagent
+Task: v10 documentation (README/CHANGELOG/VERIFICATION_REPORT/ARCHITECTURE)
+
+Work Log:
+- Read existing docs (README v9, CHANGELOG, VERIFICATION_REPORT v9) + both worklogs to match tone/format
+- Re-verified every key fact against the actual code before writing: pytest tests/ -q → 630 passed, 0 failed, 0 skipped, 0 xfailed (10.3s); test_browser.py 19 + test_v10.py 114 = 133 new (497 old preserved); wc -l on all 17 v10-touched modules (9 NEW: eventbus 323, voice_commands 540, offline_voice 905, gesture_registry 424, rf 228, system_actions 643, browser 1948, browser_bridge 331, offline 367; + browser_extension/ 308 lines; 8 EXTENDED: interfaces 890, actions 1063, context 364, safety 487, hands_free 585, agent 986, __main__ 1981, config 502); package total 22,781 LOC across 41 modules
+- Enum counts verified live: IntentType 52, ActionType 32, EventKind 14, Modality 8 (hand/gaze/voice/mouse/keyboard/screen/rf/browser), CommandNamespace 10; voice REGISTRY = 75 commands (engine 10, mouse 7, system 11, window 9, application 4, files 8, text 8, navigation 6, media 4, browser 8); BROWSER_ACTIONS 12; HANDS_FREE_COMBOS 8; SYSTEM_OPS 16 + FILE_OPS 8; config [v10] = 13 keys
+- Measured perf in-sandbox (budgets asserted in tests): grammar 50 utts 5.3ms (<500ms), voice 30 transcripts 3.0ms (<500ms), bus 1000 events 2.3ms (<500ms), context 1000 resolves 3.9ms (<200ms); v9 numbers cited as still valid
+- Re-ran run_offline_selftest(): 13/13 checks PASS (voice_grammar, voice_command_mode, voice_dictation, voice_context, gesture_custom, rf_bridge, browser_bridge, browser_semantic, browser_execute_verify, fusion_pipeline, event_bus, offline_gate, network_actually_blocked); confirmed both bug fixes present in code (offline.py _refuse sock/addr unpack with fix note; context.py snapshot returns _dc_replace copy)
+- Verified CLI: --version → "AirMouse v10.0.0 — Universal Offline Interaction Edition"; --help shows --offline/--browser/--browser-bridge/--gesture/--rf, --voice-mode {…,command,dictation,hybrid}, 6 subcommands; providers detect_providers() = simulated only (pocketsphinx/vosk/whisper False) — docs state transcript-injection path is what's verified
+- WROTE airmouse_pkg/docs/V10_ARCHITECTURE.md (NEW, 283 lines): full text data-flow diagram, 14-kind event table, module responsibility table (real LOC), intent→action mapping table, combo degradation ladder worked example, threading model (deterministic main loop vs 3-4 daemon producer threads + inject_intent/poll_events hand-off), 3 extension points (ASR provider, RF hardware, browser capability)
+- OVERWROTE airmouse_pkg/README.md (291 lines): v10 hero + architecture ASCII (8 modalities → EVENT BUS → FUSION/CONTEXT → INTENT with SAFETY + OFFLINE GATE wrap), What's New table per subsystem, v5–v9 preserved section, install + extras, quick start incl --offline/--voice-mode hybrid/--browser/subcommands, voice command namespaces table, gestures + custom JSON example, browser 3-layer section, offline mode, safety, [v10] config, privacy, hardware requirements table, Limitations + honest verification status, methodology, license
+- OVERWROTE airmouse_pkg/VERIFICATION_REPORT.md (219 lines): 9 sections — implementation summary w/ real LOC table, exact test numbers (630/0/0/0 = 497+19+114 with suite descriptions), offline methodology + 13 checks listed, perf measured vs budgets, security audit, EXPLICIT simulation-vs-hardware status table, packaging, regression gate, honest limitations
+- UPDATED airmouse_pkg/CHANGELOG.md (244 lines): v10.0.0 entry added on top (Added per area / Changed / Security / Fixed — both bugs detailed — / Verification with honest hardware status); v9, v5, v4, v3 entries preserved intact
+- Accuracy fixes during self-review: 42→41 module count (verified via ls), v9 module count not asserted (audit discrepancy), dictation commit markers corrected to actual WAKE_MARKERS ("commit", "new paragraph", "submit text", "end dictation") + terminal punctuation
+- No code or test files modified; nothing committed; working tree untouched except the 4 doc files
+
+Stage Summary:
+- airmouse_pkg/README.md (291 lines, v10, v5–v9 condensed preserved)
+- airmouse_pkg/CHANGELOG.md (244 lines, v10 entry on top, history intact)
+- airmouse_pkg/VERIFICATION_REPORT.md (219 lines, 9 sections, measured numbers only)
+- airmouse_pkg/docs/V10_ARCHITECTURE.md (283 lines, NEW)
+- All doc limits respected: README < 500, REPORT < 400, ARCHITECTURE < 400
+---
