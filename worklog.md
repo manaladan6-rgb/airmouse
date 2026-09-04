@@ -344,3 +344,17 @@ Stage Summary:
 - FULL SUITE: 1056 passed / 0 failed / 0 skipped / 11.70s
 - Defects found: stale pyproject description (v10 text), stale --help banner (v5 text), missing doctor/setup/test/verify/privacy commands, no release artifacts
 - Decision: hardened release = v15.1.0 (v15.0.0 tag preserved, never retagged)
+
+# ENDGAME_START — v15.1.0 → Gesture-First Endgame (2026-09-04)
+
+## BASELINE (trust nothing; all numbers measured this session)
+- Git: HEAD 85f5ff9 (audit report) on main; tag v15.1.0 @ ed29326 intact; tree clean after fresh clone (sandbox reset between sessions — GitHub is source of truth)
+- Environment restored: mediapipe 0.10.35 (pip had pulled 1.0.1, violating pyproject `<1.0` — doctor WARNING flipped overall verdict, test_doctor contract test failed; pinned back per pyproject), hand_landmarker.task re-downloaded (sandbox wiped ~/.airmouse)
+- pytest: **1312 passed / 0 failed / 19.85s**
+- compileall: exit 0
+- pyflakes: 77 findings — **3 undefined names (latent crashes)**: __main__.py:1214 voice_engine10 (P0-1), modes.py:589 Sequence, target_resolver.py:146 Sequence; ~45 unused imports (cosmetic); rest cosmetic
+- airmouse --version: "AirMouse v15.1.0 — Adaptive Human-Computer Intelligence Edition"
+- doctor: [READY FOR TESTING]; self-test: PASS (13 pass, 1 optional, 1 hardware, 0 fail); offline-test: 18/18 OK
+- Known P0s from committed audit (AUDIT_REPORT_v15.1.0.md): voice startup crash; gesture-ownership gate inert + read-before-assign; privacy lifecycle clears wrong stores; legacy gesture path bypasses safety; confidence not gating; AIRMOUSE_HOME split-brain; personalization unfed; fusion2 decorative; no AIP transport; agent execute simulated; resolver unwired; browser launcher missing; Windows volume broken; stale docs; repo strays
+
+## P0_REPAIR (v15.1.1) — in progress
