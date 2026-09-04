@@ -358,3 +358,30 @@ Stage Summary:
 - Known P0s from committed audit (AUDIT_REPORT_v15.1.0.md): voice startup crash; gesture-ownership gate inert + read-before-assign; privacy lifecycle clears wrong stores; legacy gesture path bypasses safety; confidence not gating; AIRMOUSE_HOME split-brain; personalization unfed; fusion2 decorative; no AIP transport; agent execute simulated; resolver unwired; browser launcher missing; Windows volume broken; stale docs; repo strays
 
 ## P0_REPAIR (v15.1.1) — in progress
+
+## P0_REPAIR — DONE (v15.1.1 @ 1083cf2, tag pushed)
+- voice_engine10 hoisted (voice path live; v10-owns-speech handoff wired); ownership gate applied AFTER state machine (no crash under --fusion --gaze, no double-control); memory reset/delete honor store failures; 2 Sequence NameErrors fixed
+- NEW tests/test_startup.py: real main() across 8 flag combos; suite 1312→1323 green
+
+## EXECUTION_SPINE — DONE (v15.2.0 @ 6f57a66)
+- gesture_spine.py GestureActionRouter: estop > confidence > risk (SAFE/CAUTION/DESTRUCTIVE) > policy (close_window+macro_play REFUSED by default) > rate-limit > dispatch; 1.7µs/action measured
+- ALL legacy dispatch migrated (trackpad/classic/volume/brightness/swipes); cursor/scroll/zoom = estop-gated continuous axes; ESC/[x] wired
+- confidence gates actions (config floors); fusion2 removed from wiring (Option B); registry fed by hands; personalization observe_gesture live; two-hand live behind config.two_hand; agent stdio + real mode; browser launcher + ws pin; Windows volume + app_launch fixed; paths.py + real privacy lifecycle; academy/gesture-lab/profiles
+- suite 1556/2 honest skips/0
+
+## PRIVACY / PERSONALIZATION / GESTURE_ENGINE / GESTURE_ACADEMY / MULTIMODAL / AGENT_LAST_MILE — DONE (see 9898c4a + 6f57a66)
+
+## SECURITY — DONE
+- static scan clean on all new code (no shell/eval/exec/pickle/deser); subprocess argv+shell=False everywhere; redteam+hardening+v14.5 = 140 green; launcher loopback-pinned
+
+## PACKAGING — DONE (v16.0.0 @ 9d0b8bb, tag + GitHub release 383046810)
+- PyPA build (repo root to dodge build.py shadowing): wheel 538,617B + sdist 505,027B; SHA256SUMS + RELEASE_MANIFEST
+- §38 clean-venv battery PASS: version/doctor READY/self-test 13/offline 18/18/setup 11 honest steps/profiles/academy/lab/memory + aip-stdio DISCOVER→capabilities round-trip from the wheel
+- docs reset: CLI_REFERENCE regenerated, 70-row capability matrix (47 REAL/4 SIM/3 OPT/10 PHYSICAL/6 N/A), README fixed, +5 Windows drills
+
+## REAL_WORLD_HARNESS — DONE (software side)
+- academy/gesture-lab/guided-test/verify/WINDOWS_REAL_WORLD_TEST.md all honest; physical validation remains NOT TESTED (truthful)
+
+## FINAL_RELEASE — SHIPPED
+- https://github.com/manaladan6-rgb/airmouse/releases/tag/v16.0.0 (5 assets)
+- Tags: v3.1.0…v15.2.0 + v16.0.0 all intact; no force-push; history preserved
