@@ -709,8 +709,11 @@ class ModeController:
         self.definition = MODE_REGISTRY.get(mode_id)
         self.teacher = TeacherMode(dispatcher)
         self.student = StudentMode()
-        self.office = OfficeMode()
         self.meeting = MeetingMode()
+        self.office = OfficeMode()
+        # office and meeting SHARE one meeting session: "start meeting"
+        # in office mode controls the same transcript as meeting mode
+        self.office.meeting = self.meeting
         self.research = ResearchMode()
         self.developer = DeveloperMode(dispatcher)
         self._last_note = ""

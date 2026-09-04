@@ -111,16 +111,22 @@ def insert_discourse_commas(text: str) -> str:
 
 
 def apply_spoken_punctuation(text: str) -> str:
-    """Deterministic spoken-punctuation → symbol conversion."""
+    """Deterministic spoken-punctuation → symbol conversion.
+
+    A synthetic leading space lets utterance-initial spoken punctuation
+    ("open paren ...") match the same phrase table."""
     if not isinstance(text, str) or not text:
         return ""
-    out = text
+    out = " " + text
     for spoken, sym in SPOKEN_PUNCTUATION:
         out = out.replace(spoken, sym)
     for spoken, sym in SPOKEN_QUOTES:
         out = out.replace(spoken, sym)
     # tidy spaces before punctuation
     out = re.sub(r" +([.,!?;:])", r"\1", out)
+    # no space after opening brackets / before closing brackets
+    out = re.sub(r"([([{]) +", r"\1", out)
+    out = re.sub(r" +([)\]}])", r"\1", out)
     out = re.sub(r"\n +", "\n", out)
     out = re.sub(r" +\n", "\n", out)
     out = re.sub(r"\n{3,}", "\n\n", out)

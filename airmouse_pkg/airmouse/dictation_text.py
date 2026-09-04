@@ -321,7 +321,7 @@ class EmojiSuggester:
         if self.plugin is not None:
             preds = self.plugin.suggest_emoji(text, k=k)
         if not preds:
-            from .prediction import Predictor, EMOJI_KEYWORDS
+            from .intelligence.prediction import EMOJI_KEYWORDS
             low = " " + " ".join(str(text or "").lower().split()) + " "
             seen: List[str] = []
             for kw, emojis in sorted(EMOJI_KEYWORDS.items()):

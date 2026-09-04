@@ -130,7 +130,12 @@ class PatternRecord:
     def from_dict(cls, d: Dict[str, Any]) -> "PatternRecord":
         if not isinstance(d, dict):
             raise ValueError("not a dict")
-        p = scrub_pattern(str(d.get("pattern", "")))
+        raw = d.get("pattern")
+        if not isinstance(raw, str):
+            raise ValueError("pattern must be a string")
+        if len(raw) > MAX_PATTERN_LEN:
+            raise ValueError("pattern exceeds maximum length")
+        p = scrub_pattern(raw)
         if p is None:
             raise ValueError("pattern rejected by privacy scrubber")
         ctx_in = d.get("context") or {}

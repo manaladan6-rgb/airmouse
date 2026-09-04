@@ -19,10 +19,13 @@ Copyright (c) AirMouse.  MIT License.
 
 from __future__ import annotations
 
+import re as _re
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+_STEP_NAME = _re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 MAX_WORKFLOWS = 200                  # §44 hard limit
 MAX_STEPS_PER_WORKFLOW = 24
@@ -267,8 +270,13 @@ class WorkflowStore:
     def create_manual(self, name: str, actions: Sequence[str]) -> Optional[Workflow]:
         if len(self._workflows) >= MAX_WORKFLOWS:
             return None
-        actions = [str(a)[:64] for a in actions if str(a)[:64]][
-            :MAX_STEPS_PER_WORKFLOW]
+        # step names are validated symbols — never shell fragments or code
+        clean: List[str] = []
+        for a in actions:
+            a = str(a).strip().lower()[:64]
+            if a and _STEP_NAME.match(a):
+                clean.append(a)
+        actions = clean[:MAX_STEPS_PER_WORKFLOW]
         if not actions:
             return None
         wf = Workflow(
