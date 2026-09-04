@@ -155,3 +155,36 @@ Work Log:
 
 Stage Summary:
 - v10.0.0 COMPLETE: all 30 acceptance criteria met; simulation-verified only — physical camera/mic/RF, real-Chrome CDP, extension loading, and live third-party ASR are honestly reported as HARDWARE-UNVERIFIED
+
+---
+Task ID: 1 (v11.5)
+Agent: main coordinator
+Task: AirMouse v11.5 AUDIT BEFORE CODING — establish true v10 baseline + written implementation plan
+
+Work Log:
+- Cloned github.com/manaladan6-rgb/airmouse (branch main, clean tree, HEAD 0a6a7b3)
+- Tags on remote: v3.1.0, v3.2.0, v4.0.0, v4.1.0, v4.2.0, v5.0.0, v9.0.0, v10.0.0 — full history verified
+- Sandbox env: installed mediapipe 1.0.1 + opencv + pynput into the venv so the full suite can run here
+- BASELINE TEST COUNT (measured): pytest tests/ -q → 630 passed, 0 failed, 0 skipped (10.4s) — matches v10 release claim exactly
+- v10 architecture verified real (41 modules, ~22.8k LOC): EventBus(14 EventKind), OfflineVoiceEngine(4 providers/VAD/wake/dictation), 75-command grammar, ContextEngine(deictic resolution), GestureRegistry(custom sequences), RF abstraction, system/file executors, browser bridge+semantic resolver+verifier, OfflineGate+network_isolation+13-check selftest, SafetySystem(confirmations/e-stop/rate limit), HandsFreeController(8 combos+SensorHealth), agent(InteractionAgent+Telemetry), CLI(33 flags+6 subcommands), Config(TOML sections)
+- Key contracts read in full: interfaces.py (Event/Intent/ActionPlan/FusionDecision/ContextState), actions.py (execute/plan/preconditions), intent.py (IntentEngine.process), config.py (flat attrs + per-section load), __main__.py (argparse structure)
+
+IMPLEMENTATION PLAN (v10.0.0 → v11.5.0, additive, no rewrites):
+1. feat: airmouse/intelligence/ subpackage — PersonalInteractionModel (~30MB capacity budget, quantized packed store, versioned), InteractionMemory (patterns not private content, sensitive-data scrubbing, bounded), PersonalVocabulary (terms+corrections, import/export)
+2. feat: prediction + selftune + personalization (Predictor: next-action/command/text/emoji/target with explainability; SelfTuner: bounded threshold adaptation; Gesture/Gaze/Voice profiles)
+3. feat: workflow discovery + personal automation + proactive assistance (approval-gated, destructive guards, PREDICTION≠EXECUTION)
+4. feat: live transcription engine (streaming partials/finals, punctuation/capitalization, vocab apply, buffer/export/search/history, metrics incl WER hook) + voice typing (spoken punctuation/formatting/edit commands) + TextPredictor + EmojiSuggester
+5. feat: universal text control (16 ops, keyboard fallback, semantic-first) + world model (bounded snapshot + likely intent) + contextual command expansion
+6. feat: interaction modes — teacher/student/office/meeting/research/developer/accessibility (profiles, fallback chains, timeline/notes/action-items, study timer, presentation control via generic hotkeys)
+7. feat: Fusion 2.0 (voice+gesture+gaze+keyboard+browser+app context+recent action+personal history+prediction, weighted consensus, conflict resolver) + RF interface prep (presence/motion/direction/range/velocity)
+8. feat: integration — config sections ([intelligence][learning][memory][transcription][dictation][prediction][emoji][teacher][student][office][meeting][accessibility][workflow][privacy]), CLI flags (--intelligence/--no-intelligence/--dictation/--transcribe/--teacher/--student/--office/--meeting/--research + subcommands intelligence/memory/vocabulary/workflows/self-test), HUD extensions, agent learning-event wiring (guarded, plugin failure never breaks core)
+9. feat: privacy architecture (dashboard flags, delete/reset/export/import learned data, telemetry/cloud OFF by default) + resource limits + airmouse --self-test
+10. test: tests/test_v115.py — intelligence/voice/typing/context/fusion2/safety(malicious input)/modes/offline/performance/final-integration-sim; regression gate 630 old tests MUST stay green
+11. security: audit (shell=True/eval/exec/os.system/SSRF/token leakage/plugin loading/path traversal/import profile attacks) + perf benchmarks
+12. docs: README/CHANGELOG/VERIFICATION_REPORT/ARCHITECTURE/SECURITY/PRIVACY/CLI_REFERENCE/PLUGIN_GUIDE/INTELLIGENCE_GUIDE/TRANSCRIPTION_GUIDE/TEACHER_GUIDE/STUDENT_GUIDE/OFFICE_GUIDE/ACCESSIBILITY_GUIDE — every claim honest (SIMULATION vs PHYSICAL)
+13. release: version 11.5.0, wheel, clean-venv install test, commits pushed, annotated tag v11.5.0, remote verification, GitHub release with wheel asset
+
+Stage Summary:
+- Baseline = v10.0.0 tag (0a6a7b3), 630 green tests measured in this sandbox
+- v11.5 is ADDITIVE: new airmouse/intelligence/ subpackage + transcription/dictation/text-control/world-model/modes modules; existing v10 modules get guarded integration points only
+- Plugin-optional contract: IntelligencePlugin facade NEVER raises; states AVAILABLE/DISABLED/UNAVAILABLE/CORRUPTED/INCOMPATIBLE/OUT_OF_MEMORY/PRIVACY_PAUSED
