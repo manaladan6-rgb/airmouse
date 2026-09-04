@@ -125,9 +125,14 @@ class VoiceTypingEngine:
                                     insert_discourse_commas, capitalize_text)
         out = apply_spoken_punctuation(utterance)
         out = insert_discourse_commas(out)
-        # sentence-case relative to what's already committed
-        fresh = capitalize_text(out)
-        if self._committed and not self._committed.endswith(("\n", " ")):
+        # sentence-case only at true sentence starts (start of dictation or
+        # right after a terminator/newline); mid-sentence continuation keeps
+        # its natural case
+        committed = self._committed
+        fresh_start = (not committed
+                       or committed.rstrip().endswith((".", "!", "?", "\n")))
+        fresh = capitalize_text(out) if fresh_start else out
+        if committed and not committed.endswith(("\n", " ")):
             fresh = " " + fresh
         self._push_undo()
         self._committed = (self._committed + fresh)[-MAX_DICTATION_CHARS:]
@@ -213,6 +218,11 @@ class VoiceTypingEngine:
             start = self._committed.lower().index(old.lower())
             self._committed = (self._committed[:start] + new
                                + self._committed[start + len(old):])
+            # keep segment bookkeeping consistent with the edit
+            if self._segments and old in self._segments[0]:
+                self._segments[0] = self._segments[0].replace(old, new, 1)
+            else:
+                self._segments.insert(0, new)
             return [DictationOp(op="replace", text=new, target=old,
                                 replacement=new)]
         return []
