@@ -604,15 +604,18 @@ def main():
                 engine = ActionEngine(executor=PynputExecutor())
                 label = "real"
                 print("  >> AIP REAL MODE — agent EXECUTE reaches the OS "
-                      "(permission-gated, fail-closed)", flush=True)
+                      "(permission-gated, fail-closed)", file=sys.stderr,
+                      flush=True)
             except Exception as _re:
                 print(f"  !! real executor unavailable ({_re}) — "
-                      "falling back to simulated", flush=True)
+                      "falling back to simulated", file=sys.stderr,
+                      flush=True)
                 engine, label = None, "simulated"
         endpoint = aip_stdio.default_endpoint(action_engine=engine,
                                               label=label)
         print(f"  >> AIP WIRE SERVER on stdin/stdout ({label} mode; "
-              "EXECUTE fail-closed until permissions granted)", flush=True)
+              "EXECUTE fail-closed until permissions granted)",
+              file=sys.stderr, flush=True)
         return int(aip_stdio.serve(endpoint=endpoint))
 
     # ═══ v15.1 release commands (setup / doctor / test / verify / privacy) ═══

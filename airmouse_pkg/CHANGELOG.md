@@ -1,5 +1,134 @@
 # Changelog
 
+## v16.0.0 — GESTURE-FIRST RELEASE (release candidate)
+
+The gesture-first release. Where v15.2.0 built the one execution
+spine and the new gesture surface, v16.0.0 ships the documentation and
+release hygiene that make that surface trustworthy: every claim in the
+docs is re-verified against the running code, every capability carries
+exactly one status (REAL / SIMULATED / OPTIONAL / PHYSICAL TEST
+REQUIRED / NOT AVAILABLE), and every stale or unwired claim found by
+the audit (AUDIT_REPORT_v15.1.0.md §23) is removed. **No behaviour
+change vs v15.2.0** — this release is docs + hygiene + packaging.
+
+### Documentation reset (audit §23 findings closed)
+
+- `docs/CLI_REFERENCE.md`: **regenerated completely from the live
+  parser** (was stale at v11.5 AND corrupted — broken table fragments
+  like "`[learning] emory]`"). Now documents all **30 subcommand
+  choices**, all **56 visible flags + 1 hidden CI flag**, the
+  `command_arg` semantics per command (`memory: status|export|reset|
+  delete`; `academy: lesson id|all`; `gesture-lab: [seconds]`;
+  `profile: <name>|list`; `doctor`/`test` arg aliases), measured exit
+  codes, the v16 config keys, environment variables, and the strict-
+  client note for `--aip-stdio`.
+- `docs/CAPABILITY_MATRIX.md`: rebuilt as a **70-row capability table
+  with exactly one status tag per capability** — measured tally:
+  **47 REAL / 4 SIMULATED / 3 OPTIONAL / 10 PHYSICAL TEST REQUIRED /
+  6 NOT AVAILABLE** — with live measured outputs (doctor 41
+  components, verify 10/10, academy/lab/profile/aip-stdio runs) and
+  the reproduce-with commands.
+- `README.md`: first-run-menu description corrected to the real
+  10-item menu (`cli_menu.py:41-52`: Setup, Doctor, Guided Test,
+  Start AirMouse, Voice, Intelligence, Agent, Offline Test, Safety,
+  Help — the old text wrongly listed verify/privacy/memory/exit);
+  the "onboarding asks for one choice at startup" claim **removed**
+  (`onboarding.py` has zero runtime imports and is documented as NOT
+  AVAILABLE); gesture counts corrected from "14 gestures" to the real
+  code-counted vocabulary (17 poses + 10 motion + 3 pinch events + 4
+  two-hand classes); "fist = right-click" corrected to fist = freeze
+  (peace = right-click); two-hand rotate/drag honestly labelled
+  detected-but-not-wired; `selftune_apply` documented as a reserved
+  opt-in flag with no shipped auto-apply path; new sections cover the
+  execution spine, Academy/Lab/profiles, the AIP stdio wire server
+  and the browser launcher.
+- `WINDOWS_REAL_WORLD_TEST.md`: five new six-field steps (10a–10e):
+  gesture profiles, Gesture Academy, Gesture Lab, two-hand check, and
+  the agent E-stop drill over `airmouse --aip-stdio`; header/footer
+  refreshed to the v16 numbers.
+- `VERIFICATION_REPORT.md`: v16.0.0 five-part section prepended
+  (AUTOMATED / SIMULATION / REAL WINDOWS / PHYSICAL HARDWARE / NOT
+  TESTED); REAL WINDOWS and PHYSICAL HARDWARE remain NOT PERFORMED /
+  NOT TESTED — unchanged truth.
+
+### Hygiene
+
+- Capability status vocabulary adopted project-wide: nothing is
+  described as available unless it is wired; simulated things say
+  SIMULATED; hardware things say PHYSICAL TEST REQUIRED; unwired
+  things say NOT AVAILABLE.
+- Stale-claim sweep verified: no doc claims fusion2 is wired (it was
+  removed from shipped wiring in v15.2.0 and stays an optional,
+  unadvertised library), no doc claims the onboarding interview runs,
+  and the memory lifecycle now documents its REAL artifact coverage
+  (intelligence/*, calibration, custom gestures, macros, lecture
+  notes) + `deletion_verifies()`.
+
+### Packaging
+
+- Version strings: `__init__.py` / `pyproject.toml` are bumped by the
+  standard release process (step 1 of README §Release process); at
+  documentation time the tree still prints 15.1.1 — all v16 findings
+  are independent of that string, and `airmouse verify` checks the
+  match at build time.
+- Known integration note documented for agent clients: the
+  `airmouse --aip-stdio` CLI wrapper prints one banner line before
+  the JSON-lines loop; strict first-line-JSON clients (agent-core
+  `stdio://`, agent-sdk-js `StdioTransport`) should target
+  `python -m airmouse.aip_stdio`, which emits nothing but reply
+  lines. Both entries speak the identical AIP envelope.
+
+### Verification (measured on the release-candidate tree)
+
+- Full suite: **1556 passed / 2 skipped / 0 failed** (re-measured;
+  the 2 skips are honest headless skips: no Chrome binary and no
+  tesseract stack in the sandbox).
+- `airmouse verify`: 10/10 automated PASS + 5 physical
+  ACTION_REQUIRED (unchanged truth).
+- `airmouse doctor`: READY 32 / OPTIONAL 7 / HARDWARE 2 / WARNING 0 /
+  FAILED 0 → `[READY FOR TESTING]`.
+
+---
+
+## v15.2.0 — ONE EXECUTION SPINE + GESTURE-FIRST SURFACE + AGENT/BROWSER LAST MILE + ACADEMY
+
+- gesture_spine.py GestureActionRouter: every gesture action now
+  passes estop > confidence gate > risk class (SAFE/CAUTION/DESTRUCTIVE)
+  > policy > rate-limit > dispatch; OK->Alt+F4 and macro replay
+  REFUSED by default (audit #4/#20); cursor/scroll/zoom are
+  estop-gated continuous axes
+- all legacy dispatch (trackpad + classic + volume/brightness + swipes)
+  migrated; [ESC] trips spine estop, [x] resets
+- confidence now gates actions (config gesture_min_confidence_safe/
+  caution; audit #8)
+- new gestures live: thumbs_down/four/five poses, swipe up/down,
+  circle cw/ccw, push/pull zoom, shake=cancel, wave=attention
+  (audit #9); pinch_hold/pinch_release/double_pinch emitted by the
+  state machine
+- two-hand foundation live behind config.two_hand: max_hands=2 +
+  handedness + TwoHandGestureRecognizer; zoom=ctrl+wheel; single-hand
+  actions freeze while engaged (one owner)
+- gesture registry finally fed by hands (sequence matcher live, SAFE
+  intents through spine); personalization loop closed: observe_gesture
+  on every confirmed gesture (audit #7)
+- fusion2 removed from shipped wiring (Option B, audit #10)
+- agent last mile: airmouse --aip-stdio wire server (simulated|real
+  via --aip-real through permission-gated ActionEngine); ALLOW_ONCE
+  single-use; agent budgets enforced (audit #11/#12)
+- browser last mile: --launch-browser/--browser-port launch+connect;
+  ws host pinned to loopback (audit #16); target resolver providers
+  out of the box; Windows volume fixed; app_launch op
+- unified home paths.py; privacy manifest + real reset/delete/export +
+  deletion_verifies (audit #3/#6)
+- Gesture Academy (airmouse academy, 11 lessons), gesture-lab
+  observatory, 8 interaction profiles
+- memory/privacy CLI surfaces artifacts + verification
+- tests: +43 (startup commands incl --aip-stdio roundtrip,
+  academy/lab/profiles); suite 1556 passed / 2 skipped (honest
+  headless skips)
+
+---
+
 ## v15.1.1 — P0 STARTUP REPAIR
 
 Foundation repair release: fixes the three P0 defects found by the

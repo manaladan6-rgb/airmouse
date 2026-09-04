@@ -188,7 +188,7 @@ airmouse intelligence        # plugin status: state, model size vs budget,
 airmouse memory              # top learned patterns (frequency/success/corrections)
 airmouse vocabulary          # learned terms + corrections
 airmouse workflows           # approved workflows (+ destructive flags)
-airmouse --self-test         # includes Intelligence/Memory/Prediction checks
+airmouse self-test         # includes Intelligence/Memory/Prediction checks
 
 airmouse --no-intelligence   # run a session with the plugin fully off
 ```

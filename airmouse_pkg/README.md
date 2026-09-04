@@ -1,19 +1,22 @@
-# AirMouse v15.1.0 — UNIVERSAL HUMAN + AI INTERACTION PLATFORM
+# AirMouse v16.0.0 — UNIVERSAL HUMAN + AI INTERACTION PLATFORM
 
 Voice + hand + gaze + RF + keyboard/mouse + screen + browser → one
-**event bus** → fusion 2.0 → world model → intent → action →
+**event bus** → fusion → world model → intent → **one execution spine**
+(estop → confidence → risk class → policy → rate limit) → action →
 verification → **learning**. Fully offline-capable: no LLM, no cloud
 AI, no network required for any control path — a **personal model**
 that learns your patterns locally, with prediction that can advise but
-never execute — plus (v12→v15) a **temporal world model, goals,
-tasks, skills, self-healing recovery, universal target resolution, the
-AIP 1.0 agent protocol, SDKs for Python and JavaScript, multi-agent
-infrastructure, a global permission hierarchy, DO IT WITH ME,
-one-choice onboarding, transparent licensing, a marketplace
-foundation, a deterministic simulator and failure injection** — and
-(v15.1.0) a **hardened release surface**: `airmouse setup`,
-`airmouse doctor`, `airmouse test --guided`, `airmouse verify`,
-`airmouse privacy` and the `airmouse memory` lifecycle.
+never execute — plus a **temporal world model, goals, tasks, skills,
+self-healing recovery, universal target resolution, the AIP 1.0 agent
+protocol with a real stdio wire server, SDKs for Python and JavaScript,
+multi-agent infrastructure, a global permission hierarchy, transparent
+licensing, a deterministic simulator and failure injection** — and a
+**gesture-first release surface**: 17 hand poses + 10 motion gestures +
+3 pinch events + 4 two-hand classes behind a single safety spine, the
+11-lesson Gesture Academy, the Gesture Lab observatory, 8 interaction
+profiles, a browser launcher, and a hard privacy lifecycle over a
+**single unified home**.
+
 Humans and AI agents go through the SAME pipeline — agents get no
 bypass pathway.
 
@@ -32,8 +35,9 @@ browser** — and that lets AI agents do the same through the same
 deterministic, permission-gated pipeline. Everything runs **locally**:
 there is no cloud AI code path, no account, no telemetry by default.
 It ships with a guided setup wizard, an honest health doctor, a
-12-test guided laboratory for validating hardware on YOUR machine, and
-a local memory lifecycle (export / reset / delete) that you control.
+12-test guided laboratory for validating hardware on YOUR machine, a
+Gesture Academy that teaches every gesture, and a local memory
+lifecycle (export / reset / delete) that you control.
 
 ## Why it exists
 
@@ -42,22 +46,34 @@ a local memory lifecycle (export / reset / delete) that you control.
   RSI sufferers.
 - **Privacy** — control paths that work with the network cable pulled
   out. Learning stores *patterns, not content*, on your disk, and you
-  can export or delete it.
+  can export or delete every one of the 20 declared artifacts.
 - **One honest pipeline for humans AND agents** — an AI agent that
   wants to click a button goes through the same world model, safety
   gates, permission engine and verification as you do. There is no
   agent bypass pathway, and E-STOP always wins.
-- **Honesty over marketing** — every subsystem is labelled
-  AUTOMATED-VERIFIED / SIMULATION-VERIFIED / PHYSICAL-NOT-TESTED, and
+- **Honesty over marketing** — every capability in
+  `docs/CAPABILITY_MATRIX.md` carries exactly one status: REAL /
+  SIMULATED / OPTIONAL / PHYSICAL TEST REQUIRED / NOT AVAILABLE, and
   hardware checks can never auto-pass.
 
 ## Features
 
-- **Multimodal input:** voice commands + dictation, 14 webcam hand
-  gestures, webcam gaze with calibration, screen perception, browser
-  bridge, RF abstraction (no hardware required), keyboard/mouse.
+- **Multimodal input:** voice commands + dictation, webcam hand
+  tracking (**17 static poses + 10 motion gestures + 3 pinch events**,
+  plus **4 two-hand classes** — HOLD / ZOOM / ROTATE / DRAG), webcam
+  gaze with calibration, screen perception, browser bridge, RF
+  abstraction (no hardware required), keyboard/mouse.
+- **One execution spine** (`gesture_spine.py`): every gesture action
+  passes **estop > confidence gate > risk class (SAFE / CAUTION /
+  DESTRUCTIVE) > destructive policy > rate limit > dispatch**.
+  OK-gesture Alt+F4 and macro replay are REFUSED by default;
+  `[ESC]` trips the spine e-stop, `[x]` resets it.
 - **Deterministic offline grammar:** 75 commands across 10 namespaces;
   no cloud, no LLM on the control path.
+- **Gesture-first learning tools:** `airmouse academy` (11 lessons,
+  never auto-passes a physical skill), `airmouse gesture-lab`
+  (dry-run observatory that shows the safety gates refusing actions
+  live), `airmouse profile` (8 curated presets, whitelist-locked).
 - **Intelligence (optional, local):** Personal Interaction Twin (14
   fact categories), temporal world model, explainable prediction
   (PREDICTION ≠ EXECUTION), personal vocabulary, workflow discovery,
@@ -69,24 +85,29 @@ a local memory lifecycle (export / reset / delete) that you control.
 - **Self-healing:** recovery engine (7 strategies, 14 failure
   diagnoses, bounded rounds), universal target resolution
   (accessibility→DOM→semantic-API→OCR→vision→geometry→coordinate).
-- **Agent platform:** AIP 1.0 protocol, Python SDK, stdlib-only
+- **Agent platform:** AIP 1.0 protocol, **real stdio wire server**
+  (`airmouse --aip-stdio`, simulated by default, `--aip-real` routes
+  through the permission-gated ActionEngine), Python SDK, stdlib-only
   standalone agent-core, dependency-free JS/TS SDK, multi-agent
   registry with exclusive resource leases, permission engine with the
   hierarchy E-STOP > HUMAN OVERRIDE > SAFETY POLICY > PERMISSION >
-  AGENT > PREDICTION.
-- **DO IT WITH ME:** you state a goal, AirMouse proposes a plan, you
-  approve / edit / pause / stop / change direction.
-- **v15.1.0 release surface:** `airmouse setup` (consent-gated
-  wizard), `airmouse doctor [--verbose|--json]` (exit codes 0 READY /
-  1 PARTIAL / 2 BLOCKED), `airmouse test` + `airmouse test --guided`
-  (12-test laboratory), `airmouse verify` (automated checks + a
-  physical ACTION_REQUIRED list), `airmouse privacy`, `airmouse memory
-  status|export|reset|delete`, and a first-run menu (plain `airmouse`
-  on a fresh machine, TTY only).
-- **Interaction modes:** teacher / student / office / meeting /
-  research + 8 accessibility profiles with modality fallback.
+  AGENT > PREDICTION, agent budgets enforced.
+- **Browser last mile:** `airmouse --launch-browser` discovers
+  Chrome/Chromium/Edge, launches with CDP on an isolated throwaway
+  profile, and pins every websocket to loopback.
+- **Privacy lifecycle:** `airmouse privacy` prints the full storage
+  manifest (20 artifacts); `airmouse memory reset|delete` clear real
+  learning artifacts (intelligence stores, calibration, custom
+  gestures, macros, lecture notes) and verify the deletion.
+- **v15.1 release surface (preserved):** `airmouse setup` (consent-
+  gated wizard), `airmouse doctor [--verbose|--json]` (exit codes 0
+  READY / 1 PARTIAL / 2 BLOCKED), `airmouse test` + `airmouse test
+  --guided` (12-test laboratory), `airmouse verify`, `airmouse
+  privacy`, `airmouse memory status|export|reset|delete`, and a
+  first-run menu (plain `airmouse` on a fresh machine, TTY only).
 - **Crash-safe local persistence:** atomic writes, schema versioning,
-  checksum with corruption quarantine and recovery.
+  checksum with corruption quarantine and recovery; ONE home resolved
+  by `paths.py` (`$AIRMOUSE_HOME` or `~/.airmouse`).
 
 ## Architecture
 
@@ -98,22 +119,22 @@ a local memory lifecycle (export / reset / delete) that you control.
               ╔══════════ EVENT BUS (local, bounded) ══════════╗
               ╚═════════════════════╦══════════════════════════╝
                         ▼                        ▼
-              FUSION 2.0 (9 signals,      WORLD MODEL (temporal:
-              conflict resolver, ask      app/window/targets/gaze/
-              don't guess)                recent action + intent)
+              FUSION (authoritative      WORLD MODEL (temporal:
+              engine; conflict resolver, app/window/targets/gaze/
+              ask don't guess)           recent action + intent)
                         └───────────┬───────────┘
                                     ▼
           CONTEXTUAL RESOLVER · GRAMMAR · PERSONAL PREDICTION (data only)
                                     ▼
-        ┌────────────── SAFETY (e-stop · rate limits · gates · ──────────────┐
-        │                 destructive confirmations)                         │
-        │  ▼                                                                 │
-        │  OFFLINE GATE ──► ACTION ENGINE ──► VERIFICATION ──► LEARNING      │
-        │                 (32 action types,   expected vs     verified       │
-        │                  allowlisted        observed        events →        │
-        │                  executors) +                       personal model │
-        │                  RECOVERY                           (bounded)      │
-        └────────────────────────────────────────────────────────────────────┘
+        ┌────── EXECUTION SPINE (estop · confidence · risk class · ─────┐
+        │              destructive policy · rate limit)                 │
+        │  ▼                                                            │
+        │  OFFLINE GATE ──► ACTION ENGINE ──► VERIFICATION ──► LEARNING │
+        │                 (32 action types,   expected vs     verified  │
+        │                  allowlisted        observed        events →  │
+        │                  executors) +                       personal  │
+        │                  RECOVERY                           model     │
+        └───────────────────────────────────────────────────────────────┘
 ```
 
 The intelligence is **MODEL + MEMORY + CONTEXT + RULES + FUSION +
@@ -123,7 +144,7 @@ KB on a fresh install and grows with your usage. **It is not a neural
 LLM**, and predictions are data for you and the intent layer — never
 executions.
 
-### Version-by-version (v12 → v15), all preserved in v15.1.0
+### Version-by-version (v12 → v16), all preserved in v16.0.0
 
 | Version | Adds | Core modules / artifacts |
 |---|---|---|
@@ -133,12 +154,15 @@ executions.
 | **v13.5.0** | **Skills**: InteractionCompression (≥3 repetitions + confidence + notification + preview + approval, NEVER silent) + PersonalSkillLibrary (versioned/editable/revocable/exportable) | `skills.py` |
 | **v14.0.0** | **Recovery 2** (PRECONDITION→EXECUTE→OBSERVE→VERIFY→RECOVER; 7 strategies; 14 failure diagnoses; bounded rounds) + **Universal target resolution** (7-provider chain) | `recovery2.py`, `target_resolver.py` |
 | **v14.5.0** | **AIP 1.0 protocol** (18 conversation message types + STATUS; 12 strict fail-closed JSON schemas; same-major negotiation; 256 KB caps) + **Agent SDKs** + **standalone agent-core** (stdlib-only) + **JS/TS SDK** | `aip.py`, `agent_sdk.py`, `agent-core/`, `agent-sdk-js/` |
-| **v15.0.0** | **Multi-agent registry** (identity/priority/capabilities/budgets/audit; exclusive resource leases; deterministic conflict resolution) · **Permission engine** (granular keys; ALLOW/DENY/ASK/ALLOW_ONCE/ALLOW_SESSION/ALLOW_PATTERN; ASK without human == NO) · **DO IT WITH ME** · one-choice onboarding + 8 accessibility modes · transparent local licensing (FREE = complete core) · marketplace foundation (fail-closed manifests, NO code-execution path) · deterministic simulator · 12-class failure injection · six-question explainability · v15 CLI subcommands · v15 HUD badges | `agents.py`, `permissions.py`, `ditm.py`, `onboarding.py`, `licensing.py`, `marketplace.py`, `simulator.py`, `failure_injection.py`, `explain.py`, `__main__.py` |
-| **v15.1.0** | **Hardening release of v15.0.0** — no architecture changes; adds the release surface: `setup` (consent-gated wizard), `doctor` (--verbose/--json, exit 0/1/2), `test` + `test --guided` (12-test laboratory), `verify`, `privacy`, `memory status|export|reset|delete`, first-run menu, crash-safe `persistence.py`, user-grade error messages with token redaction, CLI performance budgets, red-team test suite. Tests 1056 → **1236** | `persistence.py`, `setup_wizard.py`, `capabilities.py`, `doctor.py`, `verify.py`, `guided_test.py`, `user_errors.py`, `cli_menu.py` |
+| **v15.0.0** | **Multi-agent registry** (identity/priority/capabilities/budgets/audit; exclusive resource leases; deterministic conflict resolution) · **Permission engine** (granular keys; ALLOW/DENY/ASK/ALLOW_ONCE/ALLOW_SESSION/ALLOW_PATTERN; ASK without human == NO) · **DO IT WITH ME** · one-choice onboarding module + 8 accessibility modes · transparent local licensing (FREE = complete core) · marketplace foundation (fail-closed manifests, NO code-execution path) · deterministic simulator · 12-class failure injection · six-question explainability · v15 CLI subcommands · v15 HUD badges | `agents.py`, `permissions.py`, `ditm.py`, `onboarding.py`, `licensing.py`, `marketplace.py`, `simulator.py`, `failure_injection.py`, `explain.py`, `__main__.py` |
+| **v15.1.0** | **Hardening release of v15.0.0** — no architecture changes; adds the release surface: `setup` (consent-gated wizard), `doctor` (--verbose/--json, exit 0/1/2), `test` + `test --guided` (12-test laboratory), `verify`, `privacy`, `memory status\|export\|reset\|delete`, first-run menu, crash-safe `persistence.py`, user-grade error messages with token redaction, CLI performance budgets, red-team test suite. Tests 1056 → **1236** | `persistence.py`, `setup_wizard.py`, `capabilities.py`, `doctor.py`, `verify.py`, `guided_test.py`, `user_errors.py`, `cli_menu.py` |
+| **v15.2.0** | **One execution spine + gesture evolution + agent/browser last mile**: `gesture_spine.py` gates EVERY gesture action (estop > confidence > SAFE/CAUTION/DESTRUCTIVE > policy > rate limit; Alt+F4 + macro replay refused by default); new gestures (thumbs_down, four, five, swipe up/down, circle cw/ccw, push/pull, shake, wave) + pinch_hold/pinch_release/double_pinch events; two-hand foundation (`two_hand.py`, tracker `max_hands=2`, zoom = real ctrl+wheel); gesture registry fed by hands; personalization loop closed (`observe_gesture`); fusion2 removed from shipped wiring; `--aip-stdio` wire server + ALLOW_ONCE + budget fixes; browser launcher + loopback ws pinning; unified home `paths.py`; privacy manifest + real reset/delete/export + `deletion_verifies()`; Academy + Lab + 8 profiles; suite 1236 → **1556** | `gesture_spine.py`, `gestures.py`, `two_hand.py`, `tracker.py`, `aip_stdio.py`, `agent_sdk.py`, `permissions.py`, `agents.py`, `browser.py`, `paths.py`, `privacy.py`, `persistence.py`, `academy.py`, `gesture_lab.py`, `gesture_profiles.py` |
+| **v16.0.0** | **Documentation reset + release hygiene** (this release): `docs/CLI_REFERENCE.md` regenerated from the live parser (was stale v11.5 and corrupted), `docs/CAPABILITY_MATRIX.md` rebuilt with one status per capability (REAL / SIMULATED / OPTIONAL / PHYSICAL TEST REQUIRED / NOT AVAILABLE), README first-run-menu description corrected to the real 10-item menu, unwired-feature claims removed, `WINDOWS_REAL_WORLD_TEST.md` extended with Academy / Lab / agent E-stop drill / profile / two-hand steps, CHANGELOG + VERIFICATION_REPORT refreshed (suite **1556 passed / 2 skipped / 0 failed**). No behaviour change vs v15.2.0. | `README.md`, `docs/CLI_REFERENCE.md`, `docs/CAPABILITY_MATRIX.md`, `CHANGELOG.md`, `VERIFICATION_REPORT.md`, `WINDOWS_REAL_WORLD_TEST.md` |
 
 Full map with chapter references: `docs/V15_ARCHITECTURE.md`. Protocol:
 `docs/AIP_SPEC.md`. SDKs: `docs/AGENT_SDK.md`. Multi-agent:
 `docs/MULTI_AGENT.md`. Skills + marketplace: `docs/SKILLS.md`.
+CLI surface: `docs/CLI_REFERENCE.md`.
 Quickstart: `docs/DEVELOPER_GUIDE.md`. User guide: `docs/USER_GUIDE.md`.
 
 ## Installation
@@ -230,8 +254,11 @@ root. Short version:
 5. Allow **Camera** and **Microphone** access for desktop apps:
    Windows Settings → Privacy & security → Camera / Microphone.
 6. `airmouse test --guided` — the 12-test laboratory.
-7. For browser control, start Chrome or Edge with
-   `--remote-debugging-port=9222`.
+7. `airmouse academy` — learn the gestures; `airmouse gesture-lab` —
+   watch the safety gates work before you trust them.
+8. For browser control, either start Chrome or Edge with
+   `--remote-debugging-port=9222` yourself, or let AirMouse do it:
+   `airmouse --launch-browser`.
 
 ## Hardware requirements
 
@@ -239,9 +266,9 @@ root. Short version:
 |---|---|---|
 | Python 3.9+ | required | everything |
 | Display + keyboard/mouse | required to *control* the machine | pynput input automation (works out of the box on Windows; Linux needs a display server; macOS needs Accessibility permission) |
-| Webcam | optional | hand tracking (14 gestures), gaze |
+| Webcam | optional | hand tracking (17 poses + motion + pinch events), two-hand geometry (2 hands), gaze |
 | Microphone | optional | voice commands, dictation, transcription (needs the `airmouse[voice]` extra + optionally a local ASR engine) |
-| Chrome or Edge | optional | real browser control via CDP on port 9222 (a simulated browser bridge always works offline) |
+| Chrome or Edge | optional | real browser control via CDP on port 9222 (auto-launched by `--launch-browser`, or start it yourself with the debug flag; a simulated browser bridge always works offline) |
 | RF hardware | optional | RF modality is abstracted; there is no required hardware and none is claimed |
 
 Everything else is stdlib. All processing is local; the intelligence
@@ -250,14 +277,18 @@ plugin is stdlib-only too.
 ## First-run guide
 
 - On a **fresh machine**, running plain `airmouse` (in a terminal)
-  shows a 10-option menu (setup, doctor, guided test, verify,
-  privacy, memory, info commands, start AirMouse, exit). The menu
-  appears only when stdout is a TTY and setup was not completed
-  before; after `airmouse setup` finishes it will not nag you again.
-- When AirMouse itself starts, onboarding asks for **one choice** —
-  voice / hands / eyes / keyboard / automatic / all — and you are
-  usable immediately; everything else is learned progressively and
-  stays changeable.
+  shows the first-run menu — exactly these 10 items, in this order
+  (`cli_menu.py`): `[1] Setup`, `[2] Doctor`, `[3] Guided Test`,
+  `[4] Start AirMouse`, `[5] Voice`, `[6] Intelligence`, `[7] Agent`,
+  `[8] Offline Test`, `[9] Safety`, `[0] Help`. There are no verify,
+  privacy, memory or exit entries. The menu appears only when stdout
+  is a TTY and setup was not completed before; after `airmouse setup`
+  finishes it will not nag you again.
+- There is **no onboarding interview at startup**: the one-choice
+  onboarding module (v15.0.0) exists in the codebase but is NOT wired
+  into the v16 startup path — plain `airmouse` starts the hand
+  experience, and the guided path (`setup` → `doctor` → `test
+  --guided` → `academy`) is how you get oriented.
 - Useful first-week commands:
 
 ```
@@ -265,7 +296,9 @@ airmouse doctor            # health + plain fixes (exit code 0/1/2)
 airmouse self-test         # 15-component honest report (PASS/OPTIONAL/HARDWARE)
 airmouse verify            # automated checks + physical ACTION_REQUIRED list
 airmouse test --guided     # 12-test laboratory (interactive)
-airmouse privacy           # telemetry/network/storage/controls report
+airmouse academy           # learn every gesture (headless = full plan)
+airmouse gesture-lab 20    # watch the safety gates work (dry-run, 20 s)
+airmouse privacy           # telemetry/network/storage report + 20-artifact manifest
 airmouse memory status     # local store inventory
 ```
 
@@ -309,43 +342,57 @@ OVERALL:             PARTIALLY VERIFIED
 `airmouse test --guided` on your machine — the step-by-step Windows
 procedure is `WINDOWS_REAL_WORLD_TEST.md` in the repository root.
 
-## Voice usage
-
-```
-python -m pip install "airmouse[voice]"    # once: SpeechRecognition + pyaudio
-airmouse --voice                           # mic voice control (30+ phrase grammar)
-airmouse --voice-mode command              # commands only
-airmouse --dictation                       # voice typing: spoken punctuation + edit commands
-airmouse --voice-mode hybrid               # commands + dictation together
-airmouse --transcribe                      # live transcription session (partials/finals)
-airmouse voice-status                      # which providers/engines are actually available
-```
-
-- Dictation understands spoken punctuation and edit commands such as
-  "delete last word", "replace X with Y", "capitalize that",
-  undo/redo; personal vocabulary corrections are applied.
-- **Offline ASR engines** (pocketsphinx / vosk / whisper) are optional
-  and are NOT bundled — without one, mic transcription needs the
-  simulated provider used in tests, and availability is always
-  reported honestly by `airmouse voice-status` and `airmouse doctor`.
-- If Windows blocks the microphone: Settings → Privacy & security →
-  Microphone → allow desktop apps.
-
 ## Gesture usage
 
 ```
-airmouse                # v5 hand+gesture experience: webcam hand tracking → cursor
-airmouse gestures       # list the 14 built-in gestures + any custom sequences
-airmouse --trackpad     # trackpad mode: tap=click, hold=drag, 2-finger=scroll
-airmouse --calibrate    # guided 8s calibration sweep on startup
-airmouse --precision    # precision mode
+airmouse                     # hand+gesture experience: webcam hand tracking → cursor
+airmouse gestures            # built-in gesture mappings + any custom sequences
+airmouse --trackpad          # trackpad mode: tap=click, hold=drag, 2-finger=scroll
+airmouse --calibrate         # guided 8s calibration sweep on startup
+airmouse --precision         # precision mode
+airmouse academy [lesson]    # Gesture Academy: 11 lessons, live or full plan
+airmouse gesture-lab [sec]   # Gesture Lab: dry-run observatory, watch the gates
+airmouse profile <name>      # apply one of 8 interaction profiles
+airmouse profile list        # …or list them
 ```
 
-Pinch = drag/click, fist = right-click, two fingers = scroll, pinch
-spread = zoom, plus macros (`--record NAME`, `--play NAME`,
-`--macros`). The hybrid One Euro + Kalman filter smooths jitter
-(`--no-kalman` disables). Camera permission is required the first
-time (Windows Settings → Privacy & security → Camera).
+The gesture vocabulary (counted from the code, `gestures.py`):
+
+- **17 static poses** — pointing, pinch, peace, palm, fist, thumbs_up,
+  three, pinky, gun, rock, shaka, ok, ring, six, thumbs_down, four,
+  five.
+- **10 motion gestures** — swipe left/right/up/down, circle cw/ccw,
+  push, pull, shake, wave.
+- **3 pinch events** — pinch_hold (drag start), pinch_release (drop),
+  double_pinch (double click).
+- **4 two-hand classes** (behind `config.two_hand` or `airmouse
+  profile hands_free`) — TWO_HAND_HOLD, TWO_HAND_ZOOM, TWO_HAND_ROTATE,
+  TWO_HAND_DRAG. Zoom drives a real ctrl+wheel; rotate/drag are
+  detected but not yet wired to an OS action.
+
+What the spine does with them (every action, every time):
+
+- Pinch = click (tap) / drag (hold), peace = right-click, palm = drag,
+  fist = FREEZE cursor (not right-click — peace is right-click),
+  thumbs_up = double click, pinky = middle click, three = scroll mode,
+  shaka = volume mode, ring = brightness mode, gun = show desktop,
+  rock = minimize, six = task switcher, swipes = browser back/forward
+  + scroll up/down, circles/push/pull = zoom, shake = cancel
+  (drop drag / unfreeze), wave = attention cue only.
+- **OK-gesture (Alt+F4) and macro replay are refused by default**
+  (`close_window`/`macro_play` are DESTRUCTIVE class; enable only with
+  `gesture_allow_destructive = true` in config — and think twice).
+- Confidence floors: SAFE 0.45, CAUTION 0.60 (configurable via
+  `gesture_min_confidence_safe` / `gesture_min_confidence_caution`);
+  below the floor the action is refused, not guessed.
+- thumbs_down / four / five are recognized and HUD-visible but have no
+  default OS action — map them yourself via the gesture registry
+  (`airmouse --gesture`, `~/.airmouse/gestures.json`) if you want.
+- While two-hand geometry is engaged, single-hand actions freeze —
+  exactly one owner acts.
+- The hybrid One Euro + Kalman filter smooths jitter (`--no-kalman`
+  disables). Camera permission is required the first time (Windows
+  Settings → Privacy & security → Camera).
 
 ## Gaze usage
 
@@ -373,7 +420,11 @@ default where available):
 - **Explainable prediction** — "You often follow this with *type*
   (75 actions observed)"; PREDICTION ≠ EXECUTION, enforced at 5
   layers.
-- **Personal vocabulary + workflow discovery + bounded self-tuning.**
+- **Personal vocabulary + workflow discovery + a closed
+  personalization loop**: every confirmed gesture is fed to the
+  local personalization model (bounded, learning-gated inside the
+  plugin). Self-tuning proposals exist; applying them is a deliberate
+  act, not automatic.
 
 ```
 airmouse intelligence        # model status: size vs budget, lifecycle state
@@ -402,7 +453,7 @@ standalone `airmouse-agent-core` runtime (stdlib-only, never imports
 airmouse) and the dependency-free `agent-sdk-js` JavaScript/TypeScript
 SDK. Docs: `docs/AGENT_SDK.md`.
 
-## AIP
+## AIP + the stdio wire server
 
 The **Agent Interaction Protocol 1.0** (`aip.py`) is the wire format
 between agents and AirMouse: DISCOVER / OBSERVE / TARGET / REQUEST /
@@ -411,6 +462,29 @@ message types), 12 strict fail-closed JSON schemas (unknown fields
 rejected), same-major version negotiation, 256 KB size caps.
 Inspect locally with `airmouse protocol`; spec:
 `docs/AIP_SPEC.md`.
+
+v16 ships the missing last mile — a real transport:
+
+```
+airmouse --aip-stdio                # AIP JSON-lines on stdin/stdout (simulated endpoint)
+airmouse --aip-real --aip-stdio     # EXECUTE routed through the real permission-gated ActionEngine
+python -m airmouse.aip_stdio        # module entry: nothing but reply lines (for strict clients)
+```
+
+- The default endpoint is **simulated** and every result is honestly
+  labelled `simulated: true/false`; EXECUTE is fail-closed until an
+  explicit permission grant exists (no grants + ASK = NO).
+- `--aip-real` builds the real `ActionEngine` (pynput executor) —
+  still permission-gated, still fail-closed; if the executor cannot be
+  built the server says so and falls back to simulated.
+- Permissions carry the §15 semantics: ALLOW / DENY / ASK /
+  ALLOW_ONCE (exactly one use) / ALLOW_SESSION / ALLOW_PATTERN; agent
+  budgets (`max_actions`, `max_actions_per_minute`) are enforced.
+- Strict JSON-lines clients (agent-core `stdio://`,
+  agent-sdk-js `StdioTransport`) should target
+  `python -m airmouse.aip_stdio`; the `--aip-stdio` CLI wrapper prints
+  one banner line before the JSON loop (details in
+  `docs/CLI_REFERENCE.md`).
 
 ## Multi-agent operation
 
@@ -449,34 +523,51 @@ enable.
 
 - **Telemetry OFF by default** (default hard-coded OFF in the config
   module; verified by tests) — nothing phones home.
-- **Local-only storage** in `~/.airmouse` (override with the
-  `AIRMOUSE_HOME` environment variable). Crash-safe persistence:
-  atomic writes, schema versioning, checksum with corruption
-  quarantine + recovery (corrupt files are renamed, newest 3 kept).
+- **Local-only storage in ONE home**: `~/.airmouse` (override with the
+  `AIRMOUSE_HOME` environment variable). Every artifact AirMouse can
+  create is resolved by `paths.py` — no split-brain homes. Crash-safe
+  persistence: atomic writes, schema versioning, checksum with
+  corruption quarantine + recovery (corrupt files are renamed, newest
+  3 kept).
 - **Learning stores patterns, not content:** passwords, tokens,
   credentials and credential-shaped input are refused outright;
   token-like blobs redacted.
+- **The full storage manifest is printed by `airmouse privacy`** —
+  all 20 declared artifacts (15 user-learning stores/files + config,
+  the third-party hand model, the tutorial marker, backups, exports)
+  with purpose, data type, location and live existence flags.
 - **You control the data:**
 
 ```
-airmouse privacy                        # full local-first report (also: --json)
+airmouse privacy                        # full local-first report (+ 20-artifact manifest)
 airmouse memory status                  # what exists, record counts
 airmouse memory export --to mycopy.json # export (local file only)
-airmouse memory reset                   # back up, then clear all stores
-airmouse memory delete                  # delete store files (backups kept)
+airmouse memory reset                   # back up, then clear stores + learning artifacts
+airmouse memory delete                  # delete store files + artifacts (backups kept)
 ```
+
+Reset/delete cover the REAL artifacts, not just the five stores:
+`intelligence/*` (memory, vocabulary, workflows, selftune,
+model.bin), hand + gaze calibration, custom gestures, macros and
+lecture notes — and `deletion_verifies()` re-scans the home afterwards
+and reports CLEAN (backups are deliberately excluded).
 
 Details: `docs/PRIVACY.md` · security posture: `docs/SECURITY.md`.
 
 ## Safety
 
 - Global hierarchy: **E-STOP > HUMAN OVERRIDE > SAFETY POLICY >
-  PERMISSION > AGENT > PREDICTION**. The e-stop hotkey (`x` / ESC
-  path) suspends agents instantly and releases their leases.
+  PERMISSION > AGENT > PREDICTION**. `[ESC]` trips the spine e-stop
+  AND the agent e-stop instantly (movement freezes, agents lose
+  control); `[x]` resets.
+- **The execution spine classifies every gesture action** (SAFE /
+  CAUTION / DESTRUCTIVE) and refuses DESTRUCTIVE by default — a
+  misclassified "OK" can no longer Alt+F4 your window.
 - Destructive operations require explicit confirmation — every run,
   even inside an approved plan.
-- Rate limits, gates and allowlisted executors (32 action types;
-  system/file ops are argv-only allowlists).
+- Rate limits (0.12 s per discrete action, 0.05 s scroll/zoom
+  backstop), confidence floors, gates and allowlisted executors
+  (32 action types; system/file ops are argv-only allowlists).
 - Permission-denied failures are **never retried** by the recovery
   engine; malformed input fails closed.
 - HUD badges keep you informed: `AGENT:`, `TASK:`, `CONFIRM?`,
@@ -497,7 +588,8 @@ with plain-language "Fix:" lines and exits 0 READY / 1 PARTIAL /
 | `pynput ... not supported` (Linux) | no display server / Wayland restrictions | run under X11, or use the `AIRMOUSE_*` diagnostics only |
 | Config reported corrupt | crash during a write | backup is kept automatically; run `airmouse setup` to recreate defaults |
 | `memory export` fails to write | path not writable / exists | `airmouse memory export --to <other-path>` |
-| Browser commands do nothing | Chrome/Edge not started with CDP | start Chrome with `--remote-debugging-port=9222` (see WINDOWS_REAL_WORLD_TEST.md) |
+| Browser commands do nothing | Chrome/Edge not started with CDP | run `airmouse --launch-browser`, or start Chrome with `--remote-debugging-port=9222` (see WINDOWS_REAL_WORLD_TEST.md) |
+| Agent client gets "no endpoint answered status" against `--aip-stdio` | the CLI wrapper prints a banner line before the JSON loop | point strict clients at `python -m airmouse.aip_stdio` (see docs/CLI_REFERENCE.md) |
 | Hand tracking model missing | first-run download not done | run AirMouse once online; the doctor states the expected model path |
 | Need full detail for a bug report | — | re-run the failing command with `--debug` (redacted traceback) |
 
@@ -508,9 +600,17 @@ Honest, non-negotiable:
 - **Physical hardware was NOT tested in the build environment** (a
   headless Linux sandbox): webcam, microphone, real hand tracking,
   real gaze, real browser automation and any Windows-specific runtime
-  behaviour are **PHYSICAL HARDWARE NOT TESTED**. The validation
-  procedure is handed to you: `WINDOWS_REAL_WORLD_TEST.md` +
+  behaviour are **PHYSICAL TEST REQUIRED**. The validation procedure
+  is handed to you: `WINDOWS_REAL_WORLD_TEST.md` +
   `airmouse test --guided`.
+- Two-hand ROTATE and DRAG are detected (real geometry, tested) but
+  **not wired to any OS action** — only two-hand ZOOM drives a real
+  ctrl+wheel today.
+- The one-choice onboarding interview (v15.0.0) is **not wired into
+  startup**; the module exists but nothing runs it.
+- `selftune_apply` is a reserved opt-in config flag; no shipped code
+  path applies self-tuning proposals automatically (application
+  happens only when you explicitly import a selftune bundle).
 - Offline ASR engines (pocketsphinx/vosk/whisper) are adapters, not
   bundled engines; availability is always reported honestly.
 - RF modality: the abstraction and simulated bridge exist; **no RF
@@ -521,31 +621,34 @@ Honest, non-negotiable:
   identification is not claimed.
 - Screen OCR targets require the optional `airmouse[ocr]` extra and
   are opt-in.
+- fusion2 was removed from the shipped wiring (audit finding); it
+  remains in the tree as an optional library and is not advertised.
 
 ## Verification status
 
-- **1236 automated tests green; simulation suite green; physical
-  hardware validation is performed by YOU via `airmouse test --guided`
-  on your machine — see `WINDOWS_REAL_WORLD_TEST.md`.**
-- Full suite: `python -m pytest tests/ -q` → **1236 passed, 0 failed**
-  (Python 3.12, Linux sandbox; 1056 at the v15.0.0 baseline + 180 new
-  hardening tests).
+- **1556 automated tests passed, 2 skipped (honest headless skips: no
+  Chrome binary and no tesseract stack in the sandbox), 0 failed.**
+  Physical hardware validation is performed by YOU via `airmouse test
+  --guided` on your machine — see `WINDOWS_REAL_WORLD_TEST.md`.
+- Full suite: `python -m pytest tests/ -q` → **1556 passed, 2 skipped,
+  0 failed** (Python 3.12, Linux sandbox; measured on the v16.0.0
+  release-candidate tree).
 - `airmouse verify` (headless sandbox): 10/10 automated checks PASS;
   5 physical checks honestly report ACTION_REQUIRED.
 - `airmouse doctor` (headless sandbox): READY 32 / OPTIONAL 7 /
-  HARDWARE 2 / WARNING 0 / FAILED 0 → `[READY FOR TESTING]`.
-- Measured CLI budgets (same sandbox): `--version` ≈ 1.5 s, `doctor`
-  ≈ 2.6 s, `verify` ≈ 1.6 s, `test` ≈ 1.6 s (pinned budgets in
-  `tests/test_release_perf.py`: 6 / 12 / 8 / 8 s).
+  HARDWARE 2 / WARNING 0 / FAILED 0 → `[READY FOR TESTING]` (41
+  components across 12 sections).
 - Capability-by-capability status with real captured output:
-  `docs/CAPABILITY_MATRIX.md`. Full report: `VERIFICATION_REPORT.md`.
+  `docs/CAPABILITY_MATRIX.md` — every capability carries exactly one
+  tag: REAL / SIMULATED / OPTIONAL / PHYSICAL TEST REQUIRED /
+  NOT AVAILABLE. Full report: `VERIFICATION_REPORT.md`.
 
 ## Development
 
 ```
 git clone <repo>
 cd airmouse_pkg && python -m pip install -e .
-python -m pytest tests/ -q          # from the repo root: 1236 tests
+python -m pytest tests/ -q          # from the repo root: 1556 tests
 ```
 
 - Layout: `airmouse_pkg/airmouse/` (core + `intelligence/` subpackage),
@@ -554,7 +657,9 @@ python -m pytest tests/ -q          # from the repo root: 1236 tests
 - House rules: the core stays stdlib-only and import-headless; every
   public boundary fails closed; optional subsystems are optional by
   contract; secrets are scrubbed, never echoed; error messages never
-  leak tokens (`--debug` shows a redacted traceback).
+  leak tokens (`--debug` shows a redacted traceback); nothing is
+  documented as available unless it is wired — see the capability
+  status tags in `docs/CAPABILITY_MATRIX.md`.
 - Key docs: `docs/DEVELOPER_GUIDE.md`, `docs/V15_ARCHITECTURE.md`,
   `docs/CLI_REFERENCE.md`, `docs/SKILLS.md`, `docs/AIP_SPEC.md`.
 
@@ -564,10 +669,13 @@ python -m pytest tests/ -q          # from the repo root: 1236 tests
   `airmouse`, extras `voice` / `tts` / `ocr` / `sound`,
   `requires-python >= 3.9`, MIT license.
 - Build: `python -m pip wheel .` (or `python -m build`) from
-  `airmouse_pkg/` — produces `airmouse-15.1.0-py3-none-any.whl`.
+  `airmouse_pkg/` — the wheel version must equal `__init__.py`
+  (`airmouse verify` checks the match).
 - `build.py` builds PyInstaller bundles (`--windows` / `--linux` /
   `--all`); it downloads the MediaPipe hand-landmarker model at build
-  time for bundling (network needed only for that build step).
+  time for bundling (network needed only for that build step). The
+  resulting Windows bundles are **PHYSICAL TEST REQUIRED** — none has
+  been executed on real Windows hardware.
 - The hand-tracking model is NOT bundled in the wheel; on first run
   AirMouse fetches it once (see Limitations for the offline-first-run
   consequence).
@@ -577,7 +685,8 @@ python -m pytest tests/ -q          # from the repo root: 1236 tests
 1. Set the version in `airmouse_pkg/airmouse/__init__.py` and
    `airmouse_pkg/pyproject.toml` (they must match — `airmouse verify`
    checks this).
-2. Full suite green: `python -m pytest tests/ -q` (v15.1.0: 1236/0).
+2. Full suite green: `python -m pytest tests/ -q` (v16.0.0
+   release candidate: 1556 passed / 2 skipped / 0 failed).
 3. `airmouse verify` — all automated checks PASS; physical items stay
    honestly ACTION_REQUIRED.
 4. Build wheel + sdist; record checksums.

@@ -1,8 +1,169 @@
-# AirMouse v15.0.0 — Final Verification Report (v12.0 → v15.0)
+# AirMouse v16.0.0 — Final Verification Report (release candidate)
 
 ---
 
-# v15.1.0 Hardening Verification
+# v16.0.0 Gesture-First Release Verification
+
+Date: 2026-09-04 (build environment: Linux x86_64 headless sandbox,
+Python 3.12.14). Scope: the v16.0.0 gesture-first release candidate —
+the v15.2.0 execution spine + gesture surface (preserved unchanged)
+plus the documentation reset and release hygiene (docs/CLI_REFERENCE
+regenerated from the live parser, docs/CAPABILITY_MATRIX rebuilt with
+one status per capability, README stale claims removed,
+WINDOWS_REAL_WORLD_TEST extended, CHANGELOG refreshed). Companion:
+`WINDOWS_REAL_WORLD_TEST.md` (repo root), `docs/CAPABILITY_MATRIX.md`,
+`README.md` §Verification status. **Headline honesty statement:
+physical hardware (webcam, microphone, real hand tracking single- and
+two-handed, real gaze, real browser automation, real OS input
+automation, PyInstaller Windows bundles) was NOT tested in this
+sandbox — it cannot be; the validation procedure is handed to the user
+via `WINDOWS_REAL_WORLD_TEST.md` and `airmouse test --guided`.**
+
+## Part 1 — AUTOMATED VERIFICATION
+
+- **Full suite: 1556 passed / 2 skipped / 0 failed** (re-measured on
+  the v16.0.0 release-candidate tree, 26.5 s, pytest). The 2 skips
+  are honest headless skips, verbatim from `-rs`:
+  `tests/test_endgame_browser_resolver.py:102 — no chrome/chromium/
+  edge binary in this sandbox` and `:356 — real tesseract stack
+  present — OCR opt-in works` (skipped because the OCR comparison
+  needs the real tesseract binary; the honest error path is asserted
+  separately). Baseline history: 1056 (v15.0.0) → 1236 (v15.1.0) →
+  1323 (v15.1.1) → **1556 (v15.2.0/v16.0.0)**.
+- **`airmouse verify`** (exit 0): 10/10 automated checks PASS — Core
+  import; voice grammar + offline engine determinism; intelligence
+  roundtrip; safety gates + e-stop latch + hierarchy (4 safety
+  levels); offline selftest 18/18; simulated browser bridge; agent
+  permission deny-by-default; exclusive lease + challenger refusal;
+  AIP malformed-envelope rejection; pyproject/package version match.
+  The 5 PHYSICAL rows report ACTION_REQUIRED by design (Part 4).
+- **`airmouse doctor`** (exit 0, `[READY FOR TESTING]`): READY 32 /
+  OPTIONAL 7 / HARDWARE 2 / WARNING 0 / FAILED 0 — 41 components
+  across 12 sections (SYSTEM 6, PYTHON 11, AIRMOUSE 4, CAMERA 1,
+  MICROPHONE 1, SPEECH 4, INPUT 2, BROWSER 3, INTELLIGENCE 2, AGENT 4,
+  OFFLINE 1, SAFETY 2), measured on this tree.
+- **v16 gesture surface, measured headless runs (all on this tree):**
+  - `airmouse profile list` → 8 profiles; `profile accessibility` →
+    "applied: 12 settings" + real config.toml written under
+    `$AIRMOUSE_HOME`; `profile nope` → honest listing + exit 1.
+  - `airmouse academy` (headless) → full 11-lesson plan, per-core-
+    lesson status `PHYSICAL PRACTICE REQUIRED — needs camera + hand`,
+    advanced lessons `not verifiable in this run (never
+    auto-passed)`, exit 0; `academy bogus-lesson` → valid-ids
+    listing + exit 1; progress file under the unified home.
+  - `airmouse gesture-lab --no-cam` → observatory explanation + two
+    exact example readouts, including
+    `RESULT: blocked: destructive_action_blocked_by_policy (a gesture
+    must never close windows)` — the destructive refusal is
+    demonstrable without any hardware; exit 0.
+  - `airmouse gestures` → built-in mappings include the new
+    `double_pinch`, `pinch_hold`, `pinch_release`, `shake`, `four`,
+    `five`, `swipe_up/down`, `circular_cw/ccw`.
+  - Privacy manifest: **20 declared artifacts** (15 user-learning +
+    config + third-party model + tutorial marker + backups + exports)
+    printed by `airmouse privacy` with live exists flags.
+  - Memory lifecycle: stores + real learning artifacts covered;
+    `deletion_verifies()` re-scan reported in reset/delete output.
+- **Agent last mile, measured end-to-end in the sandbox:**
+  `python -m airmouse.aip_stdio` answers DISCOVER with protocol 1.0
+  and 13 capabilities; EXECUTE with no grants →
+  `permission_denied — decision 'ask': no rule; default ASK fails
+  closed`; the standalone agent-core client (stdlib-only)
+  connects, negotiates and receives the same fail-closed denial over
+  the wire. `airmouse --aip-stdio` (CLI wrapper) serves the identical
+  envelope but prints one banner line to stdout first — documented in
+  `docs/CLI_REFERENCE.md`; strict first-line-JSON clients target the
+  module entry.
+- Version strings: the tree's `__init__.py`/`pyproject.toml` still
+  read 15.1.1 at documentation time (bumped by release step 1; the
+  packaging check in `airmouse verify` confirms they match each
+  other).
+
+## Part 2 — SIMULATION VERIFICATION
+
+- **Guided test laboratory, headless non-interactive run
+  (`airmouse test`, exit 0): 7/7 simulation tests PASS, 0/5 hardware
+  tests (all honestly ACTION_REQUIRED), overall PARTIALLY VERIFIED.**
+  Seven simulation PASSes unchanged: Installation; Intelligence
+  (`[SIMULATION]` label); Browser (7-step simulated flow); Agent
+  (benign request through the full pipeline, destructive REJECTED);
+  Multi-Agent (lease → conflict refused → handoff →
+  `emergency_stop_all`); Recovery (3 recoveries + permission denial
+  correctly NOT retried); Offline (18/18, cloud ASR blocked, local
+  grammar allowed).
+- Simulated-verified subsystems (status unchanged from v15.0.0):
+  twin, temporal world model, goals/tasks, skills, recovery2, target
+  resolver, AIP, agent SDK, multi-agent registry, DO IT WITH ME,
+  simulator, failure injection, explainability, licensing,
+  marketplace, persistence layer, setup wizard, user errors, first-
+  run menu matrix.
+- **AIP EXECUTE without `--aip-real`** is an honest simulation: every
+  result is labelled `simulated: true`; with the permission engine
+  empty the default is fail-closed denial (measured). With
+  `--aip-real` the EXECUTE path routes through the real
+  permission-gated ActionEngine in-process tests; real OS effects
+  remain Part 4.
+- The Gesture Lab is a deliberate simulation instrument: a REAL
+  `GestureActionRouter` whose executor is a dry-run stub — the
+  confidence/policy/rate gates are the real code, the hands are the
+  user's, and nothing real can fire (allow_destructive forced False
+  in the lab).
+
+## Part 3 — REAL WINDOWS VERIFICATION
+
+**NOT PERFORMED IN SANDBOX** (unchanged truth). No Windows machine was
+available; the build environment is a headless Linux sandbox. The
+complete Windows 10/11 validation procedure is handed to the user,
+step by step with COMMAND / WHAT TO DO / WHAT SHOULD HAPPEN / PASS /
+FAIL / HOW TO FIX blocks: **`WINDOWS_REAL_WORLD_TEST.md`** in the
+repository root — now **24 steps**: the original 19 plus the v16
+steps 10a–10e (gesture profiles, Gesture Academy, Gesture Lab, two-
+hand check, agent E-stop drill over `airmouse --aip-stdio`). Until
+that procedure is executed by a human on real Windows hardware, every
+Windows-runtime claim in the docs is marked "expected", not
+"verified".
+
+## Part 4 — PHYSICAL HARDWARE VERIFICATION
+
+**NOT TESTED** — the sandbox is headless and has no peripherals.
+`airmouse verify` and `airmouse test` report all five physical areas
+as **ACTION_REQUIRED** (they can never auto-pass by design):
+
+| Physical area | Sandbox status | Where it is validated |
+|---|---|---|
+| Webcam | ACTION_REQUIRED (HARDWARE: "no camera device answered at index 0") | guided test [2/12]; WINDOWS_REAL_WORLD_TEST.md Steps 9 / 10b / 10d |
+| Microphone | ACTION_REQUIRED (HARDWARE: "PortAudio works but reported no input devices") | guided test [5/12]/[6/12]; WINDOWS_REAL_WORLD_TEST.md Steps 6/12/13 |
+| Hand tracking (single-hand, 17 poses + motion + pinch events) | ACTION_REQUIRED | guided test [2/12]/[3/12]; WINDOWS_REAL_WORLD_TEST.md Steps 9/10/10c |
+| Two-hand geometry (HOLD/ZOOM/ROTATE/DRAG) | ACTION_REQUIRED (detector code + synthetic-hand tests only) | WINDOWS_REAL_WORLD_TEST.md Step 10d |
+| Gaze | ACTION_REQUIRED | guided test [4/12]; WINDOWS_REAL_WORLD_TEST.md Step 11 |
+| Real browser automation (CDP :9222) | ACTION_REQUIRED (no browser installed; `--launch-browser` honestly reports `browser_not_found`) | guided test [8/12] is simulated; real: WINDOWS_REAL_WORLD_TEST.md Step 15 |
+| Live OS input automation (cursor/clicks/keys, two-hand zoom on screen, macro replay) | ACTION_REQUIRED (pynput present, no display) | WINDOWS_REAL_WORLD_TEST.md Step 10 |
+| PyInstaller Windows bundles | NOT PRODUCED / NOT EXECUTED on real Windows | build.py path exists; bundle validation is a Windows task |
+
+## Part 5 — NOT TESTED
+
+- **RF hardware** — the RF modality is an abstraction with a
+  simulated provider only; no RF hardware exists or is claimed
+  (status: NOT AVAILABLE).
+- **Real local ASR engines** — pocketsphinx / vosk / whisper adapters
+  exist but the engines are not installed in the sandbox; real engine
+  behaviour on Windows audio is unverified (`airmouse voice-status`
+  reports availability honestly: all False in the sandbox).
+- **Cloud integrations** — none exist by design (no cloud code path);
+  "cloud" is structurally impossible to enable, so there is nothing
+  to test (status: NOT AVAILABLE).
+- **Windows runtime** — see Part 3 (REAL WINDOWS: NOT PERFORMED).
+- **PyInstaller bundles** (`build.py --windows` etc.) — build path
+  present, bundle artifacts not produced or executed in this pass
+  (status: PHYSICAL TEST REQUIRED).
+- **Onboarding interview, automatic `selftune_apply`, two-hand
+  rotate/drag OS actions, default actions for thumbs_down/four/five**
+  — not wired / not available by design; documented as NOT AVAILABLE
+  in `docs/CAPABILITY_MATRIX.md` (rows 22, 25, 60, 70).
+
+---
+
+# AirMouse v15.1.0 Hardening Verification — preserved below
 
 Date: 2026-09-04 (build environment: Linux x86_64 headless sandbox,
 Python 3.12.14). Scope: the v15.1.0 hardening release of v15.0.0 —

@@ -5,3 +5,12 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+# endgame hygiene (v16)
+.env
+.env.*
+tool-results/
+download/
+*.pyc
+__pycache__/
+*.corrupt-*

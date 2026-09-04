@@ -1,15 +1,15 @@
-# WINDOWS_REAL_WORLD_TEST.md — AirMouse v15.1.0 real-world test (Windows 10/11)
+# WINDOWS_REAL_WORLD_TEST.md — AirMouse v16.0.0 real-world test (Windows 10/11)
 
 **Who this is for:** any Windows 10 or Windows 11 user. No programming
 knowledge needed. Every command is copy-pasteable into Command Prompt.
 
-**Why this file exists (honesty):** AirMouse v15.1.0 was verified in a
-headless Linux build sandbox — **1236 automated tests green, simulation
-suite green, but NO physical hardware was tested there** (no webcam, no
-microphone, no display, no Windows). The machine cannot click a real
-button or hear a real voice. **You are the hardware test.** This
-document walks you through it, step by step, and ends with how to turn
-your results into a bug report we can act on.
+**Why this file exists (honesty):** AirMouse v16.0.0 was verified in a
+headless Linux build sandbox — **1556 automated tests green (2 honest
+skips), simulation suite green, but NO physical hardware was tested
+there** (no webcam, no microphone, no display, no Windows). The machine
+cannot click a real button or hear a real voice. **You are the hardware
+test.** This document walks you through it, step by step, and ends with
+how to turn your results into a bug report we can act on.
 
 **How to read each step:** every step has six fields:
 
@@ -60,9 +60,9 @@ saw for every step — you will paste that into the final report
 - **WHAT TO DO:** paste and press Enter. Wait for it to finish
   (1-3 minutes; it downloads OpenCV, MediaPipe and numpy).
 - **WHAT SHOULD HAPPEN:** progress bars, then a final line like
-  `Successfully installed airmouse-15.1.0 ...`.
+  `Successfully installed airmouse-16.0.0 ...`.
 - **PASS:** "Successfully installed" appears and the version is
-  15.1.0 or newer.
+  16.0.0 or newer.
 - **FAIL:** red error text (no internet, permission denied, or
   "pip is not recognized").
 - **HOW TO FIX:** check your internet; retry the same command once;
@@ -180,10 +180,11 @@ saw for every step — you will paste that into the final report
   `airmouse --precision`
 - **WHAT TO DO:** with your hand visible, do each action the lab
   asks: pinch-and-hold + move; quick pinch (click); double pinch;
-  fist for half a second (right-click); two fingers up/down (scroll);
-  pinch-and-drag across the screen. Answer each [Y/N].
+  peace sign for half a second (right-click); two fingers up/down
+  (scroll); pinch-and-drag across the screen. Answer each [Y/N].
 - **WHAT SHOULD HAPPEN:** the cursor tracks; a quick pinch clicks;
-  double pinch double-clicks; a fist opens the right-click menu;
+  double pinch double-clicks; a peace sign opens the right-click menu
+  (a FIST freezes the cursor instead — that is by design);
   two-finger movement scrolls; pinch-drag moves icons/windows.
 - **PASS:** all six actions answered Y (a single N is a partial —
   note which one failed).
@@ -194,6 +195,139 @@ saw for every step — you will paste that into the final report
   clicks are offset in one direction only, say so in the report —
   that is a calibration or camera-placement issue we want to know
   about.
+
+## Step 10a — Gesture profiles (safe, no camera needed)
+
+- **COMMAND:**
+  1. `airmouse profile list`
+  2. `airmouse profile accessibility`
+  3. `airmouse profile doesnotexist`
+- **WHAT TO DO:** run all three. The first lists the available
+  presets, the second applies the accessibility preset (bigger
+  deadzone, longer confirm windows, audio feedback on), the third
+  intentionally asks for a profile that does not exist.
+- **WHAT SHOULD HAPPEN:** (1) prints
+  `gesture profiles: accessibility, creative, default, developer, gaming, hands_free, media, presentation`;
+  (2) prints `profile 'accessibility' applied: 12 settings ->
+  <path to config.toml>`; (3) prints
+  `unknown profile 'doesnotexist' — available profiles: ...`.
+- **PASS:** all three behave exactly as described (the unknown one is
+  SUPPOSED to fail with exit code 1 — that is the fail-closed design).
+- **FAIL:** a profile "applies" but later settings behave identically,
+  or the unknown profile is silently accepted, or any Python
+  traceback.
+- **HOW TO FIX:** re-run with `python -m airmouse profile list
+  --debug` and keep the output. To undo a profile:
+  `airmouse profile default` restores the factory settings.
+
+## Step 10b — Gesture Academy (teaching; part simulation, part physical)
+
+- **COMMAND:**
+  1. `airmouse academy`
+  2. `airmouse academy click`
+- **WHAT TO DO:** run (1) with your camera plugged in — it is a live
+  classroom: each lesson shows the gesture to perform, your detected
+  gesture, a confidence bar and a hold-to-pass bar (hold the gesture
+  steady until the bar fills). Press `[SPACE]` only if you want to
+  skip WITHOUT credit, `[q]` to quit (progress is saved). Then run
+  (2) to practice just the pinch-click lesson.
+- **WHAT SHOULD HAPPEN:** an overlay shows `Lesson n/11`, the
+  instruction, the target gesture vs what it detects, and the
+  progress bar. Completed lessons are remembered (progress file in
+  your AirMouse home) and skipped on the next run. Lessons 8–11
+  (gaze, voice, two_hand, sequences) are TEACH-ONLY: they are printed
+  in the terminal with a real next step (e.g. `airmouse
+  --gaze-calibrate`) and are never auto-passed.
+- **PASS:** at least one core lesson passes by holding the gesture
+  (the bar fills and the lesson completes), and quitting/restarting
+  resumes where you left off.
+- **FAIL:** no camera window at all, the detected gesture never
+  matches what you perform even with good lighting, or lessons get
+  marked complete while you never touched a gesture.
+- **HOW TO FIX:** lighting first (Step 9's fixes apply); run
+  `airmouse doctor` and make sure the camera row is not FAILED; if a
+  lesson never recognises the gesture, note the lesson id and what
+  you performed — that is exactly the feedback we need.
+
+## Step 10c — Gesture Lab (watch the safety gates work; physical readout)
+
+- **COMMAND:**
+  1. `airmouse gesture-lab 30`
+  2. make an **OK** sign at the camera
+- **WHAT TO DO:** run it for 30 seconds. The lab is an observatory:
+  it uses the REAL recognition + execution-spine pipeline but
+  dispatches into a dry-run stub — it can never move your mouse or
+  press a key. Perform gestures and watch the readout (~5 updates per
+  second): HAND DETECTED / GESTURE / CONFIDENCE / MODE / TWO-HAND /
+  LAST ACTION / RESULT. Finish by making the OK sign — the gesture
+  normally mapped to Alt+F4.
+- **WHAT SHOULD HAPPEN:** the readout shows your detected gesture and
+  confidence; a pinch shows `LAST ACTION: left_click (executed)` INTO
+  THE STUB ONLY; the OK sign shows
+  `RESULT: blocked: destructive_action_blocked_by_policy (a gesture
+  must never close windows)`.
+- **PASS:** your gestures appear in GESTURE with plausible confidence,
+  and the OK sign is BLOCKED with the policy message.
+- **FAIL:** the OK sign shows `executed`, or no hand is ever detected
+  despite Step 9 passing.
+- **HOW TO FIX:** if the OK sign executes, STOP and report it first —
+  a destructive action allowed through the spine is a top-priority
+  bug (same severity as Step 16's rejected-request check). If no hand
+  is detected, apply the Step 9 lighting/privacy fixes first.
+
+## Step 10d — Two-hand check (physical; zoom only is wired)
+
+- **COMMAND:**
+  1. `airmouse profile hands_free`
+  2. `airmouse gesture-lab 30`
+  3. pinch BOTH hands, then pull them apart / push them together
+- **WHAT TO DO:** apply the hands_free profile (it turns on
+  `two_hand`), then watch the lab's TWO-HAND and MODE fields while
+  pinching with both hands and changing the distance between them.
+  You can also try it live in `airmouse` itself: both hands pinched
+  zooms the window under the cursor (real Ctrl+mouse-wheel).
+- **WHAT SHOULD HAPPEN:** MODE flips to `two-hand`; with both pinches
+  engaged the readout shows `TWO_HAND_ZOOM`-style engagement and the
+  scale changing as you pull apart (zoom in) or push together (zoom
+  out); single-hand gestures stop firing while both hands are
+  engaged.
+- **PASS:** two-hand engagement is detected and (in the live app)
+  zooming works via the two-hand pinch; single-hand actions freeze
+  while engaged.
+- **FAIL:** MODE never shows two-hand, or the lab crashes with both
+  hands visible.
+- **HOW TO FIX:** check `airmouse doctor` (camera row), make sure BOTH
+  hands are fully in frame and well lit; note that two-hand ROTATE
+  and DRAG are detected but not yet wired to any OS action — only
+  ZOOM drives a real action today. If that changes what you saw, say
+  so in the report.
+
+## Step 10e — Agent E-Stop drill (simulation; the human always wins)
+
+- **COMMAND:**
+  1. `python -m airmouse.aip_stdio` (leave this window open — it is
+     the agent wire server; nothing but JSON reply lines appears)
+  2. in a second CMD window, send an agent EXECUTE request, e.g.:
+     `echo {"aip_version":"1.0","type":"execute","id":"x1","agent_id":"drill","request_id":"","ts":0,"payload":{"action":"click","verify":true,"params":{}}} | python -m airmouse.aip_stdio`
+     (or use `agent-core` / `agent-sdk-js` pointed at the server)
+  3. watch window 1, then close it with Ctrl-C
+- **WHAT SHOULD HAPPEN:** the server starts silently (or with one
+  banner line if you used `airmouse --aip-stdio` — both speak the
+  same protocol). The EXECUTE request gets back a JSON error line:
+  `"permission_denied" — "decision 'ask': no rule; default ASK fails
+  closed"`. No mouse click happens anywhere. Closing the server
+  window is the E-stop: any agent on the other side simply gets no
+  more replies.
+- **PASS:** the request is DENIED with `permission_denied` and your
+  mouse never moves or clicks.
+- **FAIL:** a click happens with no permission granted — treat this
+  like the Step 16 destructive-request failure: top-priority bug,
+  report first.
+- **HOW TO FIX:** if a click happens, do not retry; keep the server
+  output and report it. If you want to see the REAL execution path
+  (still permission-gated), it exists via
+  `airmouse --aip-real --aip-stdio` — grants are explicit, single-use
+  (`ALLOW_ONCE`) or session-scoped, and there is no grant by default.
 
 ## Step 11 — Gaze test (physical)
 
@@ -366,7 +500,7 @@ machine physically could not. If something failed, help us fix it:
 
 **Where:** open a GitHub issue on the AirMouse repository
 (https://github.com/manaladan6-rgb/airmouse/issues), title:
-`Windows real-world test v15.1.0 — step N failed`.
+`Windows real-world test v16.0.0 — step N failed`.
 
 **Paste these, in this order:**
 
@@ -387,13 +521,17 @@ personal content by design.
 
 **Pass criteria for the whole document:** Steps 1-8 PASS and at least
 Steps 9, 10, 12, 13, 15 answered Y (hand, mouse, voice, dictation,
-browser). Steps 14, 16, 17 must PASS (they are simulation tests — a
-FAIL here is a software bug, not a hardware quirk).
+browser); Steps 10a–10e recorded (10c's OK-sign BLOCK and 10e's
+permission_denied are mandatory PASSes — a FAIL there is a software
+bug). Steps 14, 16, 17 must PASS (they are simulation tests — a FAIL
+here is a software bug, not a hardware quirk).
 
 ---
 
-*Honesty footer: AirMouse v15.1.0 — 1236 automated tests green,
-simulation suite green, `airmouse verify` 10/10 automated PASS in the
-build sandbox. Physical hardware (webcam, microphone, hand tracking,
-gaze, real browser) was NOT tested there and CANNOT be — that is what
+*Honesty footer: AirMouse v16.0.0 — 1556 automated tests green (2
+honest headless skips), simulation suite green, `airmouse verify`
+10/10 automated PASS in the build sandbox. Physical hardware (webcam,
+microphone, hand tracking, two-hand geometry, gaze, real browser,
+real OS input automation, Windows bundles) was NOT tested there and
+CANNOT be — that is what
 this document is for. Windows runtime was not tested in the sandbox.*
