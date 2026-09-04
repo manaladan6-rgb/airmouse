@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "airmouse"
-version = "5.0.0"
-description = "AirMouse v5.0 Voice + Kalman Edition — 14-gesture physics-driven finger mouse with hybrid One Euro + Kalman fusion filtering, voice control (30 commands, turbo sensitivity), pinch-to-zoom, adaptive calibration that learns your hand, macro recorder/replay, angle-based gesture detection with hysteresis, and single-file simple mode"
+version = "9.0.0"
+description = "AirMouse v9.0 Multimodal Intelligence Edition — webcam eye/gaze tracking with dwell + blink control, 14-gesture hand mouse, 30-phrase voice + natural-language control, multimodal fusion engine (gaze x hand x voice), screen understanding, intent engine, verified action execution with recovery, safety system (e-stop, rate limits, confirmations), semantic macros, hybrid One Euro + Kalman filtering, adaptive calibration, and single-file simple mode"
 license = "MIT"
 requires-python = ">=3.9"
 authors = [{name = "AirMouse"}]
-keywords = ["airmouse", "hand-tracking", "gesture", "mouse", "physics", "mediapipe", "voice-control", "kalman-filter", "iron-man"]
+keywords = ["airmouse", "hand-tracking", "gaze", "eye-tracking", "gesture", "mouse", "multimodal", "fusion", "voice-control", "natural-language", "screen-understanding", "intent-engine", "kalman-filter", "accessibility", "hands-free"]
 
 dependencies = [
     "mediapipe>=0.10.9,<1.0",
@@ -19,6 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ocr = ["pytesseract>=0.3.10", "Pillow>=10.0"]
 sound = ["sounddevice>=0.5.0"]
 voice = ["SpeechRecognition>=3.10.0", "pyaudio>=0.2.13"]
 tts = ["pyttsx3>=2.90"]

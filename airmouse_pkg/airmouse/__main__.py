@@ -1,5 +1,5 @@
 """
-AirMouse v5.0.0 — VOICE + KALMAN Edition
+AirMouse v9.0.0 — MULTIMODAL INTELLIGENCE EDITION
 
     airmouse              # Start with tutorial (first run)
     airmouse --skip       # Skip tutorial
@@ -30,11 +30,22 @@ v5.0 POWER FEATURES:
     --play NAME        Replay a macro on startup
     --macros           List saved macros and exit
 
+v9.0 MULTIMODAL (eyes + hands + voice + screen understanding):
+    --gaze             Enable webcam gaze/eye tracking (iris, blink, dwell)
+    --gaze-calibrate   Run guided gaze->screen calibration, save, exit
+    --fusion           FUSION mode: gaze targets, hand confirms, voice intents
+    --hands-free       HANDS-FREE: eyes target, voice commands, dwell confirm
+    --assist           ASSIST mode: observe everything, confirm every action
+    --interaction MODE hand|gaze|voice|fusion|hands-free|assist (explicit)
+    --no-voice         Disable voice control
+
 Keyboard shortcuts (in camera window):
     [q] quit   [d] debug   [r] recalibrate   [s] sound toggle
     [p] precision mode   [t] tutorial   [h] help
     [v] voice on/off   [k] Kalman hybrid on/off   [z] zoom on/off
     [m] macro record on/off
+    [g] gaze on/off    [f] cycle fusion mode   [x] e-stop trip/reset
+    ESC  -> EMERGENCY STOP (v9) / quit hook (always available)
 """
 
 import os
@@ -62,6 +73,10 @@ from .voice_control import VoiceCommandEngine, VoiceCommand, SENSITIVITY_PROFILE
 from .calibration import AdaptiveCalibration, get_default_calibration
 from .macros import MacroRecorder, MacroPlayer, list_macros, MACRO_DIR
 from .zoom import PinchZoomController, zoom_scroll
+from .interfaces import FusionMode  # v9.0
+from .agent import InteractionAgent  # v9.0 orchestrator
+from .gaze_calibration import GazeCalibration  # v9.0 gaze calibration
+from .gaze import GazeEngine  # v9.0 gaze sensing
 
 
 def _get_screen_size():
@@ -89,7 +104,8 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
               frozen, dragging, scrolling, volume_mode, brightness_mode,
               precision_mode, gsm_progress, gesture_confidence,
               voice_caption=None, voice_active=False, zoom_active=False,
-              recording=False, kalman_on=False, cal_ready=False):
+              recording=False, kalman_on=False, cal_ready=False,
+              v9_state=None):
     """Draw Iron Man HUD overlay with v3.1 enhancements."""
     if frame is None:
         return
@@ -152,6 +168,26 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
         badges.append(("ZOOM", (255, 100, 255)))
     if recording:
         badges.append(("REC", (0, 0, 255)))
+    # v9.0 multimodal badges (lightweight single row)
+    if v9_state:
+        try:
+            if v9_state.get("mode"):
+                badges.append((f"FUSION:{str(v9_state['mode'])[:4].upper()}",
+                               (255, 100, 100)))
+            gc = v9_state.get("gaze_conf")
+            if gc is not None:
+                badges.append((f"GAZE:{int(gc * 100)}%",
+                               (100, 220, 255) if gc >= 0.55 else (120, 120, 120)))
+            if v9_state.get("target"):
+                badges.append((f"T:{str(v9_state['target'])[:22]}", (200, 255, 120)))
+            if v9_state.get("intent"):
+                badges.append((f"I:{str(v9_state['intent'])[:14].upper()}", (255, 200, 80)))
+            if v9_state.get("action"):
+                badges.append((f"A:{str(v9_state['action'])[:14].upper()}", (140, 255, 140)))
+            if v9_state.get("estop"):
+                badges.append(("E-STOP", (0, 0, 255)))
+        except Exception:
+            pass
     if voice_active:
         badges.append(("VOICE", (0, 255, 180)))
     if kalman_on:
@@ -265,6 +301,88 @@ def _safe_kb_action(kb_instance, action_name):
         pass
 
 
+def _run_gaze_calibration(config, simulated: bool = False) -> bool:
+    """Guided gaze->screen calibration (v9.0).
+
+    Real mode (default): opens a calibration window, shows a 9-point grid,
+    collects FaceMesh gaze samples per point, fits + saves the affine
+    mapping to ~/.airmouse/gaze_calibration.json.
+
+    Simulated mode (--gaze-sim): deterministic synthetic-eye calibration —
+    verifies the complete calibration pipeline without a camera (CI).
+    Returns True on success.  Never raises.
+    """
+    print("  >> GAZE CALIBRATION — follow the on-screen targets with your eyes")
+    cal = GazeCalibration(n_points=9)
+    engine = GazeEngine({
+        "gaze_dwell_time": config.gaze_dwell_time,
+        "gaze_min_confidence": config.gaze_min_confidence,
+    })
+    try:
+        if simulated:
+            print("  >> SIMULATED eye model (--gaze-sim) — no camera needed")
+            import random
+            rng = random.Random(42)
+            points = cal.begin()
+            for t in points:
+                for _ in range(14):
+                    from airmouse.interfaces import GazeSample
+                    noise = rng.uniform(-0.004, 0.004)
+                    cal.add_sample(t, GazeSample(x=t[0] + noise, y=t[1] + noise,
+                                                 confidence=0.9))
+            quality = cal.finish()
+        else:
+            import cv2 as _cv2
+            import numpy as _np
+            cam = _cv2.VideoCapture(config.camera_index)
+            if not cam.isOpened():
+                print("  !! Camera unavailable — use --gaze-sim for a simulated calibration.")
+                return False
+            points = cal.begin()
+            sw, sh = 960, 540
+            canvas = _np.zeros((sh, sw, 3), dtype=_np.uint8)
+            aborted = False
+            for pi, t in enumerate(points):
+                tx, ty = int(t[0] * (sw - 80) + 40), int(t[1] * (sh - 80) + 40)
+                collected = 0
+                t0 = time.perf_counter()
+                while collected < 30 and time.perf_counter() - t0 < 3.5:
+                    ok, frame = cam.read()
+                    if not ok:
+                        continue
+                    frame = _cv2.flip(frame, 1)
+                    st = engine.update(frame)
+                    if st.confidence >= 0.35:
+                        cal.add_sample(t, type("S", (), {"x": st.x, "y": st.y,
+                                                         "confidence": st.confidence,
+                                                         "timestamp": st.timestamp})())
+                        collected += 1
+                    view = canvas.copy()
+                    _cv2.circle(view, (tx, ty), 14, (0, 255, 255), -1)
+                    _cv2.putText(view, f"Target {pi + 1}/9  ({collected}/30)",
+                                 (20, 40), _cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                    _cv2.imshow("AirMouse Gaze Calibration", view)
+                    if (_cv2.waitKey(1) & 0xFF) == 27:
+                        aborted = True
+                        break
+                if aborted:
+                    break
+            cam.release()
+            _cv2.destroyAllWindows()
+            if aborted:
+                print("  >> Calibration aborted.")
+                return False
+            quality = cal.finish()
+        ok = quality.get("status") in ("good", "fair") and cal.save()
+        print(f"  >> Calibration quality: {quality.get('status')} "
+              f"(mean residual {quality.get('mean_residual_px')} px) "
+              f"-> {'SAVED' if ok else 'NOT saved (quality too low)'}")
+        return bool(ok)
+    except Exception as e:
+        print(f"  !! Gaze calibration failed: {e}")
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="airmouse",
@@ -297,7 +415,24 @@ def main():
     parser.add_argument("--record", type=str, default=None, metavar="NAME", help="Record a macro this session")
     parser.add_argument("--play", type=str, default=None, metavar="NAME", help="Replay macro NAME on startup")
     parser.add_argument("--macros", action="store_true", help="List saved macros and exit")
+    # ═══ v9.0 multimodal flags ═══
+    parser.add_argument("--gaze", action="store_true", help="Enable webcam gaze/eye tracking (v9 multimodal)")
+    parser.add_argument("--no-gaze", action="store_true", help="Disable gaze even if enabled in config")
+    parser.add_argument("--gaze-calibrate", action="store_true", help="Run guided gaze->screen calibration, save, exit")
+    parser.add_argument("--gaze-sim", action="store_true", help=argparse.SUPPRESS)  # simulated calibration (CI)
+    parser.add_argument("--fusion", action="store_true", help="FUSION mode: gaze targets + hand confirms + voice intents")
+    parser.add_argument("--hands-free", action="store_true", help="HANDS-FREE mode: eyes target, voice commands, dwell confirm")
+    parser.add_argument("--assist", action="store_true", help="ASSIST mode: multimodal observation, actions need confirmation")
+    parser.add_argument("--interaction", type=str, default=None,
+                        choices=["hand", "gaze", "voice", "fusion", "hands-free", "assist"],
+                        help="v9 interaction mode (overrides --fusion/--hands-free/--assist)")
+    parser.add_argument("--no-voice", action="store_true", help="Disable voice control")
+    parser.add_argument("--version", action="store_true", help="Print version and exit")
     args = parser.parse_args()
+
+    if args.version:
+        print(f"AirMouse v{_pkg.__version__} — Multimodal Intelligence Edition")
+        return
 
     # Handle --settings
     if args.settings:
@@ -357,6 +492,19 @@ def main():
     if args.no_kalman: config.kalman_enabled = False
     if args.no_zoom: config.zoom_enabled = False
     if args.no_calibration: config.adaptive_calibration = False
+    if args.no_voice: config.voice_enabled = False
+    # ═══ v9.0 flag overrides ═══
+    if args.gaze: config.gaze_enabled = True
+    if args.no_gaze: config.gaze_enabled = False
+    if args.fusion: config.fusion_mode = "fusion"
+    if args.hands_free: config.fusion_mode = "hands_free"
+    if args.assist: config.fusion_mode = "assist"
+    if args.interaction: config.fusion_mode = args.interaction.replace("-", "_")
+    # Handle --gaze-calibrate (v9.0) — runs the guided (or simulated) flow,
+    # saves the fit to ~/.airmouse/gaze_calibration.json and exits.
+    if args.gaze_calibrate:
+        ok = _run_gaze_calibration(config, simulated=args.gaze_sim)
+        sys.exit(0 if ok else 1)
 
     # Trackpad mode — natural trackpad feel (tap=click, hold=drag, 2-finger=scroll)
     trackpad_mode = args.trackpad or getattr(config, 'trackpad_mode', False)
@@ -489,6 +637,17 @@ def main():
     elif config.adaptive_calibration and calib.is_ready:
         print(f"  >> Adaptive calibration: loaded (coverage {calib.coverage:.0%})")
 
+    # ═══ v9.0 — multimodal utterance tap (raw transcripts for NL) ═══
+    utterance_queue = []          # raw transcript strings from voice
+
+    def _on_transcript(transcript, command="", score=0.0):
+        """Voice engine callback: feed raw text to the v9 NL pipeline."""
+        try:
+            if agent is not None and transcript:
+                utterance_queue.append((transcript, time.perf_counter()))
+        except Exception:
+            pass
+
     # ═══ v5.0 — Voice Control ═══
     voice = None
     voice_caption = ""        # last transcript for HUD
@@ -496,7 +655,8 @@ def main():
     if config.voice_enabled:
         sensitivity = config.voice_sensitivity if config.voice_sensitivity in SENSITIVITY_PROFILES else "high"
         mic_index = config.voice_mic_index if isinstance(config.voice_mic_index, int) and config.voice_mic_index >= 0 else None
-        voice = VoiceCommandEngine(sensitivity=sensitivity, mic_index=mic_index)
+        voice = VoiceCommandEngine(sensitivity=sensitivity, mic_index=mic_index,
+                                   on_transcript=_on_transcript)
         if voice.is_available():
             voice.start()
             print(f"  >> VOICE ONLINE ({sensitivity} mode) — say: click, right click,"
@@ -505,6 +665,49 @@ def main():
             print("  >> Voice requested but SpeechRecognition/pyaudio unavailable.")
             print("     Install:  pip install SpeechRecognition pyaudio")
             voice = None
+
+    # ═══ v9.0 — Interaction Agent (multimodal intelligence) ═══
+    # Wires gaze + hand + voice + screen understanding into one pipeline:
+    # perception -> fusion -> intent -> action -> verification -> recovery.
+    # Pure v5 behaviour is unchanged when the agent is inactive.
+    agent = None
+    v9_owns_actions = False
+    v9_summary = {"intent": "", "action": "", "target": ""}
+    if (config.gaze_enabled or config.fusion_mode != "hand") and \
+            config.fusion_mode in ("gaze", "voice", "fusion", "hands_free", "assist"):
+        try:
+            agent = InteractionAgent({
+                "gaze_enabled": config.gaze_enabled,
+                "voice_enabled": config.voice_enabled,
+                "mode": config.fusion_mode,
+                "safety_level": config.safety_level,
+                "screen_w": screen_w,
+                "screen_h": screen_h,
+                "screen_refresh": config.screen_refresh_interval,
+                "dwell_confirm": True,
+                "blink_confirm": config.gaze_blink_click,
+                "long_blink_estop": config.gaze_long_blink_estop,
+                "min_gaze_confidence": config.gaze_min_confidence,
+                "intent_config": {"min_confidence": config.intent_min_confidence},
+                "action_config": {"timeout": config.action_timeout,
+                                  "max_retries": config.action_max_retries},
+                "fusion_config": {"mode_switch_min_interval": 0.35},
+                "safety_config": {"max_actions_per_sec": config.max_actions_per_sec,
+                                  "min_click_interval": config.min_click_interval,
+                                  "confirmation_timeout": config.confirmation_timeout,
+                                  "stream_loss_grace": config.stream_loss_grace},
+            })
+            v9_owns_actions = True
+            print(f"  >> V9 MULTIMODAL ONLINE — mode: {config.fusion_mode.upper()}"
+                  f"{', gaze ' + ('ON' if config.gaze_enabled else 'off')}"
+                  ", fusion engine active")
+            print("     Say things like: 'click that', 'scroll down a little',"
+                  " 'close this window', 'stop everything'")
+            print("     ESC = emergency stop   [f] cycle mode   [g] gaze on/off")
+        except Exception as e:
+            print(f"  !! v9 agent unavailable ({e}) — continuing in v5 mode")
+            agent = None
+            v9_owns_actions = False
 
     # ═══ v5.0 — Pinch-to-Zoom ═══
     # Zoom engages when pinch is HELD past zoom_engage_hold; a quick pinch
@@ -723,8 +926,8 @@ def main():
     # Banner
     print()
     print("  +==================================================+")
-    print(f"  |   AirMouse v{_pkg.__version__} - VOICE + KALMAN Edition     |")
-    print("  |   14 gestures | Hybrid filter | Voice | Zoom | Macros |")
+    print(f"  |   AirMouse v{_pkg.__version__} - MULTIMODAL INTELLIGENCE   |")
+    print("  |  Eyes + Hands + Voice | Fusion | Intent | Safety | Macros |")
     print("  +==================================================+")
     print(f"  Screen: {screen_w}x{screen_h}  |  Audio: {'ON' if config.audio_enabled else 'OFF'}  |  Gestures: 14+2 swipe")
     print(f"  Tracking: {'DIRECT (1:1 finger-to-screen)' if is_direct else 'IRONMAN (exponential finger-relative)'}")
@@ -786,6 +989,16 @@ def main():
                     hand_stable = True  # Direct mode doesn't need stability gating
                 else:
                     hand_stable = home.is_stable() if home.is_calibrated else False
+                # v9: when the multimodal agent owns actions, hand gestures
+                # become FUSION CONFIRMATIONS (hand:pinch near gaze target)
+                # instead of direct mouse actions — no double-clicking.
+                if v9_owns_actions:
+                    if config.fusion_mode in ("hands_free", "gaze", "assist"):
+                        gesture = Gesture.NONE  # hands-free: hands ignored
+                    elif gesture in (Gesture.PINCH, Gesture.PEACE, Gesture.PALM,
+                                     Gesture.FIST, Gesture.THUMBS_UP, Gesture.THREE,
+                                     Gesture.PINKY):
+                        gesture = Gesture.NONE  # owned by the action engine
                 gesture = gsm.update(raw_gesture, now=now, hand_stable=hand_stable)
                 gesture_changed = (gesture != prev_gesture)
 
@@ -1243,6 +1456,67 @@ def main():
 
             # Display
             if config.show_camera and debug_mode and hand_data["frame"] is not None:
+                # ═══ v9.0 — MULTIMODAL TICK (gaze + hand + voice + screen) ═══
+                # Runs once per frame AFTER gesture recognition so the fusion
+                # engine receives the confirmed hand gesture as confirmation.
+                if agent is not None:
+                    v9_t0 = time.perf_counter()
+                    v9_frame = hand_data.get("frame") if isinstance(hand_data, dict) else None
+                    v9_utterance = ""
+                    if utterance_queue:
+                        v9_utterance, _v9ts = utterance_queue.pop(0)
+                    v9_hand = None
+                    if hand_data.get("hand_found") and gesture is not None:
+                        try:
+                            v9_hand = {
+                                "gesture": getattr(gesture, "name", str(gesture)).lower(),
+                                "point": (float(cursor_pos[0]), float(cursor_pos[1]))
+                                if cursor_pos is not None else None,
+                                "confidence": float(gesture_confidence or 0.0),
+                            }
+                        except Exception:
+                            v9_hand = None
+                    try:
+                        v9_out = agent.process_frame(
+                            frame=v9_frame if config.gaze_enabled else None,
+                            hand_data=v9_hand,
+                            utterance=v9_utterance,
+                            now=v9_t0,
+                        )
+                        v9_reports = v9_out.get("reports", [])
+                        if v9_reports:
+                            _lr = v9_reports[-1]
+                            v9_summary["action"] = (
+                                (f"{_lr.plan.action.value}" if _lr.plan else "?")
+                                + (":ok" if _lr.ok else f":{_lr.status.value}"))
+                        else:
+                            v9_summary["action"] = ""
+                        _dec = v9_out.get("decision")
+                        if _dec is not None:
+                            if _dec.target is not None:
+                                try:
+                                    v9_summary["target"] = agent.screen.describe_target(_dec.target)
+                                except Exception:
+                                    v9_summary["target"] = _dec.target.id
+                            elif _dec.point is not None:
+                                v9_summary["target"] = f"({int(_dec.point[0])},{int(_dec.point[1])})"
+                            else:
+                                v9_summary["target"] = ""
+                        _nin = v9_out.get("intents", [])
+                        v9_summary["intent"] = _nin[-1].type.value if _nin else ""
+                        v9_summary["mode"] = str(getattr(agent, "mode", "") or "")
+                        _gs = v9_out.get("gaze_state")
+                        v9_summary["gaze_conf"] = (
+                            float(getattr(_gs, "confidence", 0.0) or 0.0)
+                            if _gs is not None else None)
+                        v9_summary["estop"] = bool(
+                            getattr(agent.safety, "level", None) is not None
+                            and str(getattr(agent.safety, "level", "")) .endswith("EMERGENCY"))
+                        if v9_out.get("estop"):
+                            v9_summary["intent"] = "EMERGENCY_STOP"
+                    except Exception as _v9e:
+                        v9_summary["action"] = f"err:{_v9e}"
+
                 _draw_hud(hand_data["frame"], gesture_result, spring, fps,
                           config, cursor_frozen, dragging, scrolling,
                           volume_mode, brightness_mode, precision_mode,
@@ -1252,11 +1526,18 @@ def main():
                           zoom_active=(pinch_zoom.active if pinch_zoom else False),
                           recording=recording_macro,
                           kalman_on=(is_direct and config.kalman_enabled),
-                          cal_ready=calib.is_ready)
+                          cal_ready=calib.is_ready,
+                          v9_state=v9_summary)
                 cv2.imshow("AirMouse", hand_data["frame"])
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):
                     running = False
+                elif key == 27:  # ESC — emergency stop in v9, quit otherwise
+                    if agent is not None and not str(getattr(agent.safety, "level", "")).endswith("EMERGENCY"):
+                        agent.trip_estop("escape_key")
+                        print("  >> EMERGENCY STOP (ESC) — [x] to reset")
+                    else:
+                        running = False
                 elif key == ord("d"):
                     debug_mode = not debug_mode
                 elif key == ord("r"):
@@ -1326,6 +1607,41 @@ def main():
                         recording_macro = True
                         audio.mode_enter()
                         print(f"  -> Recording macro '{macro_name}' (press [m] again to stop)")
+                # ═══ v9.0 hotkeys ═══
+                elif key == ord("g"):
+                    if agent is not None:
+                        config.gaze_enabled = not config.gaze_enabled
+                        agent.config.gaze_enabled = config.gaze_enabled
+                        audio.mode_enter() if config.gaze_enabled else audio.mode_exit()
+                        print(f"  -> Gaze {'ON' if config.gaze_enabled else 'OFF'}")
+                    else:
+                        print("  -> Gaze requires v9 mode (--gaze / --fusion / --hands-free)")
+                elif key == ord("f"):
+                    if agent is not None:
+                        _cycle = ["hand", "fusion", "gaze", "hands_free", "assist", "voice"]
+                        _cur = str(agent.config.mode)
+                        _next = _cycle[(_cycle.index(_cur) + 1) % len(_cycle)] \
+                            if _cur in _cycle else "fusion"
+                        if agent.set_mode(_next):
+                            config.fusion_mode = _next
+                            print(f"  -> Interaction mode: {_next.upper()}")
+                        else:
+                            print("  -> Mode switch rate-limited, try again in a moment")
+                    else:
+                        print("  -> Fusion modes require v9 mode (--fusion / --hands-free)")
+                elif key == ord("x"):
+                    if agent is not None:
+                        _lvl = str(getattr(agent.safety, "level", ""))
+                        if _lvl.endswith("EMERGENCY"):
+                            agent.reset_estop()
+                            print("  -> E-STOP RESET — actions re-enabled")
+                            audio.mode_enter()
+                        else:
+                            agent.trip_estop("keyboard")
+                            print("  >> EMERGENCY STOP engaged — press [x] again to reset")
+                            audio.freeze()
+                    else:
+                        print("  -> E-stop requires v9 mode")
 
             # FPS throttling
             elapsed = time.perf_counter() - t0
@@ -1364,6 +1680,23 @@ def main():
         if dragging:
             try:
                 mouse.stop_drag()
+            except Exception:
+                pass
+        # ═══ v9.0 shutdown: agent teardown + performance report ═══
+        if agent is not None:
+            try:
+                if config.telemetry_enabled:
+                    t = agent.telemetry.snapshot()
+                    print("  ── v9 performance report ──")
+                    print(f"     camera {t.fps_camera:.1f} fps | gaze {t.fps_gaze:.1f} fps"
+                          f" | gaze latency {t.latency_gaze_ms:.1f} ms"
+                          f" | fusion {t.latency_fusion_ms:.1f} ms"
+                          f" | action {t.latency_action_ms:.1f} ms")
+                    print(f"     actions: {t.actions_total} total,"
+                          f" {t.actions_success} ok, {t.actions_failed} failed,"
+                          f" {t.actions_blocked} blocked by safety,"
+                          f" {t.recoveries} recoveries, {t.estop_count} e-stops")
+                agent.shutdown()
             except Exception:
                 pass
         try:

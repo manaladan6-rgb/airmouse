@@ -161,6 +161,26 @@ class Config:
     adaptive_calibration = True      # learns your reach box + tremor + speed
     calibration_save_every = 300     # autosave interval (frames)
 
+    # ═══ v9.0 — MULTIMODAL / GAZE / FUSION / SAFETY ═══
+    fusion_mode = "hand"             # hand | gaze | voice | fusion | hands_free | assist
+    gaze_enabled = False             # webcam eye/gaze subsystem (FaceMesh iris)
+    gaze_min_confidence = 0.55       # below this, gaze never triggers actions
+    gaze_dwell_time = 1.0            # seconds of fixation before dwell-click
+    gaze_blink_click = False         # blink = click (OFF by default: accident-prone)
+    gaze_long_blink_estop = True     # long blink (~1.2s) trips the e-stop latch
+    screen_refresh_interval = 0.5    # screen-understanding model cache (seconds)
+    screen_ocr_enabled = False       # PRIVACY: OCR target detection is opt-in
+    intent_min_confidence = 0.35     # drop intents below this confidence
+    action_timeout = 2.0             # seconds per action attempt
+    action_max_retries = 1           # safe retries per action
+    safety_level = "normal"          # normal | careful | safe
+    max_actions_per_sec = 8          # sliding-window action rate limit
+    min_click_interval = 0.15        # seconds between click-class actions
+    confirmation_timeout = 5.0       # sensitive-action confirmation expiry
+    stream_loss_grace = 2.0          # camera/mic loss before SAFE_MODE
+    macro_max_steps = 200            # semantic macro program guard
+    telemetry_enabled = True         # rolling perf stats (fps/latency/counters)
+
     def save_defaults(self):
         """Save current config as TOML (creates template for user editing)."""
         if tomllib is None:
@@ -270,6 +290,26 @@ class Config:
             "[calibration]",
             f"adaptive_enabled = {str(self.adaptive_calibration).lower()}",
             f"save_every = {self.calibration_save_every}          # autosave interval (frames)",
+            "",
+            "[v9]  # v9.0 multimodal: gaze + fusion + intent + safety",
+            f"fusion_mode = \"{self.fusion_mode}\"        # hand | gaze | voice | fusion | hands_free | assist",
+            f"gaze_enabled = {str(self.gaze_enabled).lower()}          # webcam eye/gaze subsystem",
+            f"gaze_min_confidence = {self.gaze_min_confidence}      # gaze never acts below this",
+            f"gaze_dwell_time = {self.gaze_dwell_time}        # fixation seconds before dwell-click",
+            f"gaze_blink_click = {str(self.gaze_blink_click).lower()}       # blink = click (accident-prone, off)",
+            f"gaze_long_blink_estop = {str(self.gaze_long_blink_estop).lower()}   # long blink trips e-stop",
+            f"screen_refresh_interval = {self.screen_refresh_interval}   # screen model cache seconds",
+            f"screen_ocr_enabled = {str(self.screen_ocr_enabled).lower()}      # PRIVACY: OCR is opt-in only",
+            f"intent_min_confidence = {self.intent_min_confidence}    # drop low-confidence intents",
+            f"action_timeout = {self.action_timeout}        # seconds per action attempt",
+            f"action_max_retries = {self.action_max_retries}      # safe retries per action",
+            f"safety_level = \"{self.safety_level}\"         # normal | careful | safe",
+            f"max_actions_per_sec = {self.max_actions_per_sec}     # sliding-window rate limit",
+            f"min_click_interval = {self.min_click_interval}     # seconds between clicks",
+            f"confirmation_timeout = {self.confirmation_timeout}   # sensitive-action confirmation expiry",
+            f"stream_loss_grace = {self.stream_loss_grace}       # camera/mic loss before SAFE_MODE",
+            f"macro_max_steps = {self.macro_max_steps}        # semantic macro guard",
+            f"telemetry_enabled = {str(self.telemetry_enabled).lower()}      # perf stats on shutdown",
         ]
         with open(CONFIG_PATH, "w") as f:
             f.write("\n".join(lines) + "\n")
@@ -396,6 +436,28 @@ class Config:
                 cb = data["calibration"]
                 self.adaptive_calibration = cb.get("adaptive_enabled", self.adaptive_calibration)
                 self.calibration_save_every = cb.get("save_every", self.calibration_save_every)
+
+            # ═══ v9.0 sections ═══
+            if "v9" in data:
+                v9 = data["v9"]
+                self.fusion_mode = v9.get("fusion_mode", self.fusion_mode)
+                self.gaze_enabled = v9.get("gaze_enabled", self.gaze_enabled)
+                self.gaze_min_confidence = v9.get("gaze_min_confidence", self.gaze_min_confidence)
+                self.gaze_dwell_time = v9.get("gaze_dwell_time", self.gaze_dwell_time)
+                self.gaze_blink_click = v9.get("gaze_blink_click", self.gaze_blink_click)
+                self.gaze_long_blink_estop = v9.get("gaze_long_blink_estop", self.gaze_long_blink_estop)
+                self.screen_refresh_interval = v9.get("screen_refresh_interval", self.screen_refresh_interval)
+                self.screen_ocr_enabled = v9.get("screen_ocr_enabled", self.screen_ocr_enabled)
+                self.intent_min_confidence = v9.get("intent_min_confidence", self.intent_min_confidence)
+                self.action_timeout = v9.get("action_timeout", self.action_timeout)
+                self.action_max_retries = v9.get("action_max_retries", self.action_max_retries)
+                self.safety_level = v9.get("safety_level", self.safety_level)
+                self.max_actions_per_sec = v9.get("max_actions_per_sec", self.max_actions_per_sec)
+                self.min_click_interval = v9.get("min_click_interval", self.min_click_interval)
+                self.confirmation_timeout = v9.get("confirmation_timeout", self.confirmation_timeout)
+                self.stream_loss_grace = v9.get("stream_loss_grace", self.stream_loss_grace)
+                self.macro_max_steps = v9.get("macro_max_steps", self.macro_max_steps)
+                self.telemetry_enabled = v9.get("telemetry_enabled", self.telemetry_enabled)
 
         except Exception as e:
             print(f"  Warning: Config load error: {e}, using defaults")
