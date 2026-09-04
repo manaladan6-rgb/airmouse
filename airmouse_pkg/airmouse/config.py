@@ -108,6 +108,14 @@ class Config:
     temporal_world_enabled = True
     temporal_world_max_history = 128
 
+    # ═══ v13 — Goal Hierarchy + Task Engine (§4/§5) ═══
+    # [goals]
+    goals_parser_enabled = True
+    goals_interpreter_enabled = False   # optional adapter, off by default
+    # [tasks]
+    tasks_max_tasks = 100
+    tasks_default_step_timeout = 30.0
+
     # [privacy]
     privacy_mode = False               # pause learning + history, wipe nothing
     telemetry_enabled = False          # OFF by default; nothing phones home
