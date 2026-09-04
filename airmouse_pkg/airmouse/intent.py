@@ -300,16 +300,24 @@ class IntentEngine:
                 return [stop]
 
             # 2. Hand/voice-confirmed click (gaze target + explicit confirm).
+            #    The GAZE source is stamped ONLY when gaze actually
+            #    contributed to the decision — otherwise the safety gate's
+            #    gaze-confidence rule would wrongly demand eye confidence
+            #    for hand/voice-only flows (e.g. gaze disabled).
             click_emitted = False
             pt = decision.target_point()
             if decision.has_target and pt is not None:
                 confirmations = list(decision.confirmations or [])
                 if "hand:pinch" in confirmations or "voice:click" in confirmations:
-                    sources = (
-                        Modality.GAZE | Modality.HAND
-                        if "hand:pinch" in confirmations
-                        else Modality.GAZE | Modality.VOICE
-                    )
+                    gaze_contributed = bool(
+                        getattr(decision, "contributing", Modality.NONE)
+                        & Modality.GAZE)
+                    if "hand:pinch" in confirmations:
+                        sources = (Modality.GAZE | Modality.HAND
+                                   if gaze_contributed else Modality.HAND)
+                    else:
+                        sources = (Modality.GAZE | Modality.VOICE
+                                   if gaze_contributed else Modality.VOICE)
                     cand = Intent(
                         type=IntentType.CLICK,
                         target=decision.target,
