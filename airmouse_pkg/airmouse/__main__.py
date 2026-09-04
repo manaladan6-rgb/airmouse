@@ -696,10 +696,26 @@ def main():
             print("  cancelled — nothing changed")
             return 0
         if mem_arg == "reset":
-            persistence.memory_reset()
+            res = persistence.memory_reset()
+            failed = {n: s for n, s in res.get("stores", {}).items()
+                      if not s.get("cleared") or s.get("error")}
+            if failed:
+                print("  reset INCOMPLETE — some stores could not be cleared:")
+                for n, s in sorted(failed.items()):
+                    print(f"    - {n}: {s.get('error', 'not cleared')}")
+                print("  (check directory permissions; backups are under <home>/backups/)")
+                return 1
             print("  reset complete — backups saved under <home>/backups/")
         else:
-            persistence.memory_delete()
+            res = persistence.memory_delete()
+            failed = sorted(n for n, s in res.get("stores", {}).items()
+                            if not s.get("deleted"))
+            if failed:
+                print("  delete INCOMPLETE — some store files could not be removed:")
+                for n in failed:
+                    print(f"    - {n}")
+                print("  (check directory permissions; backups are under <home>/backups/)")
+                return 1
             print("  deleted store files — backups kept under <home>/backups/")
         return 0
 
@@ -1207,6 +1223,12 @@ def main():
         except Exception:
             pass
 
+    # ═══ v10.0 — offline voice engine handle ═══
+    # Declared BEFORE the v5 voice block below: the v5 cloud engine is a
+    # fallback that must only start when the v10 offline engine will not.
+    # (v15.1.0 regression: this read preceded the assignment — UnboundLocalError
+    # on every `airmouse --voice` startup; fixed in v15.1.1.)
+    voice_engine10 = None
     # ═══ v5.0 — Voice Control ═══
     voice = None
     voice_caption = ""        # last transcript for HUD
@@ -1329,6 +1351,15 @@ def main():
             voice_engine10 = OfflineVoiceEngine(
                 {"mode": (args.voice_mode or "command")},
                 bus=event_bus, context=context_engine)
+            # v10 offline voice replaces the v5 cloud engine when active:
+            # exactly one voice owner (v15.1.1 ownership invariant).
+            if voice is not None:
+                try:
+                    voice.stop()
+                except Exception:
+                    pass
+                voice = None
+                print("  >> v5 cloud voice stopped — v10 offline voice owns speech")
             # deterministic transcript injection hook for CI (AIRMOUSE_VOICE_TEXT)
             print(f"  >> V10 OFFLINE VOICE ONLINE — mode: "
                   f"{voice_engine10.mode.value.upper()} (deterministic local grammar)")
@@ -1719,9 +1750,14 @@ def main():
                     hand_stable = True  # Direct mode doesn't need stability gating
                 else:
                     hand_stable = home.is_stable() if home.is_calibrated else False
+                gesture = gsm.update(raw_gesture, now=now, hand_stable=hand_stable)
                 # v9: when the multimodal agent owns actions, hand gestures
                 # become FUSION CONFIRMATIONS (hand:pinch near gaze target)
-                # instead of direct mouse actions — no double-clicking.
+                # instead of direct mouse actions — no double-control.
+                # (v15.1.1 fix: ownership is applied AFTER the state machine
+                # update — previously the gate ran before `gesture` existed
+                # (UnboundLocalError under --fusion --gaze) and was then
+                # silently overwritten, so hands-free modes double-controlled.)
                 if v9_owns_actions:
                     if config.fusion_mode in ("hands_free", "gaze", "assist"):
                         gesture = Gesture.NONE  # hands-free: hands ignored
@@ -1735,7 +1771,6 @@ def main():
                         gesture = Gesture.NONE  # owned by the action engine
                     # fusion WITHOUT gaze: keep v5 gesture actions as the
                     # functional fallback (confirmed clicks need a gaze target)
-                gesture = gsm.update(raw_gesture, now=now, hand_stable=hand_stable)
                 gesture_changed = (gesture != prev_gesture)
 
                 # Sound feedback on gesture confirmation

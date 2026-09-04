@@ -1,5 +1,35 @@
 # Changelog
 
+## v15.1.1 — P0 STARTUP REPAIR
+
+Foundation repair release: fixes the three P0 defects found by the
+full-spectrum audit (airmouse_pkg/docs/AUDIT_REPORT_v15.1.0.md). No
+features removed; behavior otherwise unchanged.
+
+- FIX (P0): `airmouse --voice` crashed at startup with UnboundLocalError
+  (voice_engine10 read at __main__.py:1214 before its assignment). The
+  v10 offline engine handle is now declared before the v5 fallback
+  block, and when the v10 engine activates a running v5 cloud engine is
+  stopped — exactly one voice owner. The live microphone path works
+  again.
+- FIX (P0): the v9 gesture-ownership gate was inert (overwritten by the
+  state-machine update) and crashed under `--fusion --gaze`
+  (read-before-assignment). Ownership is now applied AFTER the state
+  machine: in hands-free/gaze/assist modes hand gestures no longer fire
+  direct mouse actions while the agent owns interaction.
+- FIX (P0, CLI honesty): `airmouse memory reset/delete` now surface
+  per-store failures (cleared=False / errors) and exit 1 instead of
+  printing unconditional success.
+- FIX: two latent NameError crashes — `Sequence` was undefined in
+  modes.py:589 and target_resolver.py:146 (would crash those paths on
+  first execution).
+- TEST: new tests/test_startup.py — drives the REAL main() through 8
+  documented startup flag combinations with stubbed hardware (bare,
+  --voice, --gaze, --fusion, --voice --fusion, --gaze --fusion,
+  --hands-free, --voice-mode command), plus voice-initialization and
+  voice-ownership handoff assertions. Startup wiring regressions can no
+  longer ship green. Suite: 1323 passed / 0 failed.
+
 ## v15.1.0 — HARDENED RELEASE (of v15.0.0)
 
 A hardening release: **no architecture changes** — everything from

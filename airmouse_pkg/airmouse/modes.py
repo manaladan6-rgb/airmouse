@@ -31,7 +31,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 MAX_MARKERS = 500
 MAX_NOTES = 300
