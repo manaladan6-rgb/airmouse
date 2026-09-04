@@ -105,7 +105,8 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
               precision_mode, gsm_progress, gesture_confidence,
               voice_caption=None, voice_active=False, zoom_active=False,
               recording=False, kalman_on=False, cal_ready=False,
-              v9_state=None, v10_state=None, v115_state=None):
+              v9_state=None, v10_state=None, v115_state=None,
+              v15_state=None):
     """Draw Iron Man HUD overlay with v3.1 enhancements."""
     if frame is None:
         return
@@ -226,6 +227,23 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
             if v115_state.get("transcript"):
                 badges.append((f"\"{str(v115_state['transcript'])[-18:]}\"",
                                (200, 230, 255)))
+        except Exception:
+            pass
+    # v15 badges: agent control, task, recovery (§33 — the user must
+    # ALWAYS know whether an AI agent is controlling the computer)
+    if v15_state:
+        try:
+            if v15_state.get("agent"):
+                badges.append((f"AGENT:{str(v15_state['agent'])[:8].upper()}",
+                               (255, 120, 120)))
+            if v15_state.get("task"):
+                badges.append((f"TASK:{str(v15_state['task'])[:12].upper()}",
+                               (160, 255, 160)))
+            if v15_state.get("confirm"):
+                badges.append(("CONFIRM?", (255, 210, 90)))
+            if v15_state.get("recovery"):
+                badges.append((f"RECOVER:{str(v15_state['recovery'])[:8].upper()}",
+                               (255, 160, 90)))
         except Exception:
             pass
     if kalman_on:
@@ -498,8 +516,12 @@ def main():
                         choices=["voice-status", "gestures", "commands",
                                  "browser", "offline-test", "diagnostics",
                                  "intelligence", "memory", "vocabulary",
-                                 "workflows", "self-test"],
-                        help="v10/v11.5 info/diagnostic subcommand (prints and exits)")
+                                 "workflows", "self-test",
+                                 "status", "capabilities", "observe",
+                                 "world", "twin", "skills", "agents",
+                                 "permissions", "tasks", "protocol",
+                                 "benchmark"],
+                        help="v10/v11.5/v15 info/diagnostic subcommand (prints and exits)")
     args = parser.parse_args()
 
     if args.version:
@@ -566,6 +588,132 @@ def main():
         from .selftest import run_self_test, format_self_test
         print(format_self_test(run_self_test(
             intelligence=not args.no_intelligence)))
+        return
+
+    # ═══ v15 subcommands (print + exit; all local, all fast) ═══
+    if args.command == "status":
+        print(f"  AirMouse v{_pkg.__version__} — Universal Human + AI "
+              f"Interaction Platform")
+        print(f"  protocol: AIP 1.0 (local-first, permission-aware)")
+        print(f"  hierarchy: E-STOP > HUMAN OVERRIDE > SAFETY > "
+              f"PERMISSION > AGENT > PREDICTION")
+        from .licensing import CapabilityLicensing
+        lic = CapabilityLicensing().state()
+        print(f"  license: {lic['tier']} (local-only, "
+              f"free core complete)")
+        return
+    if args.command == "capabilities":
+        from .aip import build_capabilities
+        caps = build_capabilities(
+            {"voice": False, "hand": False, "gaze": False,
+             "keyboard": True, "browser": False, "offline": True},
+            {"click": "mouse.click", "type_text": "type.text",
+             "open_app": "application.launch",
+             "navigate": "browser.navigate",
+             "observe": "observe.screen"})
+        print("  capabilities (AIP discover):")
+        for c in caps:
+            av = "+" if c["available"] else "-"
+            perm = f" perm={c['permission']}" if c.get("permission") else ""
+            print(f"    [{av}] {c['name']} ({c['kind']}){perm}")
+        return
+    if args.command == "observe":
+        from .simulator import Simulator
+        snap = Simulator().observe()
+        print("  observe (simulated computer — no hardware claimed):")
+        for k in sorted(snap):
+            print(f"    {k}: {snap[k]}")
+        return
+    if args.command == "world":
+        from .world_model_temporal import TemporalWorldModel
+        w = TemporalWorldModel()
+        w.observe(human={"mode": "unknown"}, cause="cli")
+        print("  temporal world model:", w.explain())
+        print("  predict_state:", w.predict_state())
+        return
+    if args.command == "twin":
+        from .intelligence.twin import PersonalInteractionTwin
+        t = PersonalInteractionTwin()
+        st = t.status()
+        print(f"  personal interaction twin (optional, local): "
+              f"{st['facts']}/{st['capacity']} facts, "
+              f"{st['observations']} observations, "
+              f"{st['corrections']} corrections, "
+              f"{st['errors']} errors")
+        return
+    if args.command == "skills":
+        from .skills import PersonalSkillLibrary
+        lib = PersonalSkillLibrary()
+        rows = lib.list_skills()
+        print(f"  personal skill library — {len(rows)} skill(s) "
+              f"(proposal+approval required; never silent)")
+        for r in rows[:10]:
+            print(f"    {r['skill_id']} {r['name']} v{r['version']} "
+                  f"risk={r['risk']} enabled={r['enabled']}")
+        return
+    if args.command == "agents":
+        from .agents import AgentRegistry
+        reg = AgentRegistry()
+        rows = reg.discover()
+        print(f"  multi-agent registry — {len(rows)} agent(s) "
+              f"(leases + conflict resolution + human override)")
+        for r in rows:
+            print(f"    {r['agent_id']} pri={r['priority']} "
+                  f"state={r['state']}")
+        return
+    if args.command == "permissions":
+        from .permissions import PERMISSION_KEYS, AgentPermissionEngine
+        p = AgentPermissionEngine()
+        print("  agent permission keys (§15 granular set):")
+        for k in PERMISSION_KEYS:
+            print(f"    {k}")
+        print(f"  decisions: allow deny ask allow_once allow_session "
+              f"allow_pattern — ASK fails closed")
+        return
+    if args.command == "tasks":
+        from .tasks import TaskEngine
+        te = TaskEngine()
+        rows = te.list_tasks()
+        print(f"  task engine — {len(rows)} task(s); "
+              f"destructive steps require human approval")
+        return
+    if args.command == "protocol":
+        from .aip import AIP_VERSION, schemas_document
+        doc = schemas_document()
+        print(f"  AirMouse Interaction Protocol (AIP) v{AIP_VERSION}")
+        print(f"  concepts: DISCOVER OBSERVE TARGET REQUEST AUTHORIZE "
+              f"EXECUTE VERIFY RESULT")
+        print(f"  schemas: {', '.join(sorted(doc['schemas']))}")
+        return
+    if args.command == "benchmark":
+        import time as _t
+        print("  v15 performance spot-check (this machine):")
+        t0 = _t.perf_counter()
+        from airmouse.intelligence.twin import PersonalInteractionTwin
+        twin = PersonalInteractionTwin()
+        t1 = _t.perf_counter()
+        for i in range(100):
+            twin.learn("preference", f"k{i % 20}", "v", confidence=0.6)
+        t2 = _t.perf_counter()
+        from airmouse.world_model_temporal import TemporalWorldModel
+        w = TemporalWorldModel()
+        t3 = _t.perf_counter()
+        for i in range(100):
+            w.observe(computer={"active_application": "sim"},
+                      cause="bench")
+        t4 = _t.perf_counter()
+        from airmouse.tasks import TaskEngine
+        te = TaskEngine()
+        t5 = _t.perf_counter()
+        for i in range(50):
+            te.create_task(f"bench {i}")
+        t6 = _t.perf_counter()
+        print(f"    import+construct twin: {(t1 - t0) * 1000:.2f} ms")
+        print(f"    100 twin learns:      {(t2 - t1) * 1000:.2f} ms")
+        print(f"    construct world:      {(t3 - t2) * 1000:.2f} ms")
+        print(f"    100 world observes:   {(t4 - t3) * 1000:.2f} ms")
+        print(f"    construct tasks:      {(t5 - t4) * 1000:.2f} ms")
+        print(f"    50 task creations:    {(t6 - t5) * 1000:.2f} ms")
         return
 
     # ═══ v10.0 subcommands (print + exit) ═══
@@ -1980,7 +2128,9 @@ def main():
                           cal_ready=calib.is_ready,
                           v9_state=v9_summary,
                           v10_state=v10_state,
-                          v115_state=v115_state)
+                          v115_state=v115_state,
+                          v15_state=None)  # agent/task/recovery badges
+                          # populated by the agent runtime at runtime
                 cv2.imshow("AirMouse", hand_data["frame"])
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):

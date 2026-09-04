@@ -137,6 +137,22 @@ class Config:
     aip_version = "1.0"
     aip_max_message_bytes = 262144
 
+    # ═══ v15 — Agents/Permissions/DiTM/Marketplace/Licensing ═══
+    # [agents]
+    agents_enabled = True
+    agents_max_agents = 32
+    agents_default_lease_ttl = 30.0
+    # [permissions]
+    permissions_fail_closed = True      # ASK without human == NO
+    # [ditm]
+    ditm_enabled = True                 # DO IT WITH ME flagship flow
+    # [onboarding]
+    onboarding_entry = "automatic"      # voice|hands|eyes|keyboard|automatic|all
+    # [marketplace]
+    marketplace_enabled = True          # manifests are data; no code exec
+    # [licensing]
+    licensing_tier = "free"             # local, transparent, no crippling
+
     # [privacy]
     privacy_mode = False               # pause learning + history, wipe nothing
     telemetry_enabled = False          # OFF by default; nothing phones home
