@@ -213,3 +213,30 @@ Stage Summary:
 - 15 new modules + agent/config/CLI/HUD/offline integration, all additive; version 11.5.0
 - Full v10 regression suite stays green (630 passed) at every commit
 - Offline selftest 18/18 (network truly blocked)
+
+---
+Task ID: 11-docs
+Agent: docs subagent
+Task: v11.5 documentation set
+
+Work Log:
+- Read worklog.md + all existing docs (README/CHANGELOG/VERIFICATION_REPORT/docs/V10_ARCHITECTURE.md) to match tone/format
+- RE-VERIFIED every key claim against code before documenting:
+  - pytest tests/ -q → 786 passed, 0 failed, 0 skipped (11.0s); tests/test_v115.py = 156 tests; `-k budget` = 8 passed
+  - run_offline_selftest() → 18/18 PASS (5 new checks: intelligence/memory/vocabulary/transcription/fusion2_offline + network_actually_blocked)
+  - run_self_test()/format_self_test() → 15 components: 13 PASS, 1 OPTIONAL (RealLocalASR), 1 HARDWARE (Camera), 0 fail
+  - Re-measured §34 budgets with exact test workloads: prediction 0.004ms (<50ms), emoji 0.024ms (<50ms), memory record 0.005ms (<10ms), transcription tick 0.001ms (<100ms), fusion 0.008ms (<20ms), bus publish 0.002ms, model load 3.4ms (<500ms); 200-sentence artifact = 17,296 bytes; `airmouse intelligence` shows "0.1 KB of 30 MB budget" fresh
+  - wc -l on all 58 modules (29,646 LOC total; intelligence subpackage 3,445; transcription 624, modes 832, fusion2 291, world_model 265, text_control 250, privacy 193, selftest 233, dictation_text 343, __main__ 2164, agent 1045, config 593, offline 423)
+  - CLI: all flags read from __main__.py add_argument calls (9 new v11.5 flags, 11 subcommands); --version banner confirmed live
+  - fusion2.SIGNAL_WEIGHTS (0.30/0.25/0.25/0.10/5×0.05), world_model CONTEXTUAL_COMMANDS (12 families/15 utterances, confidence model 0.85/0.75/0.55/0.5/0.2, min 0.4), selftune TUNABLES (10 with bands+min_samples), PatternRecord schema, scrubber regexes/hints, workflows constants (step regex ^[a-z0-9][a-z0-9_-]{0,63}$, 3-8 steps, ≥3 reps, 200×24 caps, destructive sets), plugin 8 states + load() failure mapping, PRESENTATION_KEYS, MODE_REGISTRY phrase tables, 8 ACCESSIBILITY_PROFILES, 16 TextOps, 16 EDIT_COMMANDS, EMOJI_COOLDOWN 30s, transcription limits (500 segs/200k buffer/8MB export), spoken-punctuation phrase table, IntelligenceState, PrivacyFlags (cloud structurally forced False), offline.py v11.5 checks implementation, agent._learn_from_report + overrides keys, config v11.5 keys
+  - Security greps re-run: shell=True (only a docstring mention), eval(, exec(, os.system → NONE in 58 modules; subprocess argv-list only (one xdotool "--shell" output-flag noted, not a shell)
+  - tests/test_v115.py §43 malicious corpus + §34 budgets read and cited accurately
+- WROTE (line counts): docs/V11_5_ARCHITECTURE.md (347), docs/INTELLIGENCE_GUIDE.md (227), docs/TRANSCRIPTION_GUIDE.md (170), docs/TEACHER_GUIDE.md (87), docs/STUDENT_GUIDE.md (78), docs/OFFICE_GUIDE.md (93), docs/ACCESSIBILITY_GUIDE.md (92), docs/PRIVACY.md (108), docs/SECURITY.md (108), docs/PLUGIN_GUIDE.md (172), docs/CLI_REFERENCE.md (124)
+- UPDATED: README.md (202 lines, v11.5 hero + what's-new table + quick start + modes + privacy + honest status, v5-v10 condensed), CHANGELOG.md (437 lines, v11.5.0 entry on top with Added/Changed/Security/Fixed/Verification, all older entries intact), VERIFICATION_REPORT.md (411 lines, v11.5 report on top incl. SIMULATION vs PHYSICAL table + measured perf, full v10 report preserved below)
+- Honesty decisions: ~30MB = hard capacity budget not shipped size (fresh ≈ 0.1 KB, measured); "not a neural LLM" stated explicitly; punctuation/capitalization documented as deterministic heuristics NOT an AI punctuation model; no speaker-ID claims; presentation control documented as generic hotkeys with app-dependent caveats; ASR engines documented as present-but-not-installed (never pretended installed); webcam/mic/gaze/RF/CDP/real-ASR all marked NOT PHYSICALLY VERIFIED; PREDICTION ≠ EXECUTION documented with its 5 enforcement points
+- No Python code or tests modified; UTF-8 validated for all 14 files; honesty grep pass (no overclaims)
+
+Stage Summary:
+- 11 new guides in airmouse_pkg/docs/ + 3 updated top-level docs (README/CHANGELOG/VERIFICATION_REPORT), 2,656 lines total
+- Every factual claim verified against code, live CLI runs, re-run selftests, or re-measured benchmarks; hardware status table is explicit (everything = SIMULATION-VERIFIED; camera/mic/gaze/RF/CDP/real-ASR = NOT PHYSICALLY VERIFIED)
+- Docs only — working tree otherwise untouched

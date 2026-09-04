@@ -1,4 +1,195 @@
-# AirMouse v10.0.0 — Final Verification Report
+# AirMouse v11.5.0 — Final Verification Report
+
+Date: 2025-09-05 (build environment: Linux sandbox, Python 3.12)
+Scope: v10.0.0 → v11.5.0 "Adaptive Human-Computer Intelligence" per
+mission spec. Companion documents: `README.md` (user guide),
+`docs/V11_5_ARCHITECTURE.md` (deep dive), `docs/SECURITY.md`,
+`docs/PRIVACY.md`, `CHANGELOG.md` (history). The full v10 report is
+preserved below.
+
+---
+
+## 1. Implementation summary
+
+v11.5 adds 17 new modules (9 in the `intelligence/` subpackage) and
+extends 4 existing ones. Line counts are real `wc -l` values on the
+final tree (docstrings included). Package total: **58 Python modules /
+29,646 LOC** (v10: 41 modules / 22,781 LOC ⇒ net growth ≈ +6,900
+lines; `browser_extension/` assets unchanged at 235 lines).
+
+| Module | LOC | Status | Contents |
+|---|---:|---|---|
+| `intelligence/model.py` | 858 | NEW | PersonalInteractionModel: NGram+ActionMarkov+Command+Emoji+FeatureWeights; AIMM artifact (magic+version); ~30 MB capacity budget; quantized; deterministic pruning |
+| `intelligence/plugin.py` | 499 | NEW | IntelligencePlugin facade — never raises; 8 lifecycle states; atomic artifact persistence; validated export/import profile |
+| `intelligence/workflows.py` | 500 | NEW | WorkflowDiscovery (approval-gated), WorkflowStore, WorkflowRunner (preview + destructive confirmations), ProactiveAssistant, Suggestion |
+| `intelligence/memory.py` | 373 | NEW | InteractionMemory + PatternRecord schema; fail-closed sensitive-data scrubbing (is_sensitive/scrub_pattern); bounded 5,000 |
+| `intelligence/personalization.py` | 349 | NEW | Gesture/Gaze/Voice profiles incl. alias learning; PersonalizationEngine |
+| `intelligence/vocabulary.py` | 310 | NEW | PersonalVocabulary terms + corrections; validated import/export |
+| `intelligence/prediction.py` | 271 | NEW | Predictor → explainable Prediction; EMOJI_KEYWORDS baseline |
+| `intelligence/selftune.py` | 187 | NEW | SelfTuner; 10 TUNABLES with hard bands + min-samples gates |
+| `intelligence/__init__.py` | 98 | NEW | IntelligenceState (8 states); AIMM magic/version/capacity constants |
+| `transcription.py` | 624 | NEW | LiveTranscriptionEngine streaming pipeline; adapters; punctuation/caps/numbers/vocab chain; history/export/search; wer(); metrics |
+| `modes.py` | 832 | NEW | ModeController + 6 mode phrase tables; PresentationController (generic hotkeys); Timeline/StudyTimer/Notes/SourceCapture; MeetingMode; AccessibilityProfiles (8 + custom) |
+| `dictation_text.py` | 343 | NEW | VoiceTypingEngine (modes, spoken formatting, edit commands, undo/redo); TextPredictor; EmojiSuggester (30 s cooldown) |
+| `fusion2.py` | 291 | NEW | FusionEngine2 (9 signals), ConflictResolver, executable policy, RFExtendedProvider + RFNoHardware |
+| `selftest.py` | 233 | NEW | 15-component self-test with PASS/FAIL/OPTIONAL/HARDWARE |
+| `world_model.py` | 265 | NEW | WorldModel bounded snapshot + likely intent; ContextualCommandResolver (12 families) |
+| `text_control.py` | 250 | NEW | TextController — 16 TextOps, keyboard fallback, coordinate-independent |
+| `privacy.py` | 193 | NEW | PrivacyDashboard/PrivacyFlags/ConnectionState; delete/reset/clear/export/import |
+| `__main__.py` | 2,164 | EXTENDED | v11.5 flags + 5 subcommands + HUD badges AI:/MODE:/SUG:/transcript |
+| `agent.py` | 1,045 | EXTENDED | guarded intelligence/world_model/fusion2/modes wiring; `_learn_from_report` learning events |
+| `config.py` | 593 | EXTENDED | 16 v11.5 TOML sections (backward compatible) |
+| `offline.py` | 423 | EXTENDED | offline selftest 13 → 18 checks |
+
+All v11.5 modules are stdlib-only, import headless, and run with
+networking disabled (proven by the 18-check offline selftest).
+
+## 2. Tests — exact numbers
+
+```
+786 passed, 0 failed, 0 skipped            (pytest tests/ -q, 11.0 s)
+```
+
+Breakdown: **630 preserved v10/v9 tests (unchanged) + 156 new v11.5
+tests (`tests/test_v115.py`, 1,790 lines, 20 sections)**. The v11.5
+suite covers: §5 model (capacity/corruption/quantization), §6 memory +
+scrubbing, §7 vocabulary, prediction explainability, self-tuning
+bands, personalization, workflows (discovery/store/runner gates),
+§4 plugin contract (disabled/corrupted/incompatible/out-of-memory/
+privacy-paused), §8 transcription, §9 voice typing, §10/§11 text
+prediction + emoji, §12 text control, §13/§14 world model +
+contextual commands, §17–23 modes, §22 accessibility chains, §24
+Fusion 2.0 (all combos + conflicts), §31 offline under real network
+isolation, §32 privacy dashboard, §43 malicious input, §44 resource
+limits, §34 performance budgets, §45 self-test, §46 final integration
+simulations (voice→learning loop + teacher/student/office/developer/
+workflow role scenarios).
+
+## 3. Offline verification (§31) — 18/18
+
+`run_offline_selftest()` re-run for this report: **18/18 PASS**.
+The 13 v10 checks (voice grammar/command/dictation/context, custom
+gesture, RF bridge, simulated browser ×3, fusion pipeline, event bus,
+offline gate, final network-refused proof) are joined by 5 new checks
+under the same REAL socket-level isolation
+(`network_isolation()` monkeypatches `connect`/`connect_ex`/
+`create_connection` to raise; loopback passthrough by default):
+
+| # | Check | What it proves |
+|---|---|---|
+| 13 | `intelligence_offline` | plugin loads to `available`; learns click-after-open_app; predicts offline |
+| 14 | `memory_offline` | pattern recording + scrubbing works network-free |
+| 15 | `vocabulary_offline` | term/correction learning + application offline |
+| 16 | `transcription_offline` | simulated streaming produces a finalized segment offline |
+| 17 | `fusion2_offline` | 9-signal fusion reaches an executable click offline |
+| 18 | `network_actually_blocked` | a real `socket.create_connection(("example.com", 80))` is refused |
+
+## 4. Component self-test (§45)
+
+`airmouse self-test` — 15 components, re-run for this report:
+
+```
+Core/Voice/Transcription/Gesture/Gaze/Browser/Fusion/Intelligence/
+Memory/Prediction/Safety/Offline/Packaging ... PASS
+RealLocalASR ... OPTIONAL (vosk/whisper/pocketsphinx not installed)
+Camera ......... HARDWARE (webcam unavailable in headless environment)
+RESULT: PASS (13 pass, 1 optional, 1 hardware, 0 fail)
+```
+
+OPTIONAL/HARDWARE are honest statuses — missing dependencies or
+hardware never masquerade as failures.
+
+## 5. Performance (§34; this environment, budgets asserted by tests)
+
+Re-measured for this report with the exact §34 workloads (single run;
+budgets asserted in `tests/test_v115.py` — all 8 budget tests pass):
+
+| Metric | Measured | Budget |
+|---|---|---|
+| Prediction (`predict_next_action`) | ≈ 0.004 ms | < 50 ms |
+| Emoji suggestion | ≈ 0.024 ms | < 50 ms |
+| Memory record (`InteractionMemory.record`) | ≈ 0.005 ms | < 10 ms |
+| Transcription tick (`feed_audio`) | ≈ 0.001 ms | < 100 ms |
+| Fusion (`FusionEngine2.fuse`) | ≈ 0.008 ms | < 20 ms |
+| Event bus publish | ≈ 0.002 ms | < 5 ms (test bound) |
+| Model load (200-sentence artifact, 17 KB) | ≈ 3.4 ms | < 500 ms |
+
+Model size honesty: fresh install ≈ 0.1 KB
+(`airmouse intelligence` output); a 200-sentence training run
+produces a **17,296-byte** artifact. The ~30 MB figure is the hard
+capacity budget, not the shipped size.
+
+v10/v9 performance numbers remain valid (v10: grammar 50 utterances
+≈ 5 ms, 30 voice transcripts ≈ 3 ms, 1000 bus events ≈ 2 ms, 1000
+context resolves ≈ 4 ms).
+
+## 6. SIMULATION vs PHYSICAL hardware status — EXPLICIT
+
+**No physical webcam, microphone, or RF hardware exists in the build
+environment. Nothing below claims physical verification.**
+
+| Area | Status | What is verified |
+|---|---|---|
+| All v11.5 logic (intelligence, memory, vocabulary, prediction, self-tune, workflows, transcription pipeline, dictation, text control, world model, modes, fusion2, privacy, selftest) | **SIMULATION-VERIFIED** | deterministic simulators + injected timestamps; 156 new tests, 630 preserved |
+| Webcam / camera paths (hand, gaze) | **NOT PHYSICALLY VERIFIED** | no camera in sandbox; Camera = HARDWARE in self-test |
+| Microphone / audio-device paths | **NOT PHYSICALLY VERIFIED** | VAD/pipeline verified with synthetic buffers; no mic in sandbox |
+| Gaze behavior on real eyes | **NOT PHYSICALLY VERIFIED** | v9 targeting-aid caveat unchanged |
+| RF (any hardware, incl. RFExtendedProvider protocols) | **NOT PHYSICALLY VERIFIED** | `RFNoHardware` honest default; simulated providers only |
+| Real Chrome/Edge via CDP | **NOT PHYSICALLY VERIFIED** | v10 guarded implementation unchanged; graceful-unavailability tested |
+| PocketSphinx / Vosk / Whisper ASR | **NOT PHYSICALLY VERIFIED** (engines not installed) | adapters present with guarded imports; **simulated streaming provider + transcript injection are the verified paths**; `detect_providers()` reports honestly |
+
+Recommended first real-machine checks: `airmouse self-test`,
+`airmouse voice-status`, `airmouse --gaze-calibrate`,
+`airmouse --teacher`, `airmouse offline-test`.
+
+## 7. Security / privacy audit (v11.5 additions)
+
+- Grep-verified: **no `shell=True`, `eval(`, `exec(`, `os.system`**
+  anywhere in the 58 package modules; subprocess remains argv-only
+  with timeouts (the one `--shell` string is xdotool's own output
+  flag, not a shell).
+- New validation surfaces (workflow step regex, import scrubbing,
+  artifact bounds, length caps) enumerated in `docs/SECURITY.md` §3.
+- §43 hostile-corpus suite passes (SQLi, command substitution,
+  traversal, binary junk, XSS, credential shapes → no exceptions, no
+  execution, no secret persistence).
+- Privacy: telemetry OFF by default; `cloud` flag structurally
+  impossible (forced False in `PrivacyFlags.__post_init__`; `set()`
+  refuses it); fail-closed scrubbing keeps credential-shaped input out
+  of the learned store; bounded local audit log.
+
+## 8. Regression gate & packaging
+
+- All **630** pre-existing v10/v9 tests pass **unchanged**; v11.5
+  additions are confined to `tests/test_v115.py`. Product-bug fixes
+  found during development are listed in CHANGELOG "Fixed".
+- `pyproject.toml` at **11.5.0**; `airmouse --version` →
+  `AirMouse v11.5.0 — Adaptive Human-Computer Intelligence Edition`;
+  all v11.5 flags/subcommands registered (`--help` inspection).
+- Wheel build/tag/release remains a release step from this tree.
+
+## 9. Known limitations (honest)
+
+- **Simulation-first:** every claim above is simulation-verified;
+  physical camera/mic/gaze/RF, real-Chrome CDP, and live offline-ASR
+  engines are **not physically verified** (§6). Real-machine threshold
+  tuning is expected (the bounded self-tuner is the intended
+  mechanism).
+- The personal model is a bounded statistical system, **not** a neural
+  LLM; it ships empty and only knows what it observed on your machine.
+- Punctuation/capitalization are deterministic heuristics, not an AI
+  punctuation model (see `docs/TRANSCRIPTION_GUIDE.md` §4).
+- Meeting summaries contain only what the user marked; **no speaker
+  identification** is claimed or implemented.
+- Presentation control uses generic hotkeys — a few actions are
+  app-dependent (documented in `docs/TEACHER_GUIDE.md`).
+- Learned artifacts under `~/.airmouse/intelligence/` are plaintext
+  JSON/binary on local disk (scrubbed + bounded; disk encryption is
+  the OS's job).
+
+---
+
+# AirMouse v10.0.0 — Final Verification Report (preserved)
 
 Date: 2025-09-04 (build environment: Linux sandbox, Python 3.12.14)
 Scope: v9.0.0 → v10.0.0 "Universal Offline Interaction Engine" per

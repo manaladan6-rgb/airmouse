@@ -1,14 +1,17 @@
-# AirMouse v10.0.0 — UNIVERSAL OFFLINE INTERACTION ENGINE
+# AirMouse v11.5.0 — ADAPTIVE HUMAN-COMPUTER INTELLIGENCE
 
 Voice + hand + gaze + RF + keyboard/mouse + screen + browser → one
-**event bus** → fusion → context → intent → action → verification →
-recovery. **Fully offline-capable: no LLM, no cloud AI, no network
-required for any control path.**
+**event bus** → fusion 2.0 → world model → intent → action →
+verification → **learning**. Fully offline-capable: no LLM, no cloud
+AI, no network required for any control path — and now a **personal
+model** that learns your patterns locally, with prediction that can
+advise but never execute.
 
 ![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue)
 ![Platform](https://img.shields.io/badge/platform-windows%20%7C%20linux%20%7C%20macos-lightgrey)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Offline](https://img.shields.io/badge/offline-capable-success)
+![Local](https://img.shields.io/badge/cloud-structurally%20impossible-critical)
 
 ```
   🎤 VOICE   🖐 HAND   👁 GAZE   📡 RF   ⌨ KB/MOUSE   🖥 SCREEN   🌐 BROWSER
@@ -18,55 +21,58 @@ required for any control path.**
               ╔══════════ EVENT BUS (local, bounded) ══════════╗
               ╚═════════════════════╦══════════════════════════╝
                         ▼                        ▼
-                 MULTIMODAL FUSION        CONTEXT ENGINE
-                 (arbitration,           (app/window/browser/
-                  confirmations)          gaze target, "that/this")
+              FUSION 2.0 (9 signals,      WORLD MODEL (app/window/
+              conflict resolver, ask      targets/gaze/recent action/
+              don't guess)                mode + likely intent)
                         └───────────┬───────────┘
                                     ▼
-                             INTENT ENGINE  (52 intent types)
+          CONTEXTUAL RESOLVER · GRAMMAR · PERSONAL PREDICTION (data only)
                                     ▼
         ┌────────────── SAFETY (e-stop · rate limits · gates · ──────────────┐
-        │                 sensitive-action confirmations)                    │
+        │                 destructive confirmations)                         │
         │  ▼                                                                 │
-        │  OFFLINE GATE ──► ACTION ENGINE (32 action types, allowlisted      │
-        │                 executors) ──► VERIFICATION ──► RECOVERY           │
+        │  OFFLINE GATE ──► ACTION ENGINE ──► VERIFICATION ──► LEARNING      │
+        │                 (32 action types,   expected vs     verified       │
+        │                  allowlisted        observed        events →        │
+        │                  executors) +                       personal model │
+        │                  RECOVERY                           (bounded)      │
         └────────────────────────────────────────────────────────────────────┘
 ```
 
-The **safety system** gates every action; the **offline gate** blocks
-network-dependent features while every local path keeps running.
+The intelligence is **MODEL + MEMORY + CONTEXT + RULES + FUSION +
+WORLD MODEL + VERIFICATION + LEARNING** — a compact local model with a
+~30 MB capacity budget, quantized and versioned, that starts at a few
+KB on a fresh install and grows with your usage. **It is not a neural
+LLM**, and predictions are data for you and the intent layer — never
+executions.
 
-## What's New in v10.0.0
+## What's New in v11.5.0
 
 | Subsystem | What it does |
 |---|---|
-| **🚌 Event bus** | Every modality publishes normalized `Event`s (14 kinds); `EventBus` with bounded per-subscriber queues (drop-oldest, producers never block), history ring, stats. Pure in-process — works with networking disabled |
-| **📖 Command grammar** | 75 deterministic voice commands in 10 namespaces (engine/mouse/system/window/application/files/text/navigation/media/browser). Template grammar with `<slot>` entities, literal-specificity + namespace-priority resolution, ambiguity flags. NO LLM, NO probabilistic parsing |
-| **🎙️ Offline voice** | Pluggable local ASR (`Simulated` / `PocketSphinx` / `Vosk` / `Whisper` providers, auto-detected), energy VAD with hysteresis, wake-word gate, COMMAND / DICTATION / HYBRID modes, dictation buffer with commit markers |
-| **🧭 Context engine** | Focused app/window, browser state (tab/URL), gaze target with 2 s TTL, selection, recent action — powers deictic resolution: *"click that"*, *"close it"*, *"open this"* |
-| **🤟 Gesture registry** | Full vocabulary: v5 superset + `pinch_hold` / `pinch_release` / `double_pinch` / `grab` / `grab_move` / `circular_cw` / `circular_ccw`. Built-in + **user-defined sequence gestures** (JSON), deterministic sequence matcher, double-pinch synthesis |
-| **📡 RF sensing** | Optional `RFProvider` abstraction + simulated/dummy providers + event-bus bridge. **Never required** — idles cleanly when no RF hardware exists; system degrades via the combo ladder |
-| **🖥️ System + file actions** | 16 system ops (volume/media/lock/sleep/power/brightness/bluetooth) + 8 file ops. Shell-free argv-only subprocess, allowlisted root directories, filename sanitizing, URL scheme validation (http/https/file only) |
-| **⚡ Universal actions** | Canonical vocabulary: 52 intent types → 32 action types, v10 param normalization, destructive-op confirmation flags, executor injection (pointer/keyboard/system/file/browser) |
-| **🌐 Browser control** | Local browser control in 3 layers: transport (deterministic simulated bridge / guarded Chrome DevTools Protocol / localhost MV3-extension bridge on 127.0.0.1:17843), semantics (*"click the login button"*, *"switch to the youtube tab"*, *"search for …"*), verification (before/after state diff). Page content is data, never commands |
-| **🔌 Offline mode** | `--offline` engages a runtime gate that blocks cloud ASR/TTS, CDP, updates, telemetry — while the full local stack keeps working. `airmouse offline-test` runs the entire pipeline 13/13 checks with networking **really** disabled at socket level |
-| **🙌 Hands-free combos** | 8 named sensor combos (`voice_only` … `full_fusion`); sensor-health tracker downgrades to the largest alive subset automatically and recovers when sensors return |
-| **🛡️ Safety (extended)** | Sensitive types now include SHUTDOWN/RESTART/LOCK/SLEEP/CLOSE_TAB; FILE_OP/SYSTEM_OP get param-level destructive refinement (delete = destructive, create = not) |
+| **🧠 Personal intelligence plugin** | Optional `airmouse/intelligence/` subpackage: n-gram LM, action Markov, command + time-of-day habits, emoji model, personalization weights — packed into a versioned quantized artifact (`AIMM` format). **Never raises**: 8 lifecycle states (available/disabled/unavailable/corrupted/incompatible/out_of_memory/privacy_paused/learning_paused) |
+| **📓 Interaction memory** | Patterns, not private content — `PatternRecord` schema with fail-closed sensitive-data scrubbing (passwords/tokens/credentials refused outright, token-like blobs redacted). Bounded at 5,000 patterns |
+| **🔤 Personal vocabulary** | Learned terms + corrections ("Hydra Link" → "HydraLink"), applied in dictation & capitalization; validated import/export |
+| **🔮 Explainable prediction** | `Prediction(kind, value, confidence, reason, alternatives)` — "You often follow this with *type* (75 actions observed)". **PREDICTION ≠ EXECUTION**, enforced at 5 layers |
+| **🎚 Bounded self-tuning** | 10 tunables (confirm frames, dwell time, voice confidence…) adapt only within hard min/max bands and only after min-sample gates |
+| **⚙️ Workflow discovery** | Repeated 3–8-step action sequences (≥ 3 repetitions) become *suggestions*; nothing runs without approval, preview-first, destructive steps confirmed every run |
+| **🎙️ Live transcription** | Streaming partials/finals pipeline: mic → VAD → streaming ASR → stabilization → punctuation → capitalization → personal vocabulary → final. Bounded history, txt/json/md export, search, WER evaluator |
+| **⌨️ Voice typing** | DICTATION/COMMAND/HYBRID with spoken punctuation, edit commands ("delete last word", "replace X with Y", "capitalize that", undo/redo), text prediction, rate-limited emoji suggestions (30 s cooldown, learns preferences) |
+| **🖱 Universal text control** | 16 text ops (TYPE/SELECT/DELETE/REPLACE/COPY/PASTE/UNDO/REDO/CUT/MOVE/CAPITALIZE/LOWERCASE/UPPERCASE/FORMAT/NEW_LINE/NEW_PARAGRAPH) — keyboard fallback, never coordinate-dependent |
+| **🌍 World model** | Bounded snapshot (application/window/targets/gaze/text field/recent action+command/mode) + explainable likely intent (destructive never surfaced) |
+| **🗣 Contextual commands** | 12 deictic families — "click that", "close it", "save that"… resolved against gaze/selection/context with a deterministic confidence model; **low confidence ⇒ ASK, never guess** |
+| **🎓 Six interaction modes** | `--teacher --student --office --meeting --research` (+ developer): phrase tables, lecture/meeting timelines, study timer, verbatim source capture, structured meeting summaries |
+| **♿ Accessibility profiles** | 8 profiles + custom chains with modality fallback resolution — no single sensor is a mandatory point of failure |
+| **🔀 Fusion 2.0** | 9 weighted signals (voice .30 / gesture .25 / gaze .25 / personal history .10 / keyboard, browser, app context, recent action, prediction .05 each); conflicts scale confidence down and force confirmation; RF-extended protocol prep (presence/motion/direction/range/velocity — honest no-hardware default) |
+| **🛡 Privacy dashboard** | Learning/memory/history/vocabulary/workflow flags + delete/reset/clear/export/import; telemetry **OFF by default**; cloud **structurally impossible** (no cloud code path exists) |
+| **🩺 Honest self-test** | `airmouse self-test` — 15 components, PASS/FAIL/**OPTIONAL**/**HARDWARE** statuses so missing hardware never masquerades as failure |
 
-**Everything from v5–v9 is preserved** — see below.
-
-## Preserved from earlier versions
-
-- **v9** — multimodal fusion (6 modes), webcam gaze tracking + calibration + filtering, screen understanding (accessibility → OCR *(opt-in)* → geometry), intent engine with confidence propagation, action engine + verification + recovery ladder, safety system (e-stop, rate limiter, confirmations), semantic macros v2, natural language ("scroll down a little"), hands-free mode, InteractionAgent with telemetry
-- **v5** — 14 hand gestures + swipes, hybrid One Euro + Kalman cursor filter, 30-phrase voice control (incl. TURBO mode), pinch-to-zoom, adaptive calibration, macro recording, HUD, single-file `airmouse_simple.py`
-- **v4/v3** — trackpad mode, direct/ironman tracking, precision mode, media keys, multi-monitor, autostart, settings GUI
-
-All 497 pre-existing v9 tests still pass unchanged (regression gate).
+**Everything from v10 and earlier is preserved** — see below.
 
 ## Install
 
 ```bash
-pip install airmouse-10.0.0-py3-none-any.whl
+pip install airmouse-11.5.0-py3-none-any.whl
 
 # optional extras:
 pip install "airmouse[voice]"   # SpeechRecognition + pyaudio (v5 mic voice control)
@@ -78,214 +84,118 @@ pip install pocketsphinx        # or: pip install vosk   or: pip install openai-
 ```
 
 Requirements: Python 3.9+. Webcam optional (hand/gaze), microphone
-optional (voice), RF hardware optional (RF modality). **Everything else
-is stdlib.** All processing is local.
+optional (voice), RF hardware optional. **Everything else is
+stdlib.** All processing is local; the intelligence plugin is
+stdlib-only too.
 
 ## Quick start
 
 ```bash
 airmouse                                        # v5 hand+gesture experience (unchanged)
-airmouse --voice-mode hybrid                    # offline voice: commands + dictation
+airmouse --intelligence                         # + personal intelligence (default on)
+airmouse --dictation                            # voice typing with formatting + edit commands
+airmouse --transcribe                           # live transcription session
+airmouse --teacher                              # teach: slides + lecture timeline
+airmouse --student                              # study: notes + timer + sources
+airmouse --meeting --transcribe                 # meeting capture + structured summary
 airmouse --offline                              # hard-offline mode (blocks cloud features)
-airmouse --browser                              # + semantic browser control
-airmouse --browser --browser-bridge             # + localhost extension bridge (:17843)
-airmouse --rf                                   # + RF modality (idles without hardware)
-airmouse --gesture                              # + full gesture registry (custom sequences)
-airmouse --offline --voice-mode hybrid --gesture --browser   # everything, offline
+airmouse --offline --voice-mode hybrid --gesture --browser --intelligence  # everything
 
-# info & diagnostics subcommands:
-airmouse commands                               # print all 75 commands by namespace
-airmouse gestures                               # print the gesture registry
-airmouse voice-status                           # which offline ASR providers are available
-airmouse browser                                # browser bridge/controller status
-airmouse offline-test                           # 13-check full-stack selftest, network truly blocked
-airmouse diagnostics                            # event bus / modality / sensor report
+# v11.5 info & diagnostics:
+airmouse intelligence                           # plugin status: model size vs budget, patterns…
+airmouse memory                                 # top learned interaction patterns
+airmouse vocabulary                             # learned terms + corrections
+airmouse workflows                              # approved workflows
+airmouse self-test                              # 15-component honest health report
+
+# v10 subcommands (unchanged):
+airmouse commands | gestures | voice-status | browser | offline-test | diagnostics
 ```
 
 Legacy flags all still work: `--voice --gaze --fusion --hands-free
 --assist --gaze-calibrate --trackpad --calibrate --record NAME --play
-NAME --macros --monitor N --precision …`
+NAME --macros --monitor N --precision …` (full list:
+`docs/CLI_REFERENCE.md`).
 
-## Voice commands
-
-75 commands, 10 namespaces, deterministic grammar (exact match → 1.00
-confidence; ambiguous → flagged 0.72; fuzzy tolerance 0.62–0.85; below
-0.62 → no match). Sensitive commands are flagged for the safety layer's
-confirmation gate.
-
-| Namespace | Examples |
-|---|---|
-| engine | "stop everything", "switch to hands-free", "record macro", "quit" |
-| mouse | "click", "double click", "right click", "scroll up" |
-| system | "volume up", "mute", "lock screen", "shutdown" *(confirm)* |
-| window | "minimize window", "maximize", "snap left" |
-| application | "open firefox", "close this app" |
-| files | "open file notes.txt", "delete file old.txt" *(confirm)* |
-| text | "select all", "undo", "delete word" |
-| navigation | "scroll down", "go to top", "page down" |
-| media | "play music", "next track" |
-| browser | "new tab", "close tab" *(confirm)*, "go to youtube.com" |
-
-Dictation mode commits buffered speech on markers ("commit", "new
-paragraph", "submit text", "end dictation") or terminal punctuation;
-hybrid mode tries command grammar first and falls back to
-dictation when the utterance looks like prose. Deictic commands
-("click that", "close it") resolve against the context engine's gaze
-target / selection / recent action — never an invented coordinate.
-
-**Full list:** `airmouse commands`.
-
-## Gestures
-
-The registry contains the complete vocabulary — built-in hand gestures
-plus the v10 extensions — and maps each to its intent:
-
-- **Built-in (v5 superset):** pointing, peace, three, palm, fist,
-  pinch, thumbs up, gun, swipe left/right/up/down
-- **v10 set:** `pinch_hold`, `pinch_release`, `double_pinch`
-  (synthesized from two pinches within 0.6 s), `grab`, `grab_move`,
-  `circular_cw`, `circular_ccw`, directional motion
-- **Custom sequence gestures** — define your own multi-step patterns in
-  JSON and they flow through the same intent/safety pipeline:
-
-```json
-{
-  "name": "air_delete",
-  "pattern": ["fist", "swipe_left", "pinch_release"],
-  "intent": "hotkey",
-  "params": {"keys": ["ctrl", "backspace"]}
-}
-```
-
-Saved at `~/.airmouse/gestures.json` (override with the
-`AIRMOUSE_GESTURES` env var); loaded automatically at startup.
-Print the live registry with `airmouse gestures`.
-
-## Browser control
-
-Three layers, all local:
-
-1. **Transport** — pick one:
-   - **Simulated bridge** (default, deterministic): great for tests and offline demos.
-   - **CDP bridge**: Chrome/Edge via the DevTools Protocol (stdlib-only implementation; guarded — start Chrome with `--remote-debugging-port`, set `browser_cdp_port`).
-   - **Extension bridge**: run `airmouse --browser --browser-bridge` and load the shipped MV3 extension from `airmouse/browser_extension/` (see its README). It POSTs page metadata (roles, text, normalized bounding boxes, focus; password fields masked) to `http://127.0.0.1:17843/state` — **localhost-only**, data only, never executed.
-
-2. **Semantics** — the resolver matches a fixed template grammar against the element map:
-   > "click the login button" · "switch to the youtube tab" · "search for air mouse" · "type hello into the search box" · "go back" · "refresh" · "open github.com in a new tab"
-
-3. **Verification** — every browser action is checked with a before/after state diff (`passed` / `failed` / `unknown`), mirroring the v8 verification ladder.
-
-**Security stance:** page content is **untrusted data**. A page whose
-text says "shut down the computer" can only ever be *clicked as a
-button* if you say so — page text can never become a command, and the
-CDP adapter evaluates only fixed snippets built from our parameters.
-
-## Offline mode
+## Interaction modes in one line each
 
 ```bash
-airmouse --offline          # runtime gate: cloud ASR/TTS, CDP, updates, telemetry blocked
-airmouse offline-test       # end-to-end proof
+airmouse --teacher   # "next slide", "start lecture", "mark important", "export transcript"
+airmouse --student   # "take a note", "start study session", "save this source"
+airmouse --office    # "start meeting", "capture task …"        (shares the meeting session)
+airmouse --meeting   # "add action item", "add decision", "export transcript"
+airmouse --research  # "save this source", "take a note"       (verbatim capture, never fabricates)
 ```
 
-`offline-test` runs the **entire stack** — voice grammar → intent,
-voice → context → intent, gesture registry with a custom sequence, RF
-bridge, simulated browser (bridge + semantic resolution + execution +
-verification), fusion → intent → action → verify pipeline, event bus,
-offline gate semantics — inside `network_isolation()`, which really
-monkeypatches `socket.connect`/`create_connection` to raise. A final
-check proves a real connection attempt is refused. **13/13 checks.**
-
-## Safety
-
-- **Emergency stop:** ESC key, long blink (v9), "stop everything" (voice) — latches until reset (`[x]`)
-- **Rate limiting:** sliding-window actions/sec cap + click cooldowns
-- **Sensitive actions** (close, paste, hotkey, **shutdown, restart, lock, sleep, close tab**, destructive file/system ops) require an explicit spoken/typed confirmation before execution — flagged at intent level *and* refined at param level (e.g. `delete file` is destructive, `create file` is not)
-- **Confidence gates:** low-confidence gaze/voice can move nothing but attention
-- **Sensor loss:** auto-downgrade to the largest alive sensor combo; SAFE_MODE after `stream_loss_grace`; automatic recovery
-- **File/system ops:** argv-only subprocess (no shell), allowlisted base roots, traversal refused, filename sanitizing, URL schemes restricted to http/https/file
-
-## Configuration
-
-`~/.airmouse/config.toml` — all previous sections (`[direct] [one_euro]
-[physics] [ironman] [jitter] [gestures] [camera] [audio] [ui] [voice]
-[kalman] [zoom] [calibration] [v9]`) plus the v10 set:
-
-```toml
-[v10]
-offline = false                # TRUE OFFLINE: block network-dependent features
-voice_mode10 = "hybrid"        # command | dictation | hybrid
-voice_command_min_confidence = 0.62
-wake_word_required = false
-dictation_max_chars = 2000
-browser_enabled = true         # local browser bridge control
-browser_bridge_port = 17843    # localhost-only extension endpoint
-browser_cdp_port = 9222        # Chrome --remote-debugging-port
-gesture_registry_enabled = true
-rf_enabled = true              # RF modality (idles without hardware)
-rf_min_confidence = 0.5
-telemetry_enabled = true       # LOCAL perf report on shutdown
-```
+Slide control uses **generic hotkeys**, so it works with PowerPoint,
+Keynote, LibreOffice, browser slides and PDF viewers. Meeting
+summaries are structured from **your** markers — speaker
+identification is not claimed anywhere. Mode guides:
+`docs/TEACHER_GUIDE.md`, `docs/STUDENT_GUIDE.md`,
+`docs/OFFICE_GUIDE.md`.
 
 ## Privacy
 
-- **Local-first:** no cloud AI anywhere in the control path. Camera
-  frames, eye/face landmarks, audio, screen captures, and page metadata
-  never leave your machine.
-- Voice text is processed by the deterministic local grammar; if you
-  install an offline ASR engine (PocketSphinx/Vosk/Whisper) transcription
-  runs on-device. The optional v5 `SpeechRecognition` extra can use a
-  cloud recognizer — it is bypassed when `offline = true`.
-- Screen OCR remains **opt-in** (`screen_ocr_enabled = true`).
-- The browser extension talks only to `127.0.0.1:17843` and masks
-  password fields.
-- No telemetry leaves the process; the shutdown report is printed locally.
+- **Local-first:** no cloud AI anywhere. The `cloud` privacy flag is
+  structurally impossible to enable — there is no cloud code path.
+- **Telemetry OFF by default**; nothing phones home.
+- **Learning stores patterns, not content:** passwords, tokens,
+  credentials and credential-shaped input are refused outright
+  (fail-closed scrubbing); token-like blobs are redacted.
+- The model is yours: `delete_learned_data()`,
+  `reset_model_personalization()`, `clear_interaction_history()`,
+  `export_profile()` / `import_profile()` (validated + scrubbed on
+  import). Privacy mode pauses learning and history instantly.
+- Transcript history is bounded, off-switchable, and exportable.
+- Details: `docs/PRIVACY.md` · security posture: `docs/SECURITY.md`.
 
-## Hardware requirements
-
-| Modality | Hardware | Required? |
-|---|---|---|
-| Hand gestures | webcam (MediaPipe) | optional |
-| Gaze | webcam (MediaPipe FaceMesh) | optional |
-| Voice | microphone + (optional) an offline ASR engine | optional — transcript injection / simulation otherwise |
-| RF sensing | RF hardware implementing `RFProvider` | **never required** — idles without |
-| Browser | Chrome/Edge for CDP or the MV3 extension | optional — simulated bridge otherwise |
-| Screen | any display | for screen targets/geometry |
-
-## Limitations & honest verification status
+## Honest verification status
 
 - **No physical hardware was available in the build environment.** All
-  v10 behavior is **simulation-verified** via deterministic simulators.
-  Camera/eye-tracking/mic/audio-device paths on real hardware are
-  **hardware-unverified**.
-- The CDP browser bridge is guarded and stdlib-only; against a real
-  Chrome instance it is **unverified** (tests cover graceful
-  unavailability only). The MV3 extension source ships and is
-  lint-reviewed, but **loading it in a real browser is unverified**.
-- PocketSphinx/Vosk/Whisper code is present with guarded imports and
-  runtime auto-detection; none are installed in the build sandbox, so
-  the **transcript-injection path is what is verified** (not live ASR).
-- Webcam gaze accuracy (~1–3°) is a targeting aid, not pixel-precise —
-  confirmation patterns make it safe (v9 behavior, unchanged).
-- `airmouse_simple.py` remains the v5 single-file experience.
+  v11.5 behavior is **simulation-verified** via deterministic
+  simulators (786 tests). Webcam/mic/gaze/RF paths, real-Chrome CDP,
+  and real offline-ASR engines are **hardware-unverified**.
+- The transcription pipeline is verified through the simulated
+  streaming provider and transcript injection; vosk/whisper/
+  pocketsphinx adapters exist but the engines are **not installed**
+  in the sandbox — availability is always reported honestly
+  (`airmouse voice-status`, `airmouse self-test`).
+- The personal model **ships empty** (a few KB) and is not a neural
+  LLM; its suggestions are explainable statistics with bounded
+  confidence.
+- Full table: `VERIFICATION_REPORT.md` §SIMULATION vs PHYSICAL.
 
 ## Verification methodology
 
 ```bash
-python -m pytest tests/ -q        # 630 tests
-airmouse offline-test             # 13/13 checks with networking truly blocked
+python -m pytest tests/ -q        # 786 tests
+airmouse offline-test             # 18/18 checks, networking truly blocked
+airmouse self-test                # 13 pass · 1 optional · 1 hardware · 0 fail
 ```
 
-630 passed, 0 failed, 0 skipped (Python 3.12.14, Linux sandbox):
-**497** pre-existing v9 tests (all preserved) + **19** browser tests +
-**114** v10 tests. New suites cover grammar/intents, voice modes/VAD/
-wake-word/dictation, event bus, context engine, gesture registry +
-sequences, RF degradation, system/file executors (allowlists, traversal,
-URL validation, dry-run), safety confirmations, hands-free combos,
-offline isolation, browser bridge/semantics/verification, full fusion
-pipelines, and performance budgets (grammar 50 utterances < 0.5 s,
-1000 bus events < 0.5 s, 1000 context resolves < 0.2 s — all far under
-budget in measurement). Full details: `VERIFICATION_REPORT.md`;
-architecture deep-dive: `docs/V10_ARCHITECTURE.md`.
+786 passed, 0 failed, 0 skipped (Python 3.12, Linux sandbox):
+**630** pre-existing v10 tests (all preserved) + **156** v11.5 tests.
+Performance budgets (§34) pass with large headroom — e.g. prediction
+≈ 0.004 ms (< 50 ms), memory record ≈ 0.005 ms (< 10 ms), fusion
+≈ 0.008 ms (< 20 ms), model load ≈ 3.4 ms (< 500 ms) in this sandbox.
+Deep dive: `VERIFICATION_REPORT.md`, `docs/V11_5_ARCHITECTURE.md`,
+`docs/INTELLIGENCE_GUIDE.md`, `docs/TRANSCRIPTION_GUIDE.md`.
+
+## Preserved from earlier versions
+
+- **v10** — event bus (14 event kinds), 75-command offline grammar,
+  offline voice (VAD/wake-word/COMMAND-DICTATION-HYBRID), context
+  engine with deictic resolution, gesture registry + custom sequences,
+  RF abstraction, 16+8 allowlisted system/file ops (argv-only), 3-layer
+  browser control with verification, 8 hands-free combos with sensor
+  degradation, `--offline` + 13→18-check network-isolated selftest
+- **v9** — multimodal fusion, webcam gaze + calibration + filtering,
+  screen understanding, intent/action/verification/recovery, safety
+  system, macros v2, NL control, InteractionAgent
+- **v5** — 14 hand gestures, hybrid One Euro + Kalman filter, 30-phrase
+  voice control + TURBO, pinch-zoom, adaptive calibration, macros, HUD
+- **v4/v3** — trackpad mode, direct/ironman tracking, precision mode,
+  media keys, multi-monitor, autostart, settings GUI
 
 ## License
 

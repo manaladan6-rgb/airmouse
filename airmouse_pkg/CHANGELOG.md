@@ -1,5 +1,198 @@
 # Changelog
 
+## v11.5.0 — ADAPTIVE HUMAN-COMPUTER INTELLIGENCE
+
+The defining evolution: the deterministic v10 interaction core gains an
+OPTIONAL personal-intelligence layer — a compact local model (few KB
+fresh, ~30 MB hard budget) plus bounded memory, vocabulary,
+self-tuning, workflow discovery, live transcription, voice typing,
+universal text control, a world model, six interaction modes,
+accessibility profiles, Fusion 2.0, and a privacy dashboard.
+No LLM, no cloud, no network; PREDICTION ≠ EXECUTION everywhere.
+
+### Added — Intelligence subpackage (`airmouse/intelligence/`, optional plugin)
+- `model.py`: `PersonalInteractionModel` — `NGramModel` (order 3,
+  backoff, capped counts) + `ActionMarkov` + `CommandModel`
+  (frequency + time-of-day) + `EmojiModel` (context tags) +
+  `FeatureWeights`; quantized 8-bit packed artifact with magic
+  `AIMM` + format version; hard capacity budget
+  (`MODEL_CAPACITY_BYTES_DEFAULT` ≈ 30 MB, growth refused beyond it,
+  `capacity_hits` counter); deterministic pruning; `save/load/stats`
+- `memory.py`: `InteractionMemory` + `PatternRecord` (pattern/
+  frequency/confidence/last_seen/context/success_rate/correction_count/
+  preferred_action); **fail-closed sensitive-data scrubbing**
+  (`is_sensitive` / `scrub_pattern`) — passwords/tokens/credentials
+  refused outright, URL creds and token-like blobs redacted to
+  `[redacted-*]` placeholders; bounded 5,000 patterns; validated
+  import/export
+- `vocabulary.py`: `PersonalVocabulary` — terms (20k cap) +
+  corrections (5k cap) with `apply_corrections` (e.g. "Hydra Link" →
+  "HydraLink"), validated import/export
+- `prediction.py`: `Predictor` → explainable `Prediction`
+  (kind/value/confidence/reason/alternatives ≤ 8); deterministic
+  `EMOJI_KEYWORDS` baseline map; `predict_next_action/command`,
+  `complete_text/phrase_completions`, `suggest_emoji`,
+  `predict_target`
+- `selftune.py`: `SelfTuner` — `TUNABLES` (10 parameters) with hard
+  min/max bands, steps, `min_samples` gates, EMA stats; `apply()`
+  refuses out-of-band values
+- `personalization.py`: `GestureProfile` / `GazeProfile` /
+  `VoiceProfile` (frequent commands, false activations, **alias
+  learning** e.g. "launch browser" → "open browser"); bounded samples
+- `workflows.py`: `WorkflowDiscovery` (rolling window, 3–8-step
+  patterns, ≥ 3 repetitions, **suggestions only — nothing auto-created**);
+  `WorkflowStore` (≤ 200 workflows × 24 steps, step names validated
+  `^[a-z0-9][a-z0-9_-]{0,63}$`); `WorkflowRunner` (preview-first,
+  destructive workflows require prior preview, destructive steps
+  require per-run confirmation, conditions checked);
+  `ProactiveAssistant` + `Suggestion` (can never execute;
+  destructive-looking suggestions suppressed; `prepare()` refuses
+  URL/path/command-like resources)
+- `plugin.py`: `IntelligencePlugin` facade — the ONLY object the core
+  touches; **never raises**; `IntelligenceState` = available/disabled/
+  unavailable/corrupted/incompatible/out_of_memory/privacy_paused/
+  learning_paused; artifact persistence in `~/.airmouse/intelligence/`
+  (atomic writes); `export_profile`/`import_profile` validated
+  per-section and scrubbed; `delete_learned_data`/
+  `reset_personalization`/`clear_history`; `pause_learning`/
+  `set_privacy_mode`
+
+### Added — Voice & text
+- `transcription.py`: `LiveTranscriptionEngine` — streaming
+  partials/finals pipeline (mic → preprocess → `EnergyVAD` → streaming
+  ASR → partial → stabilization → punctuation → capitalization →
+  personal vocabulary → final); `StreamingProviderAdapter` (wraps v10
+  batch providers with a deterministic partial stream) +
+  `SimulatedStreamingProvider` (always available); `apply_spoken_
+  punctuation` (30+ phrase table), `insert_discourse_commas`
+  (deterministic heuristic), `capitalize_text`, `spell_numbers`,
+  `wer()` evaluator; bounded history (≤ 500 segments, ≤ 200k buffer) +
+  txt/json/md export (≤ 8 MB) + search; pause/resume/stop; callbacks;
+  metrics; honest provider availability in `status()`
+- `dictation_text.py`: `VoiceTypingEngine` (COMMAND/DICTATION/HYBRID;
+  spoken formatting; 16 edit commands incl. "delete last word",
+  "scratch that", "replace X with Y", "capitalize that", undo/redo);
+  `TextPredictor` (context-aware word/phrase completion);
+  `EmojiSuggester` (30 s cooldown, ≤ 3 suggestions, learns
+  preferences)
+- `text_control.py`: `TextController` — 16 `TextOp`s (TYPE/SELECT/
+  DELETE/REPLACE/COPY/PASTE/UNDO/REDO/CUT/MOVE/CAPITALIZE/LOWERCASE/
+  UPPERCASE/FORMAT/NEW_LINE/NEW_PARAGRAPH), keyboard fallback,
+  never coordinate-dependent; pluggable `TextExecutor`
+
+### Added — Context, modes, fusion, privacy
+- `world_model.py`: `WorldModel` — bounded snapshot (application/
+  window/visible targets/gaze target/text field/recent action+command/
+  mode + explainable likely intent; destructive intents never
+  surfaced); `ContextualCommandResolver` — 12 deictic families
+  (15 utterances: "click that"…"save that") with a deterministic
+  confidence model; **low confidence ⇒ `requires_confirmation`
+  (ASK, don't guess)**
+- `modes.py`: `ModeController` + `MODE_REGISTRY` phrase tables for
+  **teacher / student / office / meeting / research / developer**;
+  `PresentationController` via GENERIC hotkeys (works with
+  PowerPoint/Keynote/LibreOffice/browser slides); `TimelineSession`,
+  `StudyTimer`, `NotesStore`, `SourceCapture` (verbatim, never
+  fabricates), `MeetingMode` structured summary (transcript/timeline/
+  important/action items/decisions/questions — **no speaker-ID
+  claims**), `AccessibilityProfiles` (8 profiles + custom chains,
+  fallback via v10 `SensorHealth.alive()`), `DeveloperMode`
+- `fusion2.py`: `FusionEngine2` — 9 weighted signals (voice .30,
+  gesture .25, gaze .25, personal history .10, keyboard/browser/
+  application context/recent action/prediction .05 each);
+  `ConflictResolver` (conflicts scale confidence ×0.5 and force
+  confirmation; prediction never outranks observation);
+  `FusedIntentCandidate.executable` (requires a non-prediction
+  signal); `RFExtendedProvider` protocol (presence/motion/
+  gesture_classification/direction/range/velocity) + `RFNoHardware`
+  honest default
+- `privacy.py`: `PrivacyDashboard` — flags (learning/memory/
+  transcription_history/vocabulary_learning/workflow_learning ON;
+  **telemetry OFF by default; cloud structurally impossible** —
+  `__post_init__` forces it off and `set("cloud")` refuses);
+  OFFLINE/ONLINE/PRIVACY connection states; `delete_learned_data`/
+  `reset_model_personalization`/`clear_interaction_history`/
+  `export_profile`/`import_profile`; bounded local audit log
+- `selftest.py`: `run_self_test`/`format_self_test` — 15 components
+  with PASS/FAIL/**OPTIONAL**/​**HARDWARE** statuses (RealLocalASR =
+  OPTIONAL, Camera = HARDWARE — missing hardware is never a failure)
+
+### Changed
+- `agent.py`: guarded intelligence wiring (`intelligence`,
+  `world_model`, `fusion2`, `modes`, `text_controller`,
+  `voice_typing`, `transcription` overrides); `_learn_from_report` —
+  verified actions become learning events (model + memory + workflow
+  discovery), guarded, never raises
+- `__main__.py`: flags `--intelligence/--no-intelligence/
+  --dictation/--transcribe/--teacher/--student/--office/--meeting/
+  --research`; subcommands `intelligence/memory/vocabulary/workflows/
+  self-test` (v10 subcommands preserved); HUD badges `AI:` `MODE:`
+  `SUG:` + transcript caption
+- `config.py`: v11.5 TOML keys — `[intelligence] [learning] [memory]
+  [transcription] [dictation] [prediction] [emoji] [teacher] [student]
+  [office] [meeting] [research] [developer] [accessibility]
+  [workflow] [privacy]` — fully backward compatible
+- `offline.py`: `run_offline_selftest` extended **13 → 18 checks**
+  (adds `intelligence_offline`, `memory_offline`, `vocabulary_offline`,
+  `transcription_offline`, `fusion2_offline`) — the adaptive
+  intelligence is proven to learn and predict under REAL socket-level
+  network isolation
+- version 10.0.0 → 11.5.0 (package, CLI banner "Adaptive
+  Human-Computer Intelligence Edition")
+
+### Security
+- Re-audited for v11.5: **no `shell=True` / `eval` / `exec` /
+  `os.system` anywhere** in the package (58 modules); all subprocess
+  usage remains argv-only with timeouts
+- New validation surfaces: workflow step names must match
+  `^[a-z0-9][a-z0-9_-]{0,63}$` (shell fragments/SQL/traversal
+  rejected); memory/vocabulary/profile imports validated + scrubbed
+  per row (malformed or credential-shaped entries skipped, never
+  trusted); model artifacts bounds-checked with magic+version
+  (corrupt/incompatible ⇒ plugin states, never crashes); typed text
+  capped at 4,000 chars; dictation buffer ≤ 100k chars
+- PREDICTION ≠ EXECUTION enforced at 5 layers (data types → assistant
+  → world model → `executable` policy → v10 safety gate); destructive
+  suggestions suppressed, destructive workflow steps confirmed per run
+- §43 malicious-input suite: SQL injection, command substitution,
+  path traversal, binary junk, 10k-char strings, XSS, credential
+  shapes driven through every v11.5 parser — no exceptions, no
+  execution, no secret persistence
+- Privacy scrubbing is fail-closed: `password=hunter2`-shaped input
+  never reaches the learned store (asserted by test)
+
+### Fixed (bugs found during development)
+- n-gram packed stream u32/u64 alignment
+- dictation segment bookkeeping on "replace"
+- undo/redo stack ordering (no self-push)
+- mode dispatch routing for shared phrases ("mark important" now
+  routes to the ACTIVE mode's controller)
+- `_learn_from_report` variable shadowing
+
+### Verification
+- **786 tests passed / 0 failed / 0 skipped** (`pytest tests/ -q`,
+  Python 3.12, Linux sandbox) = 630 preserved v10 tests + **156** new
+  v11.5 tests (`tests/test_v115.py`, 20 sections incl. §43 security,
+  §44 resource limits, §34 budgets, §46 integration simulations)
+- `airmouse offline-test`: **18/18** checks with networking disabled
+  at socket level; `airmouse self-test`: 15 components — 13 pass,
+  1 optional (RealLocalASR), 1 hardware (Camera), 0 fail
+- Performance (this environment; budgets asserted in §34 tests):
+  prediction ≈ 0.004 ms (< 50 ms), emoji suggestion ≈ 0.024 ms
+  (< 50 ms), memory record ≈ 0.005 ms (< 10 ms), transcription tick
+  ≈ 0.001 ms (< 100 ms), fusion ≈ 0.008 ms (< 20 ms), event-bus
+  publish ≈ 0.002 ms, model load ≈ 3.4 ms (< 500 ms) — all ≥ 100×
+  headroom
+- **Honest hardware status:** no physical webcam/mic/RF in the build
+  environment — everything is SIMULATION-VERIFIED on deterministic
+  simulators. Real-hardware camera/mic/gaze/RF, real-Chrome CDP, and
+  live PocketSphinx/Vosk/Whisper ASR are HARDWARE-UNVERIFIED; the
+  simulated streaming provider and transcript-injection path are what
+  is verified. No physical verification is claimed
+- The personal model ships EMPTY (fresh install ≈ 0.1 KB; a
+  200-sentence training run produces a 17 KB artifact) — no
+  pre-trained weights, no neural LLM, honestly documented
+
 ## v10.0.0 — UNIVERSAL OFFLINE INTERACTION ENGINE
 
 The defining evolution: every interaction modality (voice, hand, gaze,
