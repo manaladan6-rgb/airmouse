@@ -1,5 +1,247 @@
 # Changelog
 
+## v15.0.0 — UNIVERSAL HUMAN + AI INTERACTION PLATFORM (v12.0 → v15.0)
+
+The defining evolution: the deterministic interaction core opens a
+DOCUMENTED, PERMISSION-AWARE boundary for AI agents — AIP 1.0, Python +
+JS SDKs, a standalone stdlib-only agent core, multi-agent
+infrastructure under a global control hierarchy — plus goals, tasks,
+skills, self-healing recovery, universal target resolution, DO IT WITH
+ME, one-choice onboarding, transparent local licensing, a marketplace
+foundation, a deterministic simulator, failure injection and
+six-question explainability. Humans and agents share ONE interaction
+layer; agents get no bypass pathway.
+
+### Added — v12 Personal Interaction Twin (`intelligence/twin/`)
+- `twin.py`: `PersonalInteractionTwin` — **14 fact categories**
+  (preference, habit, gesture_pattern, gaze_behavior, voice_vocabulary,
+  command_preference, application_preference, workflow_preference,
+  confirmation_behavior, correction_behavior, timing_pattern,
+  successful_action, failed_action, modality_preference); every fact
+  carries **source / confidence / context / timestamp / frequency /
+  success_rate / provenance** (bounded evidence list, ≤ 8 entries);
+  lifecycle `learn` → `record_outcome` → `decay` (30-day half-life,
+  forget below 0.05) → `forget`/`correct` → `export`/`import` →
+  `reset` → `query`/`explain`; bounded 2,000 facts; secrets scrubbed
+  fail-closed (GitHub-PAT/API-key/private-key/card-shaped values
+  refused); **optional by contract** — the core never imports it at
+  module scope; never raises through the public boundary
+
+### Added — v12.5 temporal world model
+- `world_model_temporal.py`: `TemporalWorldModel` — frozen
+  `HumanState` / `ComputerState` / `TaskState` snapshot sections;
+  `observe()` (partial merge + cause + cause_confidence),
+  `snapshot()`/`previous()`/`history()`, `diff()` (dotted paths,
+  from→to), `transitions()`, `mismatches()` + `expect()` (expected-vs-
+  observed detection), `explain()`, `predict_state()` (**PREDICTION
+  ONLY — never a permission**); bounded history **128**; snapshots out
+  are immutable deep copies
+
+### Added — v13 goals + tasks
+- `goals.py`: `GoalHierarchyParser` — deterministic
+  **COMMAND → INTENT → TASK → GOAL** classification with risk tables
+  (none/low/medium/high/destructive), required permissions and
+  required confirmations per objective; optional `interpreter`
+  adapter for low-confidence results, output labelled
+  `parsed_by="intelligence_adapter"`, bounded to the same levels, can
+  NEVER downgrade risk or set `execution_allowed` (always `False`);
+  **PREDICTION ≠ PERMISSION ≠ EXECUTION**
+- `tasks.py`: `TaskEngine` — bounded (100 tasks × 64 steps × 8
+  dependencies/step), 10 task states, structured `TaskStep`
+  (objective/action/target/preconditions/expected/verification/risk/
+  permission/timeout ≤ 600 s/bounded `RetryPolicy` ≤ 3 attempts),
+  DAG `ready_steps`/`begin_step`/`complete_step`/
+  `record_verification`/`retry_step`, **destructive steps require
+  explicit human approval** (`PENDING_APPROVAL` until `approve()`),
+  `checkpoint()`/`rollback()` restore task/step STATE only (never
+  external side effects), bounded audit ring (200)
+
+### Added — v13.5 skills
+- `skills.py`: `InteractionCompression` — sequence clustering by
+  **action-template signature** (action names + target KINDS;
+  coordinates/values deliberately ignored); a skill proposal requires
+  **≥ 3 repetitions + avg confidence ≥ 0.6 + user notification +
+  preview + approval — NEVER silent**; `PersonalSkillLibrary` —
+  100 skills × 24 steps, versioned `edit()`, enable/disable,
+  `record_use`, validated export/import, revoke; targets are
+  semantic/accessibility/DOM/OCR/visual, raw **coordinates only as an
+  explicit flagged fallback** (`coordinate_fallback`, default False)
+
+### Added — v14 recovery + target resolution
+- `recovery2.py`: `RecoveryEngine` — full loop
+  **PRECONDITION → EXECUTE → OBSERVE → VERIFY → RECOVER** on top of
+  (never replacing) the v10 RecoveryManager; 7 strategies
+  (retry / reobserve / retarget / alternate_modality /
+  alternate_semantic_target / alternate_execution / request_human) +
+  safe GIVE_UP; **14 failure diagnoses** with deterministic ladders;
+  hard round cap (6) + bounded retries; **safety gate consulted before
+  every execution**; no silent privilege escalation; destructive
+  recovery needs a confirm hook (absent ⇒ no destructive recovery);
+  every round appends an explainable trace entry
+- `target_resolver.py`: `UniversalTargetResolver` — one resolver for
+  humans AND agents; 7-provider chain **accessibility → DOM →
+  semantic_app_api → OCR → vision → geometry → coordinate**;
+  the coordinate link runs only behind the explicit
+  `allow_coordinate_fallback` flag; `resolve_target()` /
+  `explain_target()` / `verify_target()` with per-provider attempts
+
+### Added — v14.5 AIP protocol + SDKs + agent core
+- `aip.py`: **AirMouse Interaction Protocol (AIP) 1.0** — concepts
+  DISCOVER / OBSERVE / TARGET / REQUEST / AUTHORIZE / EXECUTE /
+  VERIFY / RESULT; **18 conversation message types + STATUS**; **12
+  JSON schemas** (capability, observation, target, intent, action,
+  task, permission, confirmation, verification, error, recovery,
+  result) validated by a small strict validator — **unknown fields
+  REJECTED, fail-closed**; version negotiation (same-major required);
+  deterministic capability discovery; **256 KB** message caps;
+  envelope `aip_version/type/id/agent_id/request_id/ts/payload`
+- `agent_sdk.py`: `AirMouse` SDK (§10) —
+  `connect/capabilities/observe/targets/execute/verify/task/stop/
+  status` over an in-process `AipEndpoint` backed by the shared
+  engines; **permission gate on every execute**; without a gate the
+  endpoint fails closed to ASK ⇒ denied; `stop` revokes agent control
+- `agent-core/` (standalone `airmouse-agent-core` 1.0.0, §11):
+  stdlib-only, lazy, **never imports airmouse** (≈ 10 KB source,
+  3 files), AIP over in-process handler / `.send()` transport /
+  **stdio JSON-lines** (lazy subprocess); `AipError` for protocol
+  errors; `airmouse-agent --version` smoke CLI
+- `agent-sdk-js/` (`airmouse-agent` 1.0.0, §11): **dependency-free**
+  JS/TS SDK with the identical primitive surface
+  (`InProcessTransport` / `StdioTransport`, Promises, `AipError`)
+
+### Added — v15 agents, permissions, experience, platform, testability
+- `agents.py`: `AgentRegistry` (§12) — identity / priority (1..9) /
+  capabilities / budgets / audit for up to 32 agents; **exclusive
+  resource leases** (TTL 30 s default ≤ 300 s); deterministic conflict
+  resolution — **the holder keeps the resource until release or
+  expiry; priority NEVER steals a live lease** (challenger waits);
+  `handoff` (release + reacquire + notify); agent-to-agent messages
+  are **DATA only** (info/handoff/result/question — never executed,
+  never parsed as instructions); human override (`suspend_agent` /
+  `stop_agent`) and `emergency_stop_all()` (stops every agent,
+  releases every lease, latches permission E-STOP)
+- `permissions.py`: `AgentPermissionEngine` (§14/§15) — global
+  hierarchy **E-STOP > HUMAN OVERRIDE > SAFETY POLICY > PERMISSION >
+  AGENT > PREDICTION** (nothing may reorder it); 12 granular keys
+  (`observe.screen` … `destructive.action`); decisions
+  **ALLOW / DENY / ASK / ALLOW_ONCE / ALLOW_SESSION / ALLOW_PATTERN**;
+  **ASK without a human == NO** and no-rule defaults to ASK (fail
+  closed); deterministic most-specific-wins rule matching;
+  `explain_decision()` §24 trace
+- `ditm.py`: **DO IT WITH ME** (§16) — goal → structured proposal
+  {OBJECTIVE, PLAN, SOURCES, CURRENT STATE, RISKS, REQUIRED ACTIONS,
+  APPROVAL STATE} → user verbs **START / EDIT PLAN / PAUSE / STOP /
+  CHANGE DIRECTION** → verified execution with progress reporting →
+  corrections learned (Twin optional); destructive plans stay
+  PENDING_APPROVAL inside the TaskEngine
+- `onboarding.py`: **one-choice progressive onboarding** (§17:
+  voice / hands / eyes / keyboard / automatic / all → minimal safe
+  profile, usable immediately, preferences learned quietly) +
+  **§18 accessibility posture** for 8 modes (voice-only, gesture-only,
+  gaze-only, keyboard-only, switch-access, hybrid, hands-free,
+  low-mobility) with configurable confirmation per mode and
+  large-UI / high-contrast / reduced-motion as architectural flags
+- `licensing.py`: **transparent local licensing** (§19) — tiers
+  FREE / PRO / DEVELOPER / ENTERPRISE / SDK / MARKETPLACE / HARDWARE;
+  **FREE tier = the complete local core** (21 `CORE_FEATURES`);
+  higher tiers add, never subtract; revocable; inspectable state with
+  `local_only: True`, `phones_home: False`, `dark_patterns: "none"`;
+  no phone-home code exists
+- `marketplace.py`: skill marketplace foundation (§20) —
+  `SkillManifest` validation **fail-closed** (unknown fields rejected,
+  semver versions, bounded permission lists, risk levels
+  none/low/medium/high/destructive); install / enable / disable /
+  update (strict semver supersession; risk escalation requires
+  reinstall) / rollback / remove / inspect; **high/destructive risk
+  requires explicit human trust** (`trusted_by_human`); **NO
+  code-execution path — manifests are DATA** (only pre-vetted action
+  names from the unified vocabulary)
+- `simulator.py`: **deterministic virtual computer** (§26) — windows /
+  tabs / buttons / forms / files / clipboard / navigation /
+  UI changes / failure modes; same script → same final state; also the
+  developers' "fake computer environment" (§25)
+- `failure_injection.py`: **12 failure classes** (§27: missing_target,
+  moved_button, closed_window, stale_dom, ocr_failure,
+  accessibility_failure, network_failure, permission_denial, timeout,
+  app_crash, agent_conflict, malformed_request) driven through the
+  recovery loop — OBSERVE → DIAGNOSE → RECOVER → VERIFY or safe stop;
+  permission / conflict / malformed classes never retry
+- `explain.py`: **six question traces** (§24) — why-predicted,
+  why-target, why-confirmation, why-failed, why-recovery,
+  which-preference — structured, bounded and **sensitive-data-free**
+  (categorical labels and lengths, never content), composable via
+  `decision_trace()`
+- `__main__.py`: **v15 subcommands** (§32)
+  `status / capabilities / observe / world / twin / skills / agents /
+  permissions / tasks / protocol / benchmark` (print + exit, all
+  local); **v15 HUD badges** (§33) `AGENT:` (an AI agent is
+  controlling the computer), `TASK:`, `CONFIRM?`, `RECOVER:`
+- Tests: `test_v12.py` (39), `test_v13.py` (40), `test_v13_5.py` (19),
+  `test_v14.py` (33), `test_v14_5.py` (34), `test_v15.py` (75),
+  `test_hardening_v15.py` (30) — **270 new tests**, 786 preserved
+
+### Changed
+- `pyproject.toml` / `__init__.py` / CLI banner: version 11.5.0 →
+  **15.0.0** ("Universal Human + AI Interaction Platform")
+- `config.py`: v9 perf-report flag decoupled from the privacy telemetry
+  flag (see Fixed); all v11.5 sections preserved backward-compatibly
+- Docs: `docs/V15_ARCHITECTURE.md`, `docs/AIP_SPEC.md`,
+  `docs/AGENT_SDK.md`, `docs/MULTI_AGENT.md`, `docs/SKILLS.md`,
+  `docs/DEVELOPER_GUIDE.md`, `docs/USER_GUIDE.md` (new); README +
+  VERIFICATION_REPORT updated (prior content preserved)
+
+### Security
+- **§23 executable audit** (`tests/test_hardening_v15.py`): no
+  `shell=True` / `eval(` / `exec(` / `os.system` / `pickle.load` /
+  `yaml.load` anywhere in the package; subprocess argv-list only;
+  **zero network code in all 17 new v12→v15 modules** (urllib /
+  requests / raw sockets / httpx asserted absent)
+- **§30 adversarial fuzz**: 11 parser surfaces (AIP message parser +
+  action schema, goal parser, SDK execute, marketplace manifests, twin
+  import, skill import, task engine, permission engine, agent
+  registry, target resolver, workflow importer) each driven with 23
+  hostile strings — SQL injection, command substitution, path
+  traversal, XSS, credential shapes, control chars, 5000-char blobs,
+  wrong types — no crashes, no execution, no coercion (fail-closed)
+- **AIP protocol hardening**: unknown envelope fields, unknown types,
+  wrong major versions and unknown schema fields are REJECTED, never
+  coerced; 256 KB caps enforced both directions; hostile strings in
+  `params` are inert data (no field reaches execution); the endpoint
+  fails closed to ASK==NO without a permission gate
+- **Permission hierarchy holds under adversarial agents**: e-stop,
+  human override, safety blocks, permission boundaries and destructive
+  confirmations cannot be reordered or bypassed by any agent; denied
+  leases/conflicts are audited, never preempted
+- **Telemetry default defect found and fixed** (see Fixed); privacy
+  lifecycle re-verified (twin inspect/forget/export/reset; skills
+  revocable; everything local, no upload path)
+
+### Fixed
+- **telemetry_default defect**: the legacy v9 `[v9] telemetry_enabled`
+  key (a LOCAL perf-report flag) collided with the §21 privacy
+  telemetry flag and could silently enable the privacy-sensitive
+  setting; `perf_report_enabled` now reads its own key first and
+  `telemetry_enabled` stays authoritatively **False** (asserted by
+  `test_telemetry_structurally_off`)
+- v9→v11.5 regression: none — all 786 preserved tests stayed green at
+  every milestone commit
+
+### Verification
+- **1056 tests passed / 0 failed / 0 skipped** (`pytest tests/ -q`,
+  Python 3.12.14, ≈ 12 s) = 786 preserved + **270 new** across the
+  v12→v15 suites; milestone tags **v12.0.0, v13.0.0, v13.5.0,
+  v14.0.0, v14.5.0** pushed with green suites at each commit
+  (825 → 865 → 884 → 917 → 951 → 1026 → 1056)
+- Performance budgets enforced in `tests/test_hardening_v15.py`:
+  twin learn < 10 ms, world observe < 10 ms, task create < 10 ms, AIP
+  parse < 5 ms, goal parse < 50 ms, target resolve < 20 ms, SDK
+  execute < 50 ms in-process, recovery round < 20 ms, agent-core
+  import < 200 ms
+- **SIMULATION-VERIFIED ONLY**: all v12→v15 subsystems verified in
+  simulation (deterministic §26 simulator, in-process + stdio AIP);
+  webcam / microphone / gaze / RF / real-Chrome-CDP / live-ASR remain
+  **NOT PHYSICALLY VERIFIED** (unchanged since v11.5)
+
 ## v11.5.0 — ADAPTIVE HUMAN-COMPUTER INTELLIGENCE
 
 The defining evolution: the deterministic v10 interaction core gains an

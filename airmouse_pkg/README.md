@@ -1,11 +1,18 @@
-# AirMouse v11.5.0 — ADAPTIVE HUMAN-COMPUTER INTELLIGENCE
+# AirMouse v15.0.0 — UNIVERSAL HUMAN + AI INTERACTION PLATFORM
 
 Voice + hand + gaze + RF + keyboard/mouse + screen + browser → one
 **event bus** → fusion 2.0 → world model → intent → action →
 verification → **learning**. Fully offline-capable: no LLM, no cloud
-AI, no network required for any control path — and now a **personal
-model** that learns your patterns locally, with prediction that can
-advise but never execute.
+AI, no network required for any control path — a **personal model**
+that learns your patterns locally, with prediction that can advise but
+never execute — and now (v12→v15) a **temporal world model, goals,
+tasks, skills, self-healing recovery, universal target resolution, the
+AIP 1.0 agent protocol, SDKs for Python and JavaScript, multi-agent
+infrastructure, a global permission hierarchy, DO IT WITH ME,
+one-choice onboarding, transparent licensing, a marketplace
+foundation, a deterministic simulator and failure injection**.
+Humans and AI agents go through the SAME pipeline — agents get no
+bypass pathway.
 
 ![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue)
 ![Platform](https://img.shields.io/badge/platform-windows%20%7C%20linux%20%7C%20macos-lightgrey)
@@ -46,6 +53,43 @@ KB on a fresh install and grows with your usage. **It is not a neural
 LLM**, and predictions are data for you and the intent layer — never
 executions.
 
+## What's new in v12→v15
+
+One release arc, seven milestone versions. Every row is additive —
+everything from earlier versions is preserved below.
+
+| Version | Adds | Core modules / artifacts |
+|---|---|---|
+| **v12.0.0** | **Personal Interaction Twin** (14 fact categories; every fact carries source/confidence/context/timestamp/frequency/success_rate/provenance; learn/forget/decay/correct/export/import/reset/inspect/explain; optional by contract; secrets scrubbed fail-closed) + **Temporal Interaction World Model** foundation | `intelligence/twin/` |
+| **v12.5.0** | **Temporal world model**: frozen HUMAN/COMPUTER/TASK sections; observe/snapshot/diff/history/transitions/explain/predict_state; expected-vs-observed mismatch detection; bounded history 128 | `world_model_temporal.py` |
+| **v13.0.0** | **Goals** (COMMAND→INTENT→TASK→GOAL deterministic parser; optional labelled interpreter adapter that can never downgrade risk or enable execution; PREDICTION ≠ PERMISSION ≠ EXECUTION) + **Tasks** (bounded TaskEngine, DAG dependencies, human approval gates for destructive steps, bounded retries, checkpoints with honest state-only rollback) | `goals.py`, `tasks.py` |
+| **v13.5.0** | **Skills**: InteractionCompression — sequence clustering by action-template signature that ignores coordinates; ≥3 repetitions + confidence threshold + notification + preview + approval, NEVER silent; PersonalSkillLibrary — versioned/editable/revocable/exportable | `skills.py` |
+| **v14.0.0** | **Recovery 2** (PRECONDITION→EXECUTE→OBSERVE→VERIFY→RECOVER; 7 strategies; 14 failure diagnoses; bounded rounds; safety gate before every execution; permission-denied never retries; malformed fails closed) + **Universal target resolution** (7-provider chain accessibility→DOM→semantic-API→OCR→vision→geometry→coordinate; coordinates only behind an explicit flag) | `recovery2.py`, `target_resolver.py` |
+| **v14.5.0** | **AIP 1.0 protocol** (18 conversation message types + STATUS; 12 strict fail-closed JSON schemas; same-major negotiation; 256 KB caps) + **Agent SDKs** + **standalone agent-core** (stdlib-only, lazy, never imports airmouse) + **JS/TS SDK** (dependency-free) | `aip.py`, `agent_sdk.py`, `agent-core/`, `agent-sdk-js/` |
+| **v15.0.0** | **Multi-agent registry** (identity/priority/capabilities/budgets/audit; exclusive resource leases; deterministic conflict resolution — holder keeps until release/expiry, priority never steals; handoff; data-only messaging; human override; emergency_stop_all) · **Permission engine** (E-STOP > HUMAN OVERRIDE > SAFETY POLICY > PERMISSION > AGENT > PREDICTION; granular keys; ALLOW/DENY/ASK/ALLOW_ONCE/ALLOW_SESSION/ALLOW_PATTERN; ASK without human == NO) · **DO IT WITH ME** (goal→proposal→START/EDIT/PAUSE/STOP/CHANGE_DIRECTION→progress→corrections) · **one-choice onboarding** + accessibility posture for 8 modes · **transparent local licensing** (FREE = complete core) · **marketplace foundation** (fail-closed manifests, NO code-execution path) · **deterministic simulator** · **12-class failure injection** · **six-question explainability** · **v15 CLI subcommands** · **v15 HUD badges** (`AGENT:` `TASK:` `CONFIRM?` `RECOVER:`) | `agents.py`, `permissions.py`, `ditm.py`, `onboarding.py`, `licensing.py`, `marketplace.py`, `simulator.py`, `failure_injection.py`, `explain.py`, `__main__.py` |
+
+Full map with chapter references: `docs/V15_ARCHITECTURE.md`. Protocol:
+`docs/AIP_SPEC.md`. SDKs: `docs/AGENT_SDK.md`. Multi-agent:
+`docs/MULTI_AGENT.md`. Skills + marketplace: `docs/SKILLS.md`.
+Quickstart: `docs/DEVELOPER_GUIDE.md`. User guide: `docs/USER_GUIDE.md`.
+
+### The 5-line agent SDK (§10)
+
+```python
+from airmouse.agent_sdk import AirMouse
+
+air = AirMouse()
+air.connect()
+air.capabilities()
+air.observe()
+air.execute(intent="open my research project", verify=True)
+```
+
+Every `execute` crosses the core's permission/confirmation gates — an
+agent has NO way to bypass them. The same conversation works from the
+standalone `airmouse-agent-core` runtime (stdlib-only) and the
+dependency-free JS SDK.
+
 ## What's New in v11.5.0
 
 | Subsystem | What it does |
@@ -72,7 +116,7 @@ executions.
 ## Install
 
 ```bash
-pip install airmouse-11.5.0-py3-none-any.whl
+pip install airmouse-15.0.0-py3-none-any.whl
 
 # optional extras:
 pip install "airmouse[voice]"   # SpeechRecognition + pyaudio (v5 mic voice control)

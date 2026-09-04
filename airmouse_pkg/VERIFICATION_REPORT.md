@@ -1,3 +1,106 @@
+# AirMouse v15.0.0 — Final Verification Report (v12.0 → v15.0)
+
+Date: 2025-09-05 (build environment: Linux sandbox, Python 3.12.14)
+Scope: v11.5.0 → v15.0.0 "Universal Human + AI Interaction Platform"
+per mission spec (7 milestone versions: v12.0.0, v12.5.0, v13.0.0,
+v13.5.0, v14.0.0, v14.5.0, v15.0.0). Companion documents:
+`README.md`, `docs/V15_ARCHITECTURE.md`, `docs/AIP_SPEC.md`,
+`docs/AGENT_SDK.md`, `docs/MULTI_AGENT.md`, `docs/SKILLS.md`,
+`docs/DEVELOPER_GUIDE.md`, `docs/USER_GUIDE.md`. The full v11.5 and
+v10 reports are preserved below.
+
+---
+
+## V1. Tests — exact numbers
+
+```
+Baseline before v12 : 786 passed, 0 failed, 0 skipped   (v11.5.0 tag)
+Final v15 suite     : 1056 passed, 0 failed, 0 skipped  (Python 3.12.14, ~12 s)
+```
+
+New tests by file (measured, `pytest --collect-only`):
+
+| File | New tests |
+|---|---:|
+| `tests/test_v12.py` | 39 |
+| `tests/test_v13.py` | 40 |
+| `tests/test_v13_5.py` | 19 |
+| `tests/test_v14.py` | 33 |
+| `tests/test_v14_5.py` | 34 |
+| `tests/test_v15.py` | 75 |
+| `tests/test_hardening_v15.py` | 30 |
+| **Total new** | **270** |
+
+**786 preserved** v10/v11.5 tests stayed green throughout; the
+milestone tags **v12.0.0, v13.0.0, v13.5.0, v14.0.0, v14.5.0** were
+pushed with green suites at each commit (825 → 865 → 884 → 917 → 951 →
+1026 → 1056).
+
+## V2. SIMULATION vs PHYSICAL — the honest table
+
+| Subsystem | Status |
+|---|---|
+| Personal Interaction Twin (v12) | **SIMULATION-VERIFIED** |
+| Temporal world model (v12.5) | **SIMULATION-VERIFIED** |
+| Goals + TaskEngine (v13) | **SIMULATION-VERIFIED** |
+| Skills + library (v13.5) | **SIMULATION-VERIFIED** |
+| Recovery engine + target resolver (v14) | **SIMULATION-VERIFIED** |
+| AIP protocol + SDKs + agent-core (v14.5) | **SIMULATION-VERIFIED** — protocol level, in-process AND stdio transports |
+| Multi-agent registry + permissions + DiTM + onboarding + licensing + marketplace + simulator + failure injection + explainability + CLI + HUD (v15) | **SIMULATION-VERIFIED** |
+| ALL v12–v15 subsystems, aggregate | **SIMULATION-VERIFIED ONLY — NOT PHYSICALLY VERIFIED** |
+| Webcam / microphone / gaze / RF / real-Chrome-CDP / live-ASR | **NOT PHYSICALLY VERIFIED** (unchanged since v11.5) |
+
+The §26 simulator IS the computer model for all v12→v15 verification:
+deterministic (same script → same final state), bounded, no real
+display. No physical hardware claim is made anywhere in the v12→v15
+arc.
+
+## V3. Security audit results (§23 + §30, executable in
+`tests/test_hardening_v15.py`)
+
+* **No `shell=True` / `eval(` / `exec(` / `os.system` / `pickle.load`
+  / `yaml.load`** anywhere in the package.
+* `subprocess` usage is **argv-list only** (no shell).
+* **Zero network code in all 17 new v12→v15 modules** — urllib /
+  requests / raw-socket connects / httpx asserted absent.
+* **11 parser surfaces fuzzed with 23 hostile strings each** (§30):
+  AIP message parser + action schema, goal parser, SDK execute path,
+  marketplace manifests, twin import, skill import, task engine,
+  permission engine, agent registry, target resolver, workflow
+  importer — SQL injection, command substitution, path traversal, XSS,
+  credential shapes, control characters, 5000-char blobs, wrong types.
+  No crashes, no execution, no coercion: everything fails closed.
+* **Telemetry default defect found + fixed**: the legacy v9
+  perf-report flag collided with the §21 privacy telemetry flag;
+  `telemetry_enabled` is now authoritatively False
+  (`test_telemetry_structurally_off`).
+* Permission hierarchy (E-STOP > HUMAN OVERRIDE > SAFETY POLICY >
+  PERMISSION > AGENT > PREDICTION) holds under adversarial agents;
+  `permission_denied` never retries; malformed requests fail closed.
+
+## V4. Performance budgets (all enforced in
+`tests/test_hardening_v15.py`)
+
+| Operation | Budget |
+|---|---|
+| Twin learn | < 10 ms |
+| World-model observe | < 10 ms |
+| Task create | < 10 ms |
+| AIP message parse | < 5 ms |
+| Goal/intent parse | < 50 ms |
+| Target resolve | < 20 ms |
+| SDK execute (in-process) | < 50 ms |
+| Recovery loop round | < 20 ms |
+| agent-core import | < 200 ms |
+
+## V5. Scope note
+
+Only the numbers in sections V1–V4 are claimed. Component self-test,
+offline selftest, packaging and v11.5/v10 details are unchanged from
+the reports below.
+
+---
+
 # AirMouse v11.5.0 — Final Verification Report
 
 Date: 2025-09-05 (build environment: Linux sandbox, Python 3.12)
