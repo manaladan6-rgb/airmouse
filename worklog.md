@@ -240,3 +240,23 @@ Stage Summary:
 - 11 new guides in airmouse_pkg/docs/ + 3 updated top-level docs (README/CHANGELOG/VERIFICATION_REPORT), 2,656 lines total
 - Every factual claim verified against code, live CLI runs, re-run selftests, or re-measured benchmarks; hardware status table is explicit (everything = SIMULATION-VERIFIED; camera/mic/gaze/RF/CDP/real-ASR = NOT PHYSICALLY VERIFIED)
 - Docs only — working tree otherwise untouched
+
+---
+Task ID: FINAL (v11.5)
+Agent: main coordinator
+Task: AirMouse v11.5.0 — final gate + release
+
+Work Log:
+- Test suite: tests/test_v115.py (156 tests) green after 3 hardening rounds; full suite 786 passed / 0 failed / 0 skipped (OLD 630 preserved + NEW 156)
+- Security audit re-run: no shell=True/eval(/exec(/os.system/pickle/yaml.load; subprocess argv-list-only with fixed binaries + timeouts; CDP + bridge loopback-pinned; memory/vocabulary/profile imports fail-closed validated; workflow step names regex-validated; 9 malicious strings x 8 parser surfaces fuzz-tested
+- Docs: 14 files written/updated (README, CHANGELOG, VERIFICATION_REPORT, V11_5_ARCHITECTURE, INTELLIGENCE_GUIDE, TRANSCRIPTION_GUIDE, TEACHER_GUIDE, STUDENT_GUIDE, OFFICE_GUIDE, ACCESSIBILITY_GUIDE, PRIVACY, SECURITY, PLUGIN_GUIDE, CLI_REFERENCE)
+- Packaging: wheel airmouse-11.5.0-py3-none-any.whl (338,493 bytes, 56 modules incl. intelligence subpackage + extension assets); clean-venv test passed (deps resolve, install, --version, self-test 13/1/1/0, v11.5 subsystems functional)
+- Push incident: GitHub PUSH PROTECTION rejected the first push — the v11.5 test suite contained the REAL user PAT inside its malicious-input test tuple. Fixed by rewriting the token (obviously-fake ghp_xxx36 placeholder) via interactive rebase of the local-only commit; verified 0 occurrences in pushed history. GitHub's secret scanning did exactly its job.
+- Git: pushed main 0a6a7b3..07658c8; annotated tag v11.5.0 pushed; VERIFIED local HEAD = remote HEAD = tag commit = 07658c8; working tree clean (0 changes)
+- Release: GitHub release id 382545060 published with wheel asset (uploaded, state=uploaded, verified via API)
+- Final gate re-run: 786 passed; CLI (version/self-test/offline-test/intelligence/memory/workflows/vocabulary) all green; pyflakes clean on all 15 new modules
+
+Stage Summary:
+- v11.5.0 COMPLETE and PUBLISHED: https://github.com/manaladan6-rgb/airmouse/releases/tag/v11.5.0
+- Simulation-verified only; webcam/mic/gaze/RF/real-Chrome-CDP/live-ASR honestly reported HARDWARE-UNVERIFIED
+- ACTION ITEM FOR USER: the PAT ghp_3c0y... was pasted in chat and momentarily committed locally; it was NEVER pushed (push protection), but it is exposed in conversation history — REVOKE/ROTATE it
