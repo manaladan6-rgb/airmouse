@@ -320,3 +320,20 @@ Stage Summary:
 - 7 new guides in airmouse_pkg/docs/ (V15_ARCHITECTURE 361, AIP_SPEC 365, AGENT_SDK 205, MULTI_AGENT 199, SKILLS 214, DEVELOPER_GUIDE 214, USER_GUIDE 146 = 1,704 lines) + 3 updated top-level docs (README 246, CHANGELOG 679, VERIFICATION_REPORT 514 = 1,439 lines); 3,143 lines total
 - Every factual claim verified against module source, live test runs, or pytest --collect-only; no benchmark numbers beyond the measured/measured-budget set; SIMULATION-VERIFIED / NOT PHYSICALLY VERIFIED wording used exactly
 - Docs only — no code changes, no commits, no pushes
+
+---
+Task ID: FINAL (v15)
+Agent: main coordinator
+Task: AirMouse v15.0.0 — final release gate
+
+Work Log:
+- Hardening committed (588dc30): §23 executable security audit, §30 fuzz x11 parser surfaces, §22 performance budgets, §21 privacy lifecycle; fixed pre-existing telemetry-default defect (v9 perf flag silently overrode privacy default)
+- Docs committed: 7 new guides + README/CHANGELOG/VERIFICATION_REPORT v15 sections (prior content preserved)
+- Final gate re-run: 1056 passed / 0 failed / 0 skipped (11.9s)
+- Wheels built: airmouse-15.0.0-py3-none-any.whl (416,162 bytes, dist/), airmouse_agent_core-1.0.0-py3-none-any.whl (5,485 bytes)
+- Clean-venv install test PASSED: fresh venv -> install airmouse wheel (deps resolved) -> --version OK -> status OK -> self-test 13 pass/1 optional/1 hardware/0 fail -> v15 subcommands (twin/protocol/benchmark) OK -> install airmouse-agent-core wheel -> airmouse-agent --version OK -> import OK
+- Tag v15.0.0 (annotated) + push + remote verification below
+
+Stage Summary:
+- v12→v15 evolution complete: 270 new tests, 786 preserved, all green at every milestone commit (825→865→884→917→951→1026→1056)
+- Honest scope: everything SIMULATION-VERIFIED; camera/mic/gaze/RF/real-CDP/live-ASR remain NOT PHYSICALLY VERIFIED
