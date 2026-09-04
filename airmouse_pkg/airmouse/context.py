@@ -32,12 +32,14 @@ Copyright (c) AirMouse.  MIT License.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple, Union
+import threading
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:  # package-relative (normal import path)
-    from .interfaces import AppContext, IntentType
+    from .interfaces import AppContext, ContextState, IntentType, ScreenTarget, now_ts
 except ImportError:  # pragma: no cover - direct file execution fallback
-    from airmouse.interfaces import AppContext, IntentType
+    from airmouse.interfaces import (AppContext, ContextState, IntentType,
+                                     ScreenTarget, now_ts)
 
 __all__ = [
     "CONTEXT_KEYWORDS",
@@ -45,6 +47,7 @@ __all__ = [
     "PROFILES",
     "detect_app_context",
     "ContextProfile",
+    "ContextEngine",
 ]
 
 # ---------------------------------------------------------------------------
@@ -208,3 +211,149 @@ def _coerce_ctx(ctx: Union[AppContext, str]) -> AppContext:
         return AppContext(str(getattr(ctx, "value", ctx)).lower())
     except Exception:
         return AppContext.UNKNOWN
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# v10 — Context Engine (§8)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class ContextEngine:
+    """Local context state machine (v10 §8).
+
+    One thread-safe object holding everything the system knows about
+    "where the user is": focused application/window, browser state,
+    gaze target, selection, recent action/target, active mode.
+
+    Contextual commands resolve here::
+
+        "click that"  -> current_gaze_target   (gaze → click)
+        "close it"    -> focused window        (window ref)
+        "open this"   -> selected object       (selection)
+
+    Every update accepts an explicit ``now`` for determinism; a stale
+    gaze target expires after ``gaze_ttl`` seconds (default 2.0) so
+    "click that" never fires on ancient eye positions.
+    """
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
+        cfg = dict(config or {})
+        self.gaze_ttl = float(cfg.get("gaze_ttl", 2.0))
+        self.recent_ttl = float(cfg.get("recent_ttl", 30.0))
+        self._state = ContextState()
+        self._gaze_at = -1e9
+        self._recent_at = -1e9
+        self._selection_at = -1e9
+        self._lock = threading.RLock()
+
+    # -- updates ---------------------------------------------------------------
+
+    def update_window(self, title: str, application: str = "",
+                      now: Optional[float] = None) -> None:
+        """Focused window/application changed (screen perception calls)."""
+        now = float(now if now is not None else now_ts())
+        with self._lock:
+            self._state.focused_window = str(title or "")
+            self._state.focused_application = str(application or "") or \
+                str(title or "")
+            self._state.app_context = detect_app_context(str(title or ""))
+            self._state.timestamp = now
+
+    def update_browser(self, browser: str = "", tab_title: str = "",
+                       url: str = "", now: Optional[float] = None) -> None:
+        """Browser-bridge state changed (bridge polls call this)."""
+        now = float(now if now is not None else now_ts())
+        with self._lock:
+            if browser:
+                self._state.active_browser = str(browser)
+            if tab_title:
+                self._state.active_tab_title = str(tab_title)
+            if url:
+                self._state.current_url = str(url)
+            self._state.timestamp = now
+
+    def update_gaze_target(self, target: Optional["ScreenTarget"],
+                           now: Optional[float] = None) -> None:
+        """The target currently under the gaze point (fusion calls)."""
+        now = float(now if now is not None else now_ts())
+        with self._lock:
+            self._state.current_gaze_target = target
+            self._gaze_at = now
+            self._state.timestamp = now
+
+    def set_selection(self, target: Optional["ScreenTarget"],
+                      now: Optional[float] = None) -> None:
+        now = float(now if now is not None else now_ts())
+        with self._lock:
+            self._state.selected_object = target
+            self._selection_at = now
+
+    def record_action(self, action: str,
+                      target: Optional["ScreenTarget"] = None,
+                      now: Optional[float] = None) -> None:
+        """The action engine records what it just did (recent history)."""
+        now = float(now if now is not None else now_ts())
+        with self._lock:
+            self._state.recent_action = str(action or "")
+            if target is not None:
+                self._state.recent_target = target
+            self._recent_at = now
+            self._state.timestamp = now
+
+    def set_mode(self, mode: str, now: Optional[float] = None) -> None:
+        now = float(now if now is not None else now_ts())
+        with self._lock:
+            self._state.active_mode = str(mode or "hand")
+            self._state.timestamp = now
+
+    def update_screen(self, screen_w: int, screen_h: int) -> None:
+        with self._lock:
+            self._state.current_screen = (int(screen_w), int(screen_h))
+
+    def set_browser_targets(self, targets: List["ScreenTarget"],
+                            now: Optional[float] = None) -> None:
+        now = float(now if now is not None else now_ts())
+        with self._lock:
+            self._state.browser_targets = list(targets or [])
+            self._state.timestamp = now
+
+    # -- resolution ---------------------------------------------------------------
+
+    def resolve_reference(self, ref: str,
+                          now: Optional[float] = None) -> Optional["ScreenTarget"]:
+        """Resolve a deictic reference ("that"/"it"/"window"…) against
+        live context.  Gaze targets expire after ``gaze_ttl``; recent
+        targets after ``recent_ttl``.  Never raises; returns None when
+        nothing sensible exists (the caller must NOT invent coordinates).
+        """
+        now = float(now if now is not None else now_ts())
+        with self._lock:
+            r = (ref or "").strip().lower()
+            # stale-out the gaze target first
+            if (now - self._gaze_at) > self.gaze_ttl:
+                self._state.current_gaze_target = None
+            if (now - self._recent_at) > self.recent_ttl:
+                self._state.recent_target = None
+            resolved = self._state.resolve_reference(r)
+            # "browser target" phrasing: fall back to browser targets
+            if resolved is None and r and self._state.browser_targets:
+                needle = r
+                for t in self._state.browser_targets:
+                    if needle in (t.text or "").lower():
+                        return t
+            return resolved
+
+    def snapshot(self) -> ContextState:
+        """Thread-safe copy of the current context state."""
+        with self._lock:
+            return self._state
+
+    @property
+    def state(self) -> ContextState:
+        """Live state reference (read-only users; use snapshot to copy)."""
+        return self._state
+
+    def reset(self) -> None:
+        with self._lock:
+            self._state = ContextState()
+            self._gaze_at = self._recent_at = self._selection_at = -1e9
