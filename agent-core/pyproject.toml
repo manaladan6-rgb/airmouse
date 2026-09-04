@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "airmouse-agent-core"
+version = "1.0.0"
+description = "AirMouse Agent Core — the lightweight standalone runtime for AI agents to interact with computers through the AirMouse Interaction Protocol (AIP). Stdlib-only, lazy, no ML, no camera, no microphone, no GUI, no cloud."
+license = "MIT"
+requires-python = ">=3.9"
+keywords = ["airmouse", "aip", "agent", "ai-agents", "computer-use", "automation", "protocol", "local-first"]
+
+[project.scripts]
+airmouse-agent = "airmouse_agent.client:main"
+
+[tool.setuptools.packages.find]
+include = ["airmouse_agent*"]

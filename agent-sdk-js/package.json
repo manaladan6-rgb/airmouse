@@ -1,0 +1,10 @@
+{
+  "name": "airmouse-agent",
+  "version": "1.0.0",
+  "description": "AirMouse Agent SDK for JavaScript/TypeScript — speak the AirMouse Interaction Protocol (AIP) to a local AirMouse core. Dependency-free, local-first.",
+  "main": "airmouse-agent.js",
+  "types": "airmouse-agent.d.ts",
+  "license": "MIT",
+  "keywords": ["airmouse", "aip", "agent", "computer-use", "automation", "local-first"],
+  "files": ["airmouse-agent.js", "airmouse-agent.d.ts", "README.md"]
+}

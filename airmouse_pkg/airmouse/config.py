@@ -131,6 +131,12 @@ class Config:
     target_resolution_min_confidence = 0.35
     target_resolution_coordinate_fallback = False   # explicit flag (§6/§8)
 
+    # ═══ v14.5 — AIP Protocol + Agent SDK (§9/§10/§11) ═══
+    # [aip]
+    aip_enabled = True
+    aip_version = "1.0"
+    aip_max_message_bytes = 262144
+
     # [privacy]
     privacy_mode = False               # pause learning + history, wipe nothing
     telemetry_enabled = False          # OFF by default; nothing phones home
