@@ -116,6 +116,13 @@ class Config:
     tasks_max_tasks = 100
     tasks_default_step_timeout = 30.0
 
+    # ═══ v13.5 — Interaction Compression + Skills (§6) ═══
+    # [skills]
+    skills_discovery_enabled = True      # propose only; approval required
+    skills_min_occurrences = 3
+    skills_min_confidence = 0.6
+    skills_max_count = 100
+
     # [privacy]
     privacy_mode = False               # pause learning + history, wipe nothing
     telemetry_enabled = False          # OFF by default; nothing phones home
