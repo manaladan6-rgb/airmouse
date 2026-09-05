@@ -745,6 +745,7 @@ class Teacher:
             "  Let's learn together. This will take about 3–5 minutes.\n"
             "  We'll teach:  ✓ Voice   ✓ Eyes   ✓ Hands   "
             "✓ Multimodal control\n"
+            "                ✓ Personalization\n"
             "\n"
             "  You can skip any step — \"Skip for now\" always works,\n"
             "  and nothing is marked complete unless the sensors\n"
@@ -928,20 +929,36 @@ def _render_plan(tracks: List[str], store: OnboardingStore) -> str:
 
 def _teach_voice(teacher: Teacher, dest: Any, ask: Optional[Callable],
                  camera: Optional[bool]) -> bool:
-    """The voice track.  Returns True iff the track genuinely completed."""
+    """The voice track.  Returns True iff the track genuinely completed.
+
+    v16.5.1 §5/§6: the voice track no longer requires a camera — it
+    delegates to the Voice Academy, which detects the microphone and
+    local ASR itself and runs REAL microphone practice when the
+    hardware exists, or clearly-labelled TEXT practice when it does
+    not.  Completion marked here ONLY when the academy verified it."""
     store = teacher.store
     print("\n  ── Track 1: Voice — talk to your computer ──", file=dest)
 
-    # delegate to the v16.5 voice academy when present + a camera exists
-    if camera:
+    # delegate to the v16.5.1 voice academy (interactive sessions only;
+    # the academy itself handles mic/ASR honesty in every mode)
+    if ask is not None:
         try:
             from .voice_academy import run_voice_academy  # type: ignore
-            res = run_voice_academy(level="all", out=dest, input_fn=ask)
+            res = run_voice_academy(level="all", out=dest, input_fn=ask,
+                                    offer_pack=False)
+            mode = str(res.get("mode", "text")) if isinstance(res, dict) \
+                else "text"
             if isinstance(res, dict) and res.get("completed") \
                     and not res.get("physical_required"):
                 store.mark_track_complete("voice")
-                print("  ✓ Voice track verified live — marked complete.",
-                      file=dest)
+                if mode == "real_voice":
+                    print("  ✓ Voice track verified live by the real "
+                          "microphone pipeline — marked complete.",
+                          file=dest)
+                else:
+                    print("  ✓ Voice track complete (verified by TEXT "
+                          "practice — live microphone validation remains "
+                          "a physical test).", file=dest)
                 return True
             print("  (the voice academy ran but could not verify every "
                   "level — nothing was marked)", file=dest)
@@ -962,7 +979,11 @@ def _teach_voice(teacher: Teacher, dest: Any, ask: Optional[Callable],
 
     # text practice — the honest fallback (typing IS deterministic proof
     # that the phrase grammar is learned; live mic verification stays
-    # labelled separately)
+    # labelled separately and is NEVER claimed)
+    print("  Real microphone practice: PHYSICAL TEST REQUIRED",
+          file=dest)
+    print("  Text practice: AVAILABLE (clearly labelled — not a "
+          "microphone validation)", file=dest)
     for lesson in CURRICULUM["voice"]:
         phrases = {  # real phrases from the live engine
             _normalize_answer(p) for p in _voice_phrase_pool(
@@ -970,10 +991,10 @@ def _teach_voice(teacher: Teacher, dest: Any, ask: Optional[Callable],
         print(f"\n  Lesson: {lesson['title']}", file=dest)
         print(f"    do this : {lesson['instruction']}", file=dest)
         print(f"    demo    : {lesson['demonstration']}", file=dest)
-        answered = _ask(ask, "    practice — type the phrase you would say "
-                             "(Enter = skip for now): ", dest)
+        answered = _ask(ask, "    TEXT PRACTICE — type the phrase you "
+                             "would say (Enter = skip for now): ", dest)
         if answered is None:
-            print("    skipped — no problem, we'll pick this up "
+            print("    Skipped — not completed.  We'll pick this up "
                   "next time.", file=dest)
             continue
         if _normalize_answer(answered) in phrases:
@@ -991,16 +1012,20 @@ def _teach_voice(teacher: Teacher, dest: Any, ask: Optional[Callable],
             print("    ✓ There it is.", file=dest)
         else:
             teacher.record_result(lesson["id"], passed=False)
-            coaching = Teacher.decide_practice(
-                lesson["id"], store.lesson_stats(lesson["id"]))
-            print(f"    ○ skipped for now — {coaching['message']}",
-                  file=dest)
+            if answered is not None and not answered.strip():
+                print("    Skipped — not completed.", file=dest)
+            else:
+                coaching = Teacher.decide_practice(
+                    lesson["id"], store.lesson_stats(lesson["id"]))
+                print(f"    Answer revealed. Lesson not completed.  "
+                      f"{coaching['message']}", file=dest)
 
     completed = all(int(store.lesson_stats(l["id"]).get("passes", 0) or 0) > 0
                     for l in CURRICULUM["voice"])
     if completed:
         store.mark_track_complete("voice")
-        print("\n  ✓ Voice track complete (verified by phrase practice).",
+        print("\n  ✓ Voice track complete (verified by TEXT practice — "
+              "live microphone validation remains a physical test).",
               file=dest)
         return True
     print("\n  ○ Voice track not complete yet — skipped lessons are never "
@@ -1177,6 +1202,12 @@ def run_teach(track: str = "all", resume: bool = False,
     * returns 0 in every honest path; 1 only for a usage error
       (unknown track) or an internal bug.
     """
+    # §13 — silence third-party noise (never AirMouse's own errors)
+    try:
+        from .quiet import quiet_third_party_logs
+        quiet_third_party_logs()
+    except Exception:
+        pass
     try:
         return _run_teach_impl(track=track, resume=resume, out=out,
                                input_fn=input_fn, camera=camera)

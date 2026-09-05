@@ -352,6 +352,12 @@ def run_academy(lesson: str = "all", camera: bool = True) -> int:
     * headless / no camera   -> prints the full plan honestly, exit 0
     * camera + display       -> live hold-to-pass lessons, exit 0
     """
+    # §13 — silence third-party noise (never AirMouse's own errors)
+    try:
+        from .quiet import quiet_third_party_logs
+        quiet_third_party_logs()
+    except Exception:
+        pass
     lid = str(lesson if lesson is not None else "all")
     plan = academy_plan(lid)
     if not plan:

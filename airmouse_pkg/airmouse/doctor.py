@@ -182,13 +182,21 @@ def format_doctor_report(report: DoctorReport, verbose: bool = False) -> str:
             for c in section.components:
                 state = ComponentState(c.state).value
                 detail = f" — {c.detail}" if c.detail else ""
-                lines.append(f"  {c.name:<34} {state:<13}{detail}")
+                # v16.5.1 §15: explicit real-world capability label
+                hw = f"  [{c.hardware_state}]" if c.hardware_state else ""
+                lines.append(f"  {c.name:<34} {state:<13}{detail}{hw}")
                 state_enum = ComponentState(c.state)
                 if state_enum not in (ComponentState.READY,
                                       ComponentState.OPTIONAL):
+                    # v16.5.1 §4: every WARNING/FAILED explains
+                    # WHAT (the row) / WHY / FIX — never a bare
+                    # "using defaults".
+                    why = c.why or c.detail or \
+                        "the check could not complete cleanly"
                     fix = c.remediation or c.detail or \
                         "review this item in airmouse doctor output"
-                    lines.append(f"      Fix: {fix}")
+                    lines.append(f"      WHY: {why}")
+                    lines.append(f"      FIX: {fix}")
             lines.append("")
 
     counts = report.summary_counts()

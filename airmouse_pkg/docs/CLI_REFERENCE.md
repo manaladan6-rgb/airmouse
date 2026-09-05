@@ -185,6 +185,7 @@ Exactly these 34 choices (parser `choices=`, in parser order):
 |---|---|
 | `--guided` | `test`: run the interactive guided laboratory |
 | `--verbose` | `doctor`: show per-section detail and fixes |
+| `--repair-config` | `setup` (v16.5.1): safely repair a broken/legacy-encoded config — backup → repair → validate → report; never destroys the original |
 | `--json` | `doctor`/`privacy`: machine-readable output |
 | `--to TO` | `memory export`: destination file path |
 | `--debug` | show technical details (redacted traceback) when something fails |
@@ -203,8 +204,8 @@ Exactly these 34 choices (parser `choices=`, in parser order):
 
 | Command | Prints / does | Exit codes |
 |---|---|---|
-| `setup` | 11-step consent-gated wizard; never installs without an interactive Y; writes `<home>/.setup_complete` | 0 (also on honest hardware rows) |
-| `doctor` | 12 sections / 41 components, plain "Fix:" lines; verdict `[READY FOR TESTING]` / `[PARTIAL — …]` / `[BLOCKED]`; `--json` supported | 0 READY · 1 PARTIAL · 2 BLOCKED |
+| `setup` | 11-step consent-gated wizard; never installs without an interactive Y; writes `<home>/.setup_complete`. With `--repair-config`: backup → repair → validate → report (v16.5.1) | 0 (also on honest hardware rows) |
+| `doctor` | 12 sections / 43 components; every WARNING/FAILED row explains WHAT / WHY / FIX (v16.5.1); hardware rows carry `[CAPABILITY-STATE]` labels; verdict `[READY FOR TESTING]` / `[PARTIAL — …]` / `[BLOCKED]`; `--json` supported | 0 READY · 1 PARTIAL · 2 BLOCKED |
 | `test` | 12-test laboratory; physical tests NEVER auto-pass (ACTION_REQUIRED), simulations labelled `[SIMULATION]`; `--guided` = interactive | 0 unless a test FAILs · 1 on FAIL |
 | `verify` | 12 automated checks (import, voice determinism, intelligence roundtrip, safety gates, offline 18/18, simulated browser, permission deny-by-default, lease conflict, AIP validator, packaging match, **Teacher** — onboarding ladder + honest grading + help + profile store + learning-loop approval gate + transcribe session, **Temporal** — recognizer timing ≈293 µs/frame) + 5 physical ACTION_REQUIRED rows | 0 · 1 on any automated FAIL |
 | `privacy` | telemetry/network/model state, store inventory, controls, the **storage manifest — all 24 on-disk artifacts** with purpose + location + exists flag, and the **PERSONALIZATION summary** (learned-counters only, ends `Nothing is uploaded.`); `--json` supported | 0 |

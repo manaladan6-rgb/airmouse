@@ -175,6 +175,12 @@ def run_gesture_lab(camera: bool = True, seconds: float = 0.0) -> int:
     """Run the Gesture Lab.  Returns a process exit code (always 0 when
     the lab itself started; the lab is a readout, it does not fail on
     missing hardware — it explains honestly instead)."""
+    # §13 — silence third-party noise (never AirMouse's own errors)
+    try:
+        from .quiet import quiet_third_party_logs
+        quiet_third_party_logs()
+    except Exception:
+        pass
     if not camera:
         print()
         print("  +==================================================+")

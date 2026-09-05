@@ -464,6 +464,15 @@ def _confirm(prompt: str) -> bool:
 
 
 def main():
+    # v16.5.1 §13 — silence third-party diagnostic noise (MediaPipe/
+    # Clearcut/TFLite/absl) BEFORE any dependency import; AirMouse's own
+    # errors are never filtered.
+    try:
+        from .quiet import quiet_third_party_logs
+        quiet_third_party_logs()
+    except Exception:
+        pass
+
     # ═══ first-run menu: plain `airmouse` on a fresh machine (§9) ═══
     try:
         from .cli_menu import should_show_menu, run_menu
@@ -573,6 +582,10 @@ def main():
                         help="test: run the interactive guided laboratory")
     parser.add_argument("--verbose", action="store_true",
                         help="doctor: show per-section detail and fixes")
+    parser.add_argument("--repair-config", action="store_true",
+                        dest="repair_config",
+                        help="setup: safely repair a broken/legacy-encoded "
+                             "config (backup → repair → validate → report)")
     parser.add_argument("--json", action="store_true",
                         help="doctor/privacy: machine-readable output")
     parser.add_argument("--to", type=str, default=None,
@@ -651,6 +664,18 @@ def main():
         return 0 if "READY" in verdict else 1
 
     if args.command == "setup":
+        # v16.5.1 §2 — explicit, safe config repair
+        if args.repair_config:
+            from .config import repair_config_file
+            rep = repair_config_file(out=sys.stdout)
+            for act in rep.get("actions", []):
+                print(f"  - {act}")
+            if rep.get("valid_after"):
+                print("  ✓ configuration is valid UTF-8 and parses cleanly")
+                return 0
+            print("  ✗ configuration could not be repaired automatically "
+                  "— see the actions above")
+            return 1
         from .setup_wizard import run_setup
         try:
             interactive = sys.stdin.isatty()
@@ -1200,7 +1225,8 @@ def main():
 
     config = Config()
     config.load()
-    if not os.path.exists(CONFIG_PATH):
+    from . import config as _config_mod
+    if not os.path.exists(_config_mod._resolved_config_path()):
         config.save_defaults()
 
     if args.no_cam: config.show_camera = False
@@ -2007,11 +2033,37 @@ def main():
             _learn_on = (intelligence_plugin is not None and
                          intelligence_plugin.state.value == "available" and
                          bool(config.learning_enabled))
+            # v16.5.1 §15 — explicit per-modality capability states
+            _voice_state = "○" if not (voice is not None or
+                                       voice_engine10 is not None) else "✓"
+            _mic_state, _asr_state = "○", "not installed"
+            try:
+                from .voice_stack import detect_voice_stack as _dvs
+                _vd = _dvs()
+                _mic_state = "✓" if _vd.get("microphone") else "○"
+                if any(_vd.get(k) for k in ("whisper", "vosk",
+                                            "pocketsphinx")):
+                    _asr_state = "✓"
+            except Exception:
+                pass
+            _gaze_state = "off"
+            if config.gaze_enabled:
+                try:
+                    from .paths import gaze_calibration_file as _gcf
+                    import os as _os
+                    _gaze_state = ("CALIBRATED" if _os.path.isfile(_gcf())
+                                   else "REQUIRES CALIBRATION")
+                except Exception:
+                    _gaze_state = "on"
             print("  " + "─" * 54)
             print(f"  AIRMouse READY    Hands: {'✓' if tracker else '○'}"
-                  f"  Voice: {'✓' if (voice is not None or voice_engine10 is not None) else '○'}"
-                  f"  Gaze: {'✓' if config.gaze_enabled else '○'}"
+                  f"  Voice: {_voice_state}"
+                  f"  Mic: {_mic_state}"
+                  f"  ASR: {_asr_state}"
                   f"  Learning: {'✓' if _learn_on else 'paused'}")
+            print(f"  Gaze: {_gaze_state}"
+                  + ("  (run: airmouse --gaze-calibrate)" if
+                     _gaze_state == "REQUIRES CALIBRATION" else ""))
             print("  Tip: say \"help\" anytime — or ask: airmouse help-me")
             print("  Try:  \"click that\"  ·  pinch to click  ·  peace to "
                   "right-click")

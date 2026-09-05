@@ -385,25 +385,122 @@ def _make_line_source(input_fn: Optional[Callable[[str], str]],
     return _next
 
 
+def _safe_capture(capture: Callable[[], Any]
+                  ) -> Optional[Tuple[str, float]]:
+    """One ear call, normalized: ``None`` on failure/empty — never raises."""
+    try:
+        result = capture()
+    except Exception:
+        return None
+    if result is None:
+        return None
+    if isinstance(result, str):
+        text, conf = result, 0.0
+    else:
+        try:
+            text, conf = result
+        except Exception:
+            return None
+    text = str(text or "").strip()
+    if not text:
+        return None
+    try:
+        return text, max(0.0, min(1.0, float(conf)))
+    except Exception:
+        return text, 0.95
+
+
+def _make_mic_capture(session: "TranscribeSession"
+                      ) -> Optional[Callable[[], Any]]:
+    """Build the REAL microphone ear for the session's provider.
+
+    Microphone capture via SpeechRecognition (PyAudio) → the session's
+    local ASR engine — the §8 pipeline.  ``None`` when capture cannot
+    start (honest fallback to text mode).  Never raises.
+    """
+    provider = getattr(getattr(session.stream, "provider", None),
+                       "provider", getattr(session.stream, "provider", None))
+    # StreamingProviderAdapter exposes the wrapped OfflineSpeechProvider
+    # as ``.provider``; fall back to a fresh pick when unavailable.
+    if not isinstance(provider, OfflineSpeechProvider):
+        try:
+            provider = _voice_stack.pick_provider()
+        except Exception:
+            provider = None
+    if provider is None:
+        return None
+    try:
+        import speech_recognition as _sr  # noqa: F401 — capability probe
+    except Exception:
+        return None
+    try:
+        from .voice_academy import _capture_transcript
+    except Exception:
+        return None
+
+    def _one() -> Any:
+        return _capture_transcript(provider, timeout_s=6.0)
+
+    return _one
+
+
 def run_transcribe(out: Any = None,
                    input_fn: Optional[Callable[[str], str]] = None,
                    simulate: bool = False,
-                   feed: Optional[Iterable[str]] = None) -> int:
-    """Interactive text-REPL transcription session (works headless).
+                   feed: Optional[Iterable[str]] = None,
+                   mic_mode: Optional[bool] = None,
+                   capture_fn: Optional[Callable[[], Any]] = None) -> int:
+    """Interactive transcription session (§8 — auto real mic when possible).
 
-    ``simulate=True`` forces the simulated provider; otherwise a real
-    local ASR engine is used when one is installed (stated honestly,
-    with the PHYSICAL TEST REQUIRED note for live capture), else the
-    simulated provider runs under its loud banner.  ``feed`` scripts the
-    REPL lines (tests/CI); ``input_fn`` (when callable) takes precedence.
+    Mode resolution (honest, automatic):
+
+    * ``mic_mode=None`` (default) — MIC LIVE MODE is used automatically
+      when a microphone AND a real local ASR engine are both available;
+      otherwise the text-REPL runs (typed lines through the full
+      provider pipeline).
+    * ``simulate=True`` forces the simulated provider and text mode.
+    * ``capture_fn`` injects the ear (tests); it implies mic mode.
+
+    The banner always states the provider, the mode and — in text mode —
+    the PHYSICAL TEST REQUIRED note for live capture.  Commands work in
+    both modes: pause | resume | save [json] | clear | status | stop |
+    quit.  In MIC LIVE MODE a bare Enter records one spoken utterance
+    (Microphone → VAD → local ASR → partial → final, with confidence +
+    timestamp); typed text still works as an utterance fallback.
 
     Returns 0 on a clean stop/quit/EOF; 1 only on an unexpected error.
     """
+    # §13 — silence third-party noise (never AirMouse's own errors)
+    try:
+        from .quiet import quiet_third_party_logs
+        quiet_third_party_logs()
+    except Exception:
+        pass
     try:
         session = TranscribeSession(simulate=simulate)
     except Exception as exc:  # pragma: no cover - defensive
         _emit(out, f"transcribe session failed to start: {exc}")
         return 1
+
+    # §8 — automatic mode resolution
+    live = mic_mode
+    if live is None:
+        live = False
+        if not simulate and not session.simulated:
+            try:
+                from .voice_stack import detect_voice_stack
+                live = bool(detect_voice_stack().get("microphone"))
+            except Exception:
+                live = False
+    if capture_fn is not None:
+        live = True
+    capture: Optional[Callable[[], Any]] = capture_fn
+    if live and capture is None:
+        capture = _make_mic_capture(session)
+        if capture is None:      # mic capture could not start — honest
+            live = False
+            _emit(out, "⚠ microphone capture could not start — falling "
+                       "back to TEXT-INPUT mode (honestly labelled)")
 
     _emit(out, "══ LIVE TRANSCRIPTION ══")
     if session.simulated:
@@ -411,8 +508,13 @@ def run_transcribe(out: Any = None,
         _emit(out, f"⚠ {_SIMULATED_BANNER}")
     else:
         _emit(out, f"provider: {session.provider_name} (local ASR engine)")
-        _emit(out, f"⚠ {_PHYSICAL_NOTE}")
-    _emit(out, _TEXT_INPUT_NOTE)
+    if live:
+        _emit(out, "mode: MIC LIVE — speak one utterance per Enter; "
+                   "typed commands still work")
+    else:
+        _emit(out, _TEXT_INPUT_NOTE)
+        if not session.simulated:
+            _emit(out, f"⚠ {_PHYSICAL_NOTE}")
     _emit(out, "Listening...")
     _emit(out, _COMMANDS_LINE)
 
@@ -461,6 +563,19 @@ def run_transcribe(out: Any = None,
                     _emit(out, "save failed (nothing written)")
                 continue
             if not line:
+                if live and capture is not None:
+                    got = _safe_capture(capture)
+                    if got is None:
+                        _emit(out, "  (nothing usable captured — noise or "
+                                   "timeout; nothing was recorded)")
+                        continue
+                    text, conf = got
+                    seg = session.utterance(text, conf)
+                    if seg is not None:
+                        _emit(out, f'  [{_hhmmss(seg.end_ts)}] '
+                                   f"{max(0.0, min(1.0, seg.confidence)):.0%} "
+                                   f'"{seg.text}"  (final)')
+                    continue
                 continue
             seg = session.utterance(line)
             if seg is not None:
@@ -492,7 +607,8 @@ def run_transcribe(out: Any = None,
     _emit(out, f"segments: {len(segs)}   words: {words}   "
                f"avg confidence: {avg_conf:.0%}   "
                f"provider: {session.provider_name}   "
-               f"mode: {'simulated' if session.simulated else 'local ASR'}")
+               f"mode: {'simulated' if session.simulated else 'local ASR'}"
+               f"{' + mic live' if live else ''}")
     if session.saved_files():
         _emit(out, "saved: " + ", ".join(session.saved_files()))
     if was_listening and not segs:

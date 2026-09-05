@@ -137,6 +137,14 @@ class Component:
     state: ComponentState
     detail: str = ""
     remediation: str = ""
+    # v16.5.1 §4: the WHY half of WHAT/WHY/FIX (doctor renders it above
+    # the Fix: line).  Empty = the detail is the why.
+    why: str = ""
+    # v16.5.1 §15: explicit real-world capability label for hardware
+    # rows — one of SIMULATED / AVAILABLE / ACTIVE / VERIFIED /
+    # REQUIRES_PHYSICAL_TEST / UNAVAILABLE (or a more specific honest
+    # label like REQUIRES CALIBRATION / NOT INSTALLED).  Empty = n/a.
+    hardware_state: str = ""
 
     def to_dict(self) -> Dict[str, str]:
         return {
@@ -145,6 +153,8 @@ class Component:
             "state": ComponentState(self.state).value,
             "detail": str(self.detail),
             "remediation": str(self.remediation),
+            "why": str(self.why),
+            "hardware_state": str(self.hardware_state),
         }
 
 
@@ -346,7 +356,8 @@ def _find_browsers() -> List[str]:
 
 
 def _component(name: str, category: str, state: ComponentState,
-               detail: str = "", remediation: str = "") -> Component:
+               detail: str = "", remediation: str = "",
+               why: str = "", hardware_state: str = "") -> Component:
     """Build a row with table-safe (single-line) text fields."""
     return Component(
         name=" ".join(str(name).split()),
@@ -354,6 +365,8 @@ def _component(name: str, category: str, state: ComponentState,
         state=state,
         detail=" ".join(str(detail).split()),
         remediation=" ".join(str(remediation).split()),
+        why=" ".join(str(why).split()),
+        hardware_state=" ".join(str(hardware_state).split()),
     )
 
 
@@ -518,17 +531,64 @@ def _detect_airmouse(quick: bool) -> List[Component]:
         f"v{_AIRMOUSE_VERSION}"))
 
     try:  # config public load API (Config.load never raises, belt+braces)
-        from .config import Config, CONFIG_PATH
-        cfg = Config()
-        cfg.load()
-        exists = os.path.isfile(CONFIG_PATH)
-        comps.append(_component(
-            "Configuration", "AIRMOUSE", ComponentState.READY,
-            f"{'loaded' if exists else 'defaults'} ({CONFIG_PATH})"))
+        from .config import CONFIG_PATH, load_config_strict
+        _p = str(CONFIG_PATH)
+        if not os.path.isfile(_p):
+            comps.append(_component(
+                "Configuration", "AIRMOUSE", ComponentState.READY,
+                f"defaults (no config file yet — {_p})"))
+        else:
+            # authoritative strict parse (surfaces encoding/syntax errors)
+            try:
+                load_config_strict(_p)
+                comps.append(_component(
+                    "Configuration", "AIRMOUSE", ComponentState.READY,
+                    f"UTF-8 configuration valid ({_p})"))
+            except Exception as exc:  # ConfigLoadError — honest, fixable
+                prob = getattr(exc, "problem", None) or {}
+                kind = prob.get("kind", "unknown")
+                why = {
+                    "encoding": "The file is not valid UTF-8 — legacy "
+                                "Windows encoding or a non-UTF-8 editor.",
+                    "syntax": "The file is not valid TOML.",
+                }.get(kind, prob.get("message", str(exc)))
+                comps.append(_component(
+                    "Configuration", "AIRMOUSE", ComponentState.WARNING,
+                    f"could not decode/parse ({prob.get('message', exc)})",
+                    f"run  airmouse setup --repair-config  "
+                    "(the original is backed up; defaults are used until "
+                    "repaired)",
+                    why=why))
+        try:  # v16.5.1 §15 — explicit gaze capability state
+            from .config import Config as _Cfg
+            _gaze_on = bool(getattr(_Cfg(), "gaze_enabled", False))
+            from .paths import gaze_calibration_file as _gcf
+            _cal = os.path.isfile(_gcf())
+            if not _gaze_on:
+                comps.append(_component(
+                    "Gaze subsystem", "AIRMOUSE", ComponentState.OPTIONAL,
+                    "disabled in config (enable: airmouse --gaze)",
+                    hardware_state="UNAVAILABLE"))
+            elif _cal:
+                comps.append(_component(
+                    "Gaze subsystem", "AIRMOUSE", ComponentState.READY,
+                    "calibration file present",
+                    hardware_state="CALIBRATED"))
+            else:
+                comps.append(_component(
+                    "Gaze subsystem", "AIRMOUSE", ComponentState.WARNING,
+                    "gaze is enabled but not calibrated",
+                    "run  airmouse --gaze-calibrate  with the camera "
+                    "connected",
+                    why="Eye-gaze steering needs a one-time gaze→screen "
+                        "calibration before it can control the cursor.",
+                    hardware_state="REQUIRES CALIBRATION"))
+        except Exception:  # gaze row is informational; never fatal
+            pass
     except Exception as exc:
         comps.append(_component(
             "Configuration", "AIRMOUSE", ComponentState.FAILED,
-            f"config load failed: {exc}",
+            f"config check failed: {exc}",
             "fix or remove ~/.airmouse/config.toml (defaults are used)"))
 
     try:  # storage home
@@ -584,7 +644,8 @@ def _detect_camera(quick: bool) -> List[Component]:
         return [_component(
             "Webcam", "CAMERA", ComponentState.HARDWARE,
             "device not probed in quick mode",
-            "run a full airmouse doctor with the camera connected")]
+            "run a full airmouse doctor with the camera connected",
+            hardware_state="AVAILABLE")]
     import cv2  # verified importable above (cheap after first call)
     t0 = time.perf_counter()
     cap = None
@@ -598,7 +659,8 @@ def _detect_camera(quick: bool) -> List[Component]:
                 "no camera device answered at index "
                 f"{_CAMERA_INDEX} ({elapsed * 1000:.0f}ms)",
                 "connect a webcam (and grant camera permission), then "
-                "re-run airmouse doctor")]
+                "re-run airmouse doctor",
+                hardware_state="UNAVAILABLE")]
         if elapsed > CAMERA_PROBE_BUDGET_S:
             return [_component(
                 "Webcam", "CAMERA", ComponentState.WARNING,
@@ -612,12 +674,14 @@ def _detect_camera(quick: bool) -> List[Component]:
             h, w = frame.shape[:2]
             return [_component(
                 "Webcam", "CAMERA", ComponentState.READY,
-                f"frame {w}x{h} in {elapsed * 1000:.0f}ms")]
+                f"frame {w}x{h} in {elapsed * 1000:.0f}ms",
+                hardware_state="ACTIVE")]
         return [_component(
             "Webcam", "CAMERA", ComponentState.HARDWARE,
             "camera opened but produced no frame",
             "connect a webcam (and grant camera permission), then "
-            "re-run airmouse doctor")]
+            "re-run airmouse doctor",
+            hardware_state="UNAVAILABLE")]
     except Exception as exc:
         return [_component(
             "Webcam", "CAMERA", ComponentState.FAILED,
@@ -656,12 +720,14 @@ def _detect_microphone(quick: bool) -> List[Component]:
         if inputs > 0:
             return [_component(
                 "Microphone", "MICROPHONE", ComponentState.READY,
-                f"{inputs} input device(s) via PortAudio")]
+                f"{inputs} input device(s) via PortAudio",
+                hardware_state="MICROPHONE DETECTED")]
         return [_component(
             "Microphone", "MICROPHONE", ComponentState.HARDWARE,
             "PortAudio works but reported no input devices",
             "connect a microphone (and grant mic permission), then "
-            "re-run airmouse doctor")]
+            "re-run airmouse doctor",
+            hardware_state="UNAVAILABLE")]
     except Exception as exc:
         return [_component(
             "Microphone", "MICROPHONE", ComponentState.HARDWARE,
@@ -718,14 +784,16 @@ def _detect_speech(quick: bool) -> List[Component]:
         if real:
             comps.append(_component(
                 "Transcription providers", "SPEECH", ComponentState.READY,
-                f"local ASR: {', '.join(real)}"))
+                f"local ASR: {', '.join(real)}",
+                hardware_state="ACTIVE"))
         else:
             comps.append(_component(
                 "Transcription providers", "SPEECH",
                 ComponentState.OPTIONAL,
                 "simulated provider only (deterministic, offline)",
                 "optional: pip install vosk / openai-whisper / "
-                "pocketsphinx for real local ASR"))
+                "pocketsphinx for real local ASR",
+                hardware_state="NOT INSTALLED"))
     except Exception as exc:
         comps.append(_component(
             "Transcription providers", "SPEECH", ComponentState.WARNING,

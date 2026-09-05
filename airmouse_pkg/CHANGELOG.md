@@ -1,5 +1,142 @@
 # Changelog
 
+## v16.5.1 — WINDOWS REALITY & TEACHING UX HOTFIX (2026-09-05)
+
+A hardening / UX / real-hardware-validation release. v16.5.0's first
+real Windows run validated webcam gestures (move, click, double click,
+right click, scroll, zoom) but exposed a config-encoding defect and a
+voice-teaching UX that was too much like a grammar quiz. v16.5.1 fixes
+the encoding class of bug at its root, makes every doctor warning
+actionable (WHAT/WHY/FIX), and splits voice teaching into REAL
+microphone practice vs clearly-labelled TEXT practice.  No unrelated
+features.  Suite: **1957 passed / 1 skipped / 0 failed** (baseline
+1890/1/0 — +67 tests, zero regressions).  Every claim below was
+re-measured on this tree in a headless Linux sandbox; physical
+Windows items remain honestly labelled TEST REQUIRED (§16).
+
+### P0 — the one encoding contract (§1/§2/§3)
+
+- **Root cause found**: `config.py` wrote `config.toml` with plain
+  `open(path, "w")` — the Windows process default (cp1252) — so the
+  template's em dash (`—`, byte 30 of line 1) became `0x97`, and
+  tomllib's strict UTF-8 read failed with
+  `'utf-8' codec can't decode byte 0x97 in position 30: invalid start
+  byte, using defaults`.  Measured byte-for-byte in this release.
+- **`airmouse.fileio` (new)** — THE one explicit text-encoding
+  contract: `read_text` (strict UTF-8, raises `TextDecodingError`
+  with path/byte-position/fix), `write_text_atomic` (UTF-8 no BOM,
+  tmp + `os.replace`), `read_json`/`write_json_atomic`, `probe`
+  (honest diagnosis: utf8_ok / decoded_as / bad_byte / BOM) and
+  `decode_best_effort` (repair-only recovery: UTF-8 → BOM → cp1252 →
+  latin-1).  The Windows process default encoding is never used for
+  any AirMouse-owned text file again.
+- `Config.save_defaults()` now writes canonical UTF-8 atomically; the
+  generated template's non-ASCII content (em dash, box-drawing) is
+  now SAFE because the encoding contract guarantees the round trip.
+- **Never silently fall back (§2)**: a broken config now records a
+  structured problem (`Config.load_problem()`:
+  kind=encoding|syntax|io, message, path, fix) and prints a LOUD
+  WHAT/WHY/FIX block naming `airmouse setup --repair-config` — the
+  old one-line `Config load error … using defaults` is gone.  The
+  lenient path never modifies or destroys the user's file.
+- **`airmouse setup --repair-config` (new)**: preserve → timestamped
+  backup (`backups/config-backup-<ts>.toml`, byte-for-byte) →
+  repair → validate (TOML parse) → write canonical UTF-8 → report
+  exactly what happened.  Content-preserving for legacy-encoded
+  files (measured: cp1252 with em dash → same text, now UTF-8);
+  BOM stripped; invalid-TOML files restore defaults only AFTER the
+  backup, and say so.
+- **Config round-trip tests (§3)**: write → read → identical across
+  ASCII, Unicode (Nigerian/European names), en dash, em dash, smart
+  quotes, emoji; plus fresh / existing / malformed (0x97) / BOM /
+  invalid-TOML / migration / repair / idempotent-repair matrix.
+- **Split-brain fix**: `config.py` was the last import-time path
+  resolver; `AIRMOUSE_HOME=… airmouse doctor` reported the storage
+  home in one directory and the config in another (reproduced on
+  this tree).  Config paths now resolve dynamically via
+  `airmouse.paths` with the module-global override (tests,
+  persistence backups) still honoured.
+
+### Doctor — actionable, honest (§4/§15)
+
+- Every WARNING/FAILED row now explains WHAT (the row) / WHY / FIX —
+  `Fix:` lines replaced by explicit `WHY:` + `FIX:` lines.
+- The CONFIG check now distinguishes: no file → READY ("defaults"),
+  UTF-8+TOML valid → READY ("UTF-8 configuration valid"),
+  decode/syntax failure → WARNING with the exact repair command and
+  WHY (legacy Windows encoding / invalid TOML).  Doctor no longer
+  hides anything behind "using defaults".
+- §15 capability states: hardware rows carry explicit real-world
+  labels — Webcam `[ACTIVE]`/`[UNAVAILABLE]`, Microphone
+  `[MICROPHONE DETECTED]`, Transcription providers `[ACTIVE]` /
+  `[NOT INSTALLED]`, and a new **Gaze subsystem** row
+  (`CALIBRATED` / `REQUIRES CALIBRATION` with the exact calibration
+  command / `UNAVAILABLE` when disabled).  Visible in doctor and in
+  the machine report (`why`, `hardware_state` fields).
+
+### Voice Academy — LEARN BY DOING (§5/§6/§7/§9/§10)
+
+- **Progressive curriculum, 7 lessons (§9)**: L1 basic command → L2
+  natural language → L3 context ("open my browser") → L4 dictation →
+  L5 correction ("scratch that", "delete last word", "replace that
+  with …" through the REAL VoiceTypingEngine) → L6 multimodal (voice
+  intent + observed gaze fixation — both channels must actually be
+  observed) → L7 personal voice learning (unchanged, local-only).
+  Legacy level ids (`l3_dictation`, `l4_personal`) still resolve.
+- **REAL VOICE PRACTICE (§5)**: when microphone + local ASR exist,
+  every lesson runs the real pipeline (Microphone → SR listen →
+  local ASR → transcript → command matcher → intent); a lesson
+  completes ONLY when the real pipeline recognizes the expected
+  intent.  Audio is adapted per engine (AudioData for PocketSphinx,
+  WAV for Whisper/Vosk) and never stored.
+- **TEXT PRACTICE stays, honestly labelled (§6)**: without mic/ASR
+  the academy prints `Real microphone practice: PHYSICAL TEST
+  REQUIRED`, `Text practice: AVAILABLE` and labels every prompt
+  `TEXT PRACTICE` — it is never called microphone validation.
+- **§7 provider detection**: every run starts with the honest VOICE
+  HARDWARE panel (Microphone ✓/○, Whisper/Vosk/PocketSphinx ✓/○,
+  Active provider, `Command grammar: ✓ available`, `Full speech
+  recognition: NOT INSTALLED`) and offers the optional Local Voice
+  Pack `[Y] Yes [N] Not now` — never auto-installs, never a cloud
+  API; the offer never consumes scripted/non-interactive input.
+- **§10 honest semantics**: a revealed answer prints
+  `Answer revealed. Lesson not completed.`; a skip prints
+  `Skipped — not completed.`; skips never reveal the answer and
+  never count as passes; abandoned sessions print
+  `Practice abandoned — nothing was marked complete.`
+- **Teacher voice track**: no longer (wrongly) gated on a camera;
+  completion banners distinguish real-pipeline verification from
+  TEXT-practice verification; the text fallback uses the §10 wording.
+
+### Live transcription (§8)
+
+- `airmouse transcribe` now automatically uses MIC LIVE mode when a
+  microphone and a real local ASR engine are present: speak one
+  utterance per Enter → Microphone → VAD → local ASR → partial →
+  final, displayed with confidence and timestamp; typed commands
+  (pause/resume/save/clear/status/quit) still work.  Without mic/ASR
+  it falls back to the text-REPL under its loud honesty banners.
+  No audio is ever stored (measured: save writes text only).
+
+### Noise + first-run (§13/§14)
+
+- **§13**: `airmouse.quiet` silences third-party diagnostic noise
+  (MediaPipe/Clearcut/TFLite/absl/speech stack) via env dials
+  (respecting user-set values), their loggers only, at process start
+  and at every academy/teacher/lab/transcribe entry — AirMouse's own
+  errors are never filtered.
+- **§14**: the welcome banner now lists Personalization; the
+  zero-learning-curve READY panel shows per-modality states
+  (Hands/Voice/Mic/ASR/Learning + Gaze `CALIBRATED` /
+  `REQUIRES CALIBRATION` with the exact command).
+
+### Honest scope note
+
+Physical Windows validation of the new voice/mic paths (§16) cannot
+be performed in the headless release sandbox and remains TEST
+REQUIRED in `WINDOWS_REAL_WORLD_TEST.md` (drills 17a–17f added).
+Simulated PASS never became hardware PASS anywhere.
+
 ## v16.5.0 — ADAPTIVE MULTIMODAL INTELLIGENCE (release candidate, 2026-09-05)
 
 The teaching release. v16.0.0 made the gesture surface trustworthy;

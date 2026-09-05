@@ -184,7 +184,7 @@ def test_to_machine_is_json_serializable(full_report):
     assert len(machine["components"]) == len(full_report.components)
     row = machine["components"][0]
     assert set(row.keys()) == {"name", "category", "state", "detail",
-                               "remediation"}
+                               "remediation", "why", "hardware_state"}
     decoded = json.loads(json.dumps(machine))  # roundtrip
     assert decoded == machine
 
@@ -381,7 +381,8 @@ def test_format_doctor_report_verbose_shows_fix_lines():
                  if c.state not in (ComponentState.READY,
                                     ComponentState.OPTIONAL)]
     assert non_ready, "sandbox always has at least one non-READY row"
-    assert "Fix: " in text
+    # v16.5.1 §4: every non-READY row explains WHAT / WHY / FIX
+    assert "FIX: " in text and "WHY: " in text
     for c in non_ready:
         assert c.remediation in text
     # verbose shows the section headers too

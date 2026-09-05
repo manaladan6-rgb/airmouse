@@ -1,4 +1,139 @@
-# AirMouse v16.5.0 — Final Verification Report (release candidate)
+# AirMouse v16.5.1 — Final Verification Report (WINDOWS REALITY & TEACHING UX HOTFIX)
+
+---
+
+# v16.5.1 Windows Reality & Teaching UX Hotfix Verification
+
+Date: 2026-09-05 (build environment: Linux x86_64 headless sandbox,
+Python 3.12.14). Scope: the v16.5.1 hotfix — the one UTF-8 encoding
+contract (`airmouse.fileio`), the P0 Windows config-encoding fix and
+`airmouse setup --repair-config`, never-silent broken-config handling,
+the actionable doctor (WHAT/WHY/FIX + capability states), the Voice
+Academy rework (7 progressive lessons, REAL-microphone vs TEXT
+practice, provider detection, honest skip/reveal semantics), MIC LIVE
+transcription, and third-party log-noise suppression. No unrelated
+features. Companion: `WINDOWS_REAL_WORLD_TEST.md` Steps 16e–16h.
+**Headline honesty statement: real Windows and physical hardware were
+NOT tested in this sandbox — the Windows encoding defect was
+reproduced byte-for-byte in automated tests instead, and the physical
+validation procedure is handed to the user
+(WINDOWS_REAL_WORLD_TEST.md). Simulated PASS never became hardware
+PASS.**
+
+## Part 1 — AUTOMATED VERIFICATION (measured on this tree)
+
+- **Full suite**: `pytest tests/` → **1957 passed / 1 skipped /
+  0 failed** in ~23 s (baseline v16.5.0: 1890/1/0 → +67 tests, zero
+  regressions; the 1 skip is the honest headless skip).
+- **The exact Windows defect, reproduced and fixed (measured)**:
+  writing the config template with cp1252 byte `0x97` at the em-dash
+  position and loading it reproduces the user's error
+  (`'utf-8' codec can't decode byte 0x97 … invalid start byte`);
+  the lenient load now surfaces a structured problem
+  (`kind=encoding`) plus a LOUD WHAT/WHY/FIX block naming
+  `airmouse setup --repair-config`; `repair_config_file` recovers the
+  text via cp1252, backs the original up byte-for-byte, validates the
+  TOML, rewrites canonical UTF-8, and the post-repair load is clean
+  (all measured in `tests/test_fileio_encoding.py`).
+- **Config round-trip matrix (§3, measured)**: ASCII, Unicode names
+  (Nigerian/European), en dash, em dash, smart quotes, emoji —
+  write → read → identical through `fileio` and through the real
+  config file; UTF-8 without BOM; no `.tmp` residue; missing file →
+  honest probe; BOM stripped by repair; invalid TOML → defaults only
+  after backup, reported; repair idempotent.
+- **Doctor (§4/§15, measured)**: WARNING/FAILED rows render
+  `WHY:` + `FIX:`; the CONFIG component reports READY (no file /
+  valid UTF-8) or WARNING with the exact repair command and a WHY;
+  hardware rows carry `[ACTIVE]` / `[UNAVAILABLE]` /
+  `[MICROPHONE DETECTED]` / `[NOT INSTALLED]` labels; the new Gaze
+  subsystem row reports `CALIBRATED` / `REQUIRES CALIBRATION` /
+  `UNAVAILABLE`; `to_machine()` rows include `why` +
+  `hardware_state`.
+- **Voice Academy (§5/§6/§7/§9/§10, measured)**: 7 lessons
+  (`l1_basic … l7_personal`, legacy ids still resolve); text mode
+  prints `Real microphone practice: PHYSICAL TEST REQUIRED` +
+  `Text practice: AVAILABLE` + `TEXT PRACTICE` labels; real mode
+  (injected ear) drives the REAL matchers — a fabricated transcript
+  that does not resolve never passes; skips print
+  `Skipped — not completed.` and never reveal; reveals print
+  `Answer revealed. Lesson not completed.`; abandoned input prints
+  `Practice abandoned — nothing was marked complete.`; the hardware
+  panel prints microphone/engine/active-provider truth and
+  `Full speech recognition: NOT INSTALLED` when no engine exists;
+  the Local Voice Pack offer never auto-installs and never consumes
+  scripted input; L6 completes only when voice intent AND an observed
+  gaze fixation agree; L5 correction runs the REAL VoiceTypingEngine
+  edit ops (scratch that / delete last word / undo / replace that
+  with …).
+- **MIC LIVE transcription (§8, measured)**: with a (forced) mic
+  capture the session prints `mode: MIC LIVE`, final lines with
+  timestamp + confidence, honest `nothing usable captured` on failed
+  capture, commands intact, summary `+ mic live`; the save path
+  writes text only — no audio file ever appears.
+- **Noise suppression (§13, measured)**: `quiet_third_party_logs()`
+  sets `GLOG_minloglevel=3` / `TF_CPP_MIN_LOG_LEVEL=3` /
+  `ABSL_MIN_LOG_LEVEL=3` (respecting user-set values), dials only
+  third-party loggers (the `airmouse` logger untouched), is
+  idempotent, never raises; wired at process start and at the
+  academy/teacher/lab/transcribe entry points.
+- **Release battery (measured on this tree)**: `airmouse verify` →
+  **12/12 automated PASS** (import 16.5.1, voice determinism,
+  intelligence roundtrip, safety gates, offline 18/18, simulated
+  browser, permissions deny-by-default, leases, AIP fail-closed,
+  packaging match, Teacher, Temporal ≈291 µs/frame) + 5 honest
+  ACTION_REQUIRED physical rows; `airmouse doctor` exit 0;
+  `airmouse --version` → `AirMouse v16.5.1`.
+- **Security**: changed modules py_compile clean; grep audit for
+  `eval(`/`exec(`/`os.system`/`shell=True`/`pickle`/`__import__` on
+  changed files → no hits; the repair flow backs up before any
+  rewrite and never executes file content; the pack offer never
+  installs anything; the red-team suite (76 adversarial tests) is
+  green inside the full run.
+
+## Part 2 — SIMULATION VERIFICATION
+
+- Simulated/mock paths in the new tests are used ONLY to inject ears
+  (`speak_fn`, `capture_fn`) and gaze observers — the graded
+  verification chain (command grammar → NL table → phrase table →
+  VoiceTypingEngine → VoiceProfile) is the real shipped code in every
+  pass assertion. No simulated result is reported anywhere as a
+  physical one; every simulated provider is labelled SIMULATED at its
+  point of use.
+
+## Part 3 — REAL WINDOWS VERIFICATION
+
+**NOT PERFORMED — TEST REQUIRED (honest).** The v16.5.1-specific
+Windows sequence is `WINDOWS_REAL_WORLD_TEST.md` Steps 16e (config
+repair drill — recreates the legacy ANSI encoding via Notepad,
+doctor must show WHY/FIX, repair must preserve content),
+16f (Voice Academy panel + REAL/TEXT modes with a real mic),
+16g (MIC LIVE transcription + no-audio-storage check),
+16h (doctor capability states). The historical Steps 1–17 remain
+unchanged. **Simulated PASS never became hardware PASS.**
+
+## Part 4 — PHYSICAL HARDWARE VERIFICATION
+
+**NOT PERFORMED — TEST REQUIRED.** Same scope as v16.5.0 plus the new
+microphone paths: mic capture in the Voice Academy (AudioData →
+PocketSphinx; WAV → Whisper/Vosk) and the MIC LIVE transcribe loop
+were verified only with injected ears in automation; on a real
+machine they must be exercised via Steps 16f/16g. Gaze calibration
+and the multimodal L6 lesson remain physical-only.
+
+## Part 5 — NOT AVAILABLE / limitations (honest, non-negotiable)
+
+- No Windows OS in the sandbox → Steps 16e–16h and the Windows
+  bundle smoke test remain with the user.
+- No microphone/camera/display in the sandbox → pyaudio builds
+  nothing here; real-voice capture is code-reviewed + injected-ear
+  tested, physically verified only via the handed-over drills.
+- Live ASR engines (faster-whisper / vosk / pocketsphinx) were not
+  installable in this offline build sandbox; provider detection is
+  covered by injected detection snapshots.
+- The C++ Clearcut stderr line can pre-date Python log filters; the
+  env dials are the fix that reaches it, and Step 16's noise
+  expectations were adjusted honestly rather than pretending a
+  guaranteed stderr intercept.
 
 ---
 

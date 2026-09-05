@@ -32,6 +32,8 @@ New in v3.1:
 """
 
 import os
+import time
+from typing import Any, Dict, Optional
 
 try:
     import tomllib
@@ -41,12 +43,49 @@ except ImportError:
     except ImportError:
         tomllib = None
 
+from . import fileio
+
+from . import paths as _paths
+
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".airmouse")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.toml")
+_DEFAULT_CONFIG_PATH = CONFIG_PATH
+_DEFAULT_CONFIG_DIR = CONFIG_DIR
+
+
+def _resolved_config_dir() -> str:
+    """Active config dir — dynamic unless explicitly overridden.
+
+    The v15.2 ``AIRMOUSE_HOME`` split-brain fix made every artifact
+    resolver dynamic *except* this one (config.py still resolved at
+    import time), so ``AIRMOUSE_HOME=... airmouse doctor`` reported the
+    storage home in one directory and the config in another.  Now:
+    an explicit module-global override (tests, persistence backups)
+    still wins; otherwise the path re-resolves fresh on every call via
+    :mod:`airmouse.paths`.
+    """
+    global CONFIG_DIR, CONFIG_PATH
+    if CONFIG_PATH != _DEFAULT_CONFIG_PATH or \
+            CONFIG_DIR != _DEFAULT_CONFIG_DIR:
+        return CONFIG_DIR  # explicit override (tests / persistence)
+    home = _paths.airmouse_home()
+    CONFIG_DIR = home
+    CONFIG_PATH = os.path.join(home, "config.toml")
+    return CONFIG_DIR
+
+
+def _resolved_config_path() -> str:
+    """Active config path (see :func:`_resolved_config_dir`)."""
+    _resolved_config_dir()
+    return CONFIG_PATH
 
 
 class Config:
     """AirMouse configuration with v3.2 Direct Tracking defaults."""
+
+    # v16.5.1 §2: structured problem from the most recent load().
+    # ``None`` = clean (or no file).  Never raise from the lenient path.
+    last_load_problem: Optional[Dict[str, Any]] = None
 
     # Tracking mode: "direct" (1:1 finger-to-screen) or "ironman" (exponential delta)
     tracking_mode = "direct"
@@ -306,7 +345,7 @@ class Config:
         """Save current config as TOML (creates template for user editing)."""
         if tomllib is None:
             return
-        os.makedirs(CONFIG_DIR, exist_ok=True)
+        os.makedirs(_resolved_config_dir(), exist_ok=True)
         lines = [
             "# AirMouse v3.2 Configuration — Direct Tracking Edition",
             "# Edit this file to customize your airmouse feel.",
@@ -454,15 +493,19 @@ class Config:
             f"teach_auto = {str(self.teach_auto).lower()}             # v16.5 offer first-run teaching",
             f"ready_panel = {str(self.ready_panel).lower()}            # v16.5 zero-learning-curve READY panel",
         ]
-        with open(CONFIG_PATH, "w") as f:
-            f.write("\n".join(lines) + "\n")
+        # v16.5.1 §1 encoding contract: UTF-8 EXPLICITLY, atomic write.
+        # (plain open(..., "w") used the Windows process default — cp1252
+        # — so the template's em dash became byte 0x97 and tomllib then
+        # failed with "can't decode byte 0x97 in position 30".)
+        fileio.write_text_atomic(_resolved_config_path(), "\n".join(lines) + "\n")
 
     def load(self):
-        """Load config from TOML file if it exists."""
-        if tomllib is None or not os.path.exists(CONFIG_PATH):
+        """Load config from TOML file if it exists (lenient; loud on §2 error)."""
+        self.last_load_problem = None
+        if tomllib is None or not os.path.exists(_resolved_config_path()):
             return
         try:
-            with open(CONFIG_PATH, "rb") as f:
+            with open(_resolved_config_path(), "rb") as f:
                 data = tomllib.load(f)
 
             # Top-level tracking_mode
@@ -681,4 +724,210 @@ class Config:
                 self.telemetry_enabled = pv.get("telemetry", self.telemetry_enabled)
 
         except Exception as e:
-            print(f"  Warning: Config load error: {e}, using defaults")
+            # v16.5.1 §2 — NEVER silently fall back from a broken user
+            # config.  The problem is recorded on the instance (for
+            # doctor/verify) and surfaced LOUDLY with the exact fix.
+            self.last_load_problem = _describe_load_problem(e)
+            _print_config_problem(self.last_load_problem)
+
+    # -- honesty API (v16.5.1 §2/§4) ---------------------------------
+
+    def load_problem(self) -> Optional[Dict[str, Any]]:
+        """The structured problem from the most recent :meth:`load`.
+
+        ``None`` when the configuration loaded clean (or no file
+        existed).  Shape: ``{"kind", "message", "path", "fix"}``.
+        """
+        return self.last_load_problem
+
+
+class ConfigLoadError(Exception):
+    """Raised by :func:`load_config_strict` when the config is broken.
+
+    ``.problem`` is the structured ``{"kind", "message", "path", "fix"}``
+    dict; ``str(exc)`` is the full human-readable WHAT/WHY/FIX report.
+    """
+
+    def __init__(self, problem: Dict[str, Any]) -> None:
+        super().__init__(_format_problem(problem))
+        self.problem = problem
+
+
+def load_config_strict(path: Optional[str] = None) -> dict:
+    """Parse the config file STRICTLY; raise :class:`ConfigLoadError`.
+
+    Used by doctor / verify / repair — the code paths that must surface
+    a broken configuration instead of absorbing it into defaults.
+    Returns the parsed document (``{}`` when no file exists).
+    """
+    p = path or _resolved_config_path()
+    if tomllib is None or not os.path.exists(p):
+        return {}
+    try:
+        with open(p, "rb") as f:
+            return tomllib.load(f)
+    except Exception as e:                                  # noqa: BLE001
+        raise ConfigLoadError(_describe_load_problem(e)) from None
+
+
+def _describe_load_problem(e: Exception) -> Dict[str, Any]:
+    """Classify a config failure into the honest problem record."""
+    kind = "unknown"
+    if isinstance(e, UnicodeDecodeError):
+        kind = "encoding"
+    elif tomllib is not None and isinstance(e, tomllib.TOMLDecodeError):
+        kind = "syntax"
+    elif isinstance(e, OSError):
+        kind = "io"
+    return {
+        "kind": kind,
+        "message": str(e),
+        "path": _resolved_config_path(),
+        "fix": fileio.FIX_COMMAND,
+    }
+
+
+def _format_problem(problem: Dict[str, Any]) -> str:
+    """The WHAT / WHY / FIX report block (doctor-style, §4)."""
+    kind = problem.get("kind", "unknown")
+    why = {
+        "encoding": "The configuration file is not valid UTF-8 — it was "
+                    "probably saved by a legacy Windows encoding (or a "
+                    "non-UTF-8 editor).",
+        "syntax": "The configuration file is not valid TOML.",
+        "io": "The configuration file could not be read.",
+    }.get(kind, "The configuration file could not be parsed.")
+    return ("\n".join([
+        "Configuration file could not be loaded.",
+        f"  File: {problem.get('path')}",
+        f"  Cause: {problem.get('message')}",
+        f"  Why: {why}",
+        f"  Action: run  {problem.get('fix')}",
+    ]))
+
+
+def _print_config_problem(problem: Dict[str, Any]) -> None:
+    """LOUD, actionable warning — never a bare 'using defaults' (§2)."""
+    print("=" * 64)
+    print("  WARNING: your AirMouse configuration could NOT be loaded;")
+    print("  defaults are being used for THIS session.  Your file was")
+    print("  NOT modified and will be retried on the next start.")
+    print(_format_problem(problem))
+    print("=" * 64)
+
+
+# ---------------------------------------------------------------------------
+# v16.5.1 §2 — explicit, safe config repair (`airmouse setup --repair-config`)
+# ---------------------------------------------------------------------------
+
+def repair_config_file(path: Optional[str] = None, *, out: Any = None) -> Dict[str, Any]:
+    """Repair a broken/badly-encoded config — explicitly, and safely.
+
+    Steps (§2 contract): preserve → backup → repair → validate → write
+    canonical UTF-8 → report exactly what happened.  NEVER destructive
+    without a timestamped backup, never silent.
+
+    Returns a report dict::
+
+        {"path", "existed", "problem_kind", "recovered_encoding",
+         "backup_path", "repaired", "rewrote_defaults", "valid_after",
+         "actions": [str, ...], "detail": str}
+    """
+    import shutil
+
+    w = out if out is not None else None
+
+    def _emit(text: str = "") -> None:
+        if w is not None:
+            try:
+                w.write(text + "\n")
+                w.flush()
+            except Exception:
+                pass
+
+    target = path or _resolved_config_path()
+    actions: list = []
+    report: Dict[str, Any] = {
+        "path": target, "existed": False, "problem_kind": None,
+        "recovered_encoding": None, "backup_path": None,
+        "repaired": False, "rewrote_defaults": False,
+        "valid_after": False, "actions": actions, "detail": "",
+    }
+
+    if not os.path.exists(target):
+        # Nothing to repair; (re)write the canonical template so the
+        # user has a fresh, valid, UTF-8 config.
+        _emit(f"  no configuration file at {target} — writing a fresh "
+              "UTF-8 template")
+        Config().save_defaults()
+        actions.append("wrote fresh UTF-8 template (no file existed)")
+        report["valid_after"] = True
+        report["detail"] = "fresh template written"
+        return report
+
+    report["existed"] = True
+    raw = open(target, "rb").read()
+
+    # 1) diagnose honestly
+    dec_text, enc, bad_pos = fileio.decode_best_effort(raw)
+    report["recovered_encoding"] = enc
+    if enc == fileio.TEXT_ENCODING and bad_pos is None:
+        actions.append("file already decodes as UTF-8; no re-encoding "
+                       "needed")
+    else:
+        why = ("a UTF-8 BOM was present" if enc == "utf-8-sig"
+               else f"content was recovered from legacy encoding {enc}")
+        _emit(f"  encoding issue detected: {why}")
+        actions.append(f"recovered text via {enc} "
+                       f"(utf-8 failed at byte {bad_pos})"
+                       if bad_pos is not None else f"recovered text via {enc}")
+
+    # 2) backup — the original is preserved FOREVER, byte-for-byte
+    backup_dir = os.path.join(os.path.dirname(target) or ".",
+                              "backups")
+    os.makedirs(backup_dir, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup_path = os.path.join(
+        backup_dir, f"config-backup-{stamp}{os.extsep}toml")
+    n = 0
+    while os.path.exists(backup_path):
+        n += 1
+        backup_path = os.path.join(
+            backup_dir, f"config-backup-{stamp}-{n}{os.extsep}toml")
+    shutil.copy2(target, backup_path)
+    report["backup_path"] = backup_path
+    actions.append(f"original preserved at {backup_path}")
+    _emit(f"  backup: {backup_path}")
+
+    # 3) validate the recovered text as TOML
+    parsed: Any = None
+    parse_err: Optional[str] = None
+    if tomllib is not None:
+        try:
+            parsed = tomllib.loads(dec_text)
+        except Exception as exc:                            # noqa: BLE001
+            parse_err = str(exc)
+    if parsed is not None:
+        # 4) rewrite the SAME content as canonical UTF-8 (no BOM)
+        fileio.write_text_atomic(target, dec_text)
+        actions.append("rewrote configuration as canonical UTF-8 "
+                       "(content preserved)")
+        report["repaired"] = True
+        report["valid_after"] = True
+        report["detail"] = f"re-encoded from {enc}; TOML valid; content unchanged"
+        _emit("  repaired: same configuration, now canonical UTF-8 ✓")
+        return report
+
+    # 5) content itself is broken (or tomllib missing) — restoring
+    #    defaults is only done AFTER the backup above, and reported.
+    reason = parse_err or "TOML parser unavailable"
+    _emit(f"  configuration content is not valid TOML: {reason}")
+    _emit("  writing a fresh default template (your original is in the "
+          "backup above; nothing was destroyed)")
+    Config().save_defaults()
+    actions.append("wrote fresh UTF-8 default template "
+                   f"(previous file invalid TOML: {reason})")
+    report["rewrote_defaults"] = True
+    report["valid_after"] = True
+    report["detail"] = f"defaults restored after backup ({reason})"
+    return report

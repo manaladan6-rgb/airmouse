@@ -580,6 +580,89 @@ saw for every step — you will paste that into the final report
   keep the output, and report it (the help database is a single
   module — such a bug is easy for us to fix).
 
+## Step 16e — v16.5.1 config encoding + repair drill (Windows reality)
+
+This is the drill for the P0 defect v16.5.1 fixes (`'utf-8' codec
+can't decode byte 0x97 in position 30`).
+
+- **COMMAND/WHAT TO DO:**
+  1. `airmouse doctor` — read the CONFIG row.
+  2. Open `%USERPROFILE%\.airmouse\config.toml` in **Notepad**, add a
+     line containing an em dash, e.g. `note = "test — dash"`, then
+     **Save As → Encoding: ANSI** (this recreates the legacy cp1252
+     encoding that broke v16.5.0 on Windows).
+  3. `airmouse doctor` again — read the CONFIG row now.
+  4. `airmouse setup --repair-config`
+  5. `airmouse doctor` once more.
+- **WHAT SHOULD HAPPEN:** (1) either `defaults (no config file yet)`
+  or `UTF-8 configuration valid (…)`, never a bare "using defaults";
+  (3) a WARNING row for Configuration with `WHY:` (legacy Windows
+  encoding) and `FIX:` naming the repair command — and the app still
+  starts with defaults while saying so loudly; (4) the repair prints
+  the backup path under `<home>\backups\` (your original file,
+  byte-for-byte), then reports the re-encode; (5) CONFIG is READY
+  again: `UTF-8 configuration valid`, and your `note = "test — dash"`
+  line still contains the em dash (content preserved).
+- **PASS:** no `0x97`-style decode error anywhere after repair; the
+  backup exists; doctor CONFIG = READY; content preserved.
+- **FAIL:** any silent fallback, any data loss, or a repair that
+  reports success while `airmouse doctor` still shows WARNING.
+
+## Step 16f — v16.5.1 Voice Academy: provider detection + REAL vs TEXT
+
+- **COMMAND:** `airmouse teach voice` (interactive TTY)
+- **WHAT TO DO:** read the VOICE HARDWARE panel, then try Lesson 1.
+  If you have a microphone AND installed a local ASR engine
+  (`pip install faster-whisper`, or vosk, or pocketsphinx), also
+  actually SPEAK one "click" when it says `Listening…`.
+- **WHAT SHOULD HAPPEN:** the panel shows
+  `Microphone: ✓/○ detected`, per-engine marks (Whisper / Vosk /
+  PocketSphinx), `Active provider: …`, `Command grammar: ✓
+  available`; with no engine installed it also says
+  `Full speech recognition: NOT INSTALLED` and offers
+  `Install local voice engine? [Y] Yes [N] Not now` (N never
+  installs anything).  WITH mic+ASR the lesson says
+  `Say: "click"` + `Listening…` and a pass appears only after the
+  real pipeline recognized it; WITHOUT them every prompt is labelled
+  `TEXT PRACTICE` under `Real microphone practice: PHYSICAL TEST
+  REQUIRED / Text practice: AVAILABLE`.
+- **PASS:** panel matches your actual hardware; a spoken pass is only
+  granted after you actually spoke; text practice is never called
+  microphone validation; typing nothing prints
+  `Skipped — not completed.` and three wrong tries print
+  `Answer revealed. Lesson not completed.`
+- **FAIL:** a "pass" you did not speak, a missing honesty label, or
+  the academy consuming your answers without the panel.
+
+## Step 16g — v16.5.1 live transcription with the real microphone
+
+- **COMMAND:** `airmouse transcribe` (mic + ASR installed)
+- **WHAT TO DO:** press Enter and speak; try `pause`, `resume`,
+  `status`, `save`, `quit`.
+- **WHAT SHOULD HAPPEN:** the banner shows your provider and
+  `mode: MIC LIVE`; each spoken utterance prints a final line with a
+  timestamp and confidence; `save` writes text only
+  (`transcript-*.txt|json` under `<home>\transcripts\`); the summary
+  ends `no audio was ever stored`.
+- **PASS:** your speech appears as final text with confidence +
+  timestamp; no `.wav`/`.pcm` file appears anywhere under
+  `~/.airmouse`.
+- **FAIL:** a claimed transcript you never spoke, or any audio file
+  on disk.
+
+## Step 16h — v16.5.1 doctor capability states
+
+- **COMMAND:** `airmouse doctor --verbose`
+- **WHAT SHOULD HAPPEN:** hardware rows carry explicit state labels —
+  `Webcam … [ACTIVE]`, `Microphone … [MICROPHONE DETECTED]`,
+  `Transcription providers … [ACTIVE]` or `[NOT INSTALLED]`, and the
+  new `Gaze subsystem` row (`UNAVAILABLE` / `CALIBRATED` /
+  `REQUIRES CALIBRATION` with the exact `airmouse --gaze-calibrate`
+  fix).  Every WARNING/FAILED row has `WHY:` and `FIX:` lines.
+- **PASS:** every non-READY row answers what/why/fix without you
+  having to guess; the gaze fix command works when run.
+- **FAIL:** any row that only says "using defaults"-style text.
+
 ## Step 17 — Recovery and offline tests (simulation)
 
 - **COMMAND:** in the lab, tests **[11/12] Recovery** and **[12/12]
@@ -656,17 +739,25 @@ bug); Steps 16a–16d recorded (16d's `help-me` answers and 16a's
 never-trap/never-auto-pass behaviour are mandatory PASSes — a FAIL
 there is a software bug; 16a/16b/16c pass only with a real TTY /
 ASR engine / camera respectively and stay recorded-as-attempted if
-the hardware is missing). Steps 14, 16, 17 must PASS (they are
+the hardware is missing); v16.5.1 Steps 16e–16h recorded (16e's
+repair-preserves-content and 16h's WHY/FIX rows are mandatory
+PASSes; 16f/16g's real-microphone passes require a real mic + local
+ASR engine and stay recorded-as-attempted if the hardware is
+missing). Steps 14, 16, 17 must PASS (they are
 simulation tests — a FAIL here is a software bug, not a hardware
 quirk).
 
 ---
 
-*Honesty footer: AirMouse v16.5.0 — 1889 automated tests green (2
-honest headless skips), simulation suite green, `airmouse verify`
-12/12 automated PASS in the build sandbox. Physical hardware (webcam,
+*Honesty footer: AirMouse v16.5.1 — 1957 automated tests green (1
+honest headless skip), simulation suite green, `airmouse verify`
+12/12 automated PASS in the build sandbox; the v16.5.0 Windows
+encoding defect (`0x97` at byte 30) is reproduced byte-for-byte and
+repaired in automated tests, and the repair drill (16e) recreates it
+on real Windows. Physical hardware (webcam,
 microphone, hand tracking, two-hand geometry, gaze, real browser,
 real OS input automation, the v16.5 teaching tour with real sensors,
-live ASR engines, the temporal HUD under a real camera, Windows
-bundles) was NOT tested there and CANNOT be — that is what
+live ASR engines, live mic transcription, the temporal HUD under a
+real camera, Windows
+bundles) was NOT tested in the sandbox and CANNOT be — that is what
 this document is for. Windows runtime was not tested in the sandbox.*

@@ -14,3 +14,7 @@ download/
 *.pyc
 __pycache__/
 *.corrupt-*
+
+# local dev environment (v16.5.1)
+.venv/
+bundle/
