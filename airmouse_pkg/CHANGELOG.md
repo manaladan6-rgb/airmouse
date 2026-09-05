@@ -1,5 +1,151 @@
 # Changelog
 
+## v16.5.2 — LIGHTWEIGHT LOCAL VOICE RUNTIME HOTFIX (2026-09-05)
+
+A focused integration fix.  The first real v16.5.1 Windows run showed
+the defect this release kills:
+
+```text
+airmouse doctor --verbose
+  → Transcription providers READY — local ASR: pocketsphinx [ACTIVE]
+airmouse transcribe
+  → provider: simulated_stream
+  → SIMULATED provider — install a local ASR engine for real transcription
+```
+
+Doctor and transcribe each had their OWN provider-detection
+implementation, and they disagreed on the same machine.  Doctor's
+path (`offline_voice.detect_providers()`) accepted a provider on a
+bare `hasattr(sr.Recognizer(), "recognize_sphinx")` — True whenever
+SpeechRecognition is installed, without ever importing pocketsphinx.
+Transcribe's path (`voice_stack.pick_provider()`) required a real
+`find_spec("pocketsphinx")`.  When the engine package is missing or
+broken, doctor said ACTIVE while transcribe honestly (but silently,
+to the user) ran the deterministic test provider.  That silent REAL→
+SIMULATED downgrade is exactly what the mission forbids.
+
+### The fix — ONE authoritative registry (§2/§3)
+
+- **`airmouse.asr_registry` (new)** — `ASRProviderRegistry` is the
+  single source of truth.  `discover()` probes every engine honestly;
+  `available()` / `select()` / `active()` / `diagnose()` are the only
+  selection API; doctor, transcribe, `voice-status`, the academies
+  and `offline_voice.detect_providers()` ALL go through the same
+  instance.  Provider states are exactly
+  `NOT_INSTALLED / INSTALLED / AVAILABLE / INITIALIZABLE / ACTIVE /
+  FAILED / DISABLED`.
+- **The anti-hasattr probe**: PocketSphinx is ACTIVE only after a REAL
+  initialization — an actual `pocketsphinx.Decoder` build with the
+  bundled en-US model (measured 0.35–0.42 s, cached process-wide).
+  A broken wheel/DLL that imports as metadata now fails the probe and
+  is reported `FAILED` with its exact reason — never "ACTIVE".
+- **Deterministic selection (mission priority)**: explicit user
+  configuration (`--provider` / env `AIRMOUSE_ASR_PROVIDER` /
+  config `[voice] asr_provider`) → previously selected working
+  provider (persisted best-effort to `<home>/asr_provider.json`) →
+  lightweight local (pocketsphinx) → higher-quality (vosk, whisper —
+  never mandatory, models never auto-downloaded) → simulation ONLY
+  when nothing works.  `"none"/"off"` is honoured (DISABLED), and an
+  explicit choice that fails falls through to the next candidate —
+  never to a fake.
+- **The invariant holds by construction (§16)**:
+  `doctor.active_asr_provider == transcribe.selected_provider` is now
+  a shipped regression test (`tests/test_asr_registry.py`), plus the
+  CLI-level variant `test_cli_transcribe_provider_matches_registry`.
+
+### Doctor and microphone, unified (§3/§4)
+
+- `capabilities._detect_speech` reports from the registry: ACTIVE
+  requires the real init pass (detail: `initialization verified
+  (0.35s)`), installed-but-broken engines appear as WARNING rows with
+  the exact reason + `FIX: airmouse voice-status --verbose`, and "no
+  usable engine" says the detection was a real initialization probe,
+  not an import flag.
+- **ONE microphone detector** (`asr_registry.detect_microphone`):
+  sounddevice/PortAudio FIRST (the lightest existing stack — PyAudio
+  is NOT a hard requirement), SpeechRecognition/PyAudio enumeration
+  as fallback.  Doctor's Microphone row, the voice stack, transcribe
+  and the academies all share it.  It reports backend, device count,
+  device names, channels, sample rate and the default input.
+
+### `airmouse transcribe` fixed (§5/§6/§7)
+
+- With a usable local provider the banner reads
+  `provider: pocketsphinx (local ASR engine)` — never
+  `simulated_stream` while PocketSphinx works.
+- **MIC LIVE mode** (mission §5 pipeline): sounddevice-first capture →
+  30 ms frames → shipped `EnergyVAD` silence detection → provider →
+  transcript + timestamp.  New `mic_capture` module: sounddevice is
+  the primary ear, the SpeechRecognition/PyAudio ear is the fallback,
+  and every failure raises `MicCaptureError` with an actionable
+  `.fix` — device busy, invalid device, permission failure and
+  "no speech detected" are all printed verbatim, never swallowed.
+- **`--text`** forces TEXT PRACTICE (typed input through the real
+  pipeline, explicitly labelled "NOT microphone validation");
+  **`--mic N`** selects an input device; **`--provider NAME`** pins
+  the engine.  `--offline` still forces the deterministic test
+  provider — and a forced simulation no longer claims the machine
+  lacks ASR (it says "requested via --offline").
+- **Failure is loud and explains itself (§7)**: when no engine can be
+  selected the banner prints WHY per engine
+  (`pocketsphinx: INITIALIZATION FAILED — <reason>`) plus
+  `FIX: airmouse voice-status --verbose (install: pip install
+  pocketsphinx SpeechRecognition)`.
+- **Never fabricate confidence (§12)**: PocketSphinx exposes none, so
+  its segments show `conf: unavailable` (new `confidence_known` flag
+  through `Transcript` → `TranscriptSegment` → export JSON) instead
+  of the old invented 0.6.
+- **Regression fix caught by the suite**: `simulate=True` +
+  `mic_mode=True` used to print `mode: MIC LIVE` for a SIMULATED
+  provider on machines with ASR installed — simulation now always
+  forces text mode.
+
+### voice-status becomes THE debugging tool (§8)
+
+- `airmouse voice-status [--verbose]` renders the mission's §8 view
+  from ONE registry call: MICROPHONE (detected/devices/selected/
+  backend/rate/channels), ASR PROVIDERS (installed / importable /
+  model / initialization / runtime / role, with reason + probe time
+  under `--verbose`) and TRANSCRIPTION (real microphone: AVAILABLE,
+  provider, mode, offline: YES, audio storage: NONE, network:
+  NOT REQUIRED).
+
+### Voice Academy rides the real pipeline (§10/§11)
+
+- Practice-mode resolution now uses the unified mic detector + the
+  registry: mic + ACTIVE provider ⇒ REAL MICROPHONE PRACTICE through
+  `mic_capture` (sounddevice-first); everything else stays honestly
+  labelled TEXT PRACTICE.  Typed input still can never pass a real
+  microphone lesson.  COMMAND (`open browser` → `Open browser`) and
+  DICTATION (`hello bro comma how are you question mark` →
+  `Hello bro, how are you?`) both verified through the real
+  post-processing chain.
+
+### Windows-first + quality gates (§14–§23)
+
+- No Linux-only assumptions in the new code (sounddevice + pure
+  Python); no Bash/WSL/Docker required; no cloud, no audio storage,
+  no network for local ASR.
+- **Suite: 1992 passed / 2 honest skips / 0 failed** (baseline
+  1957/1/0 → +35 tests, zero regressions).  The 4 environment-shifted
+  v16.5.1 tests that assumed "the sandbox has no ASR" were rewritten
+  to fake whole environments self-consistently (find_spec + probe +
+  ctor) so they pass identically on machines WITH engines installed.
+- `airmouse verify` 12/12 automated PASS (honest ACTION_REQUIRED rows
+  for physical hardware); `airmouse offline-test` 18/18.
+- **Performance (§18, measured on the release tree)**: ASR startup
+  (registry discover incl. the real Decoder init) 424 ms one-time,
+  then cached; provider selection 0.4 ms; per-utterance pipeline
+  (push → partials → finalize) 0.1–0.5 ms; VAD record loop ≈0 ms CPU
+  per 30 ms frame; peak RSS 118 MB for the whole voice process
+  (dominated by pre-existing numpy/OpenCV imports).  The default
+  stack stays lightweight: PocketSphinx + sounddevice only.
+- Security scan of the new voice modules: no eval/exec/os.system/
+  shell=True/subprocess; red-team phrases (`run powershell …`,
+  `execute cmd …`, `delete everything …`, `curl/wget/download …`)
+  resolve at most to structured, permission-gated intents — the ASR
+  layer itself never executes anything (regression-tested).
+
 ## v16.5.1 — WINDOWS REALITY & TEACHING UX HOTFIX (2026-09-05)
 
 A hardening / UX / real-hardware-validation release. v16.5.0's first

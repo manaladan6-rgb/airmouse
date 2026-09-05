@@ -111,6 +111,10 @@ class Transcript:
     provider: str = ""
     duration: float = 0.0
     timestamp: float = field(default_factory=now_ts)
+    #: v16.5.2 §12 — False when the provider does NOT supply a real
+    #: confidence (e.g. PocketSphinx).  Never fabricate a percentage;
+    #: renderers show "confidence: unavailable" instead.
+    confidence_known: bool = True
 
 
 class OfflineSpeechProvider:
@@ -165,8 +169,14 @@ class SimulatedSpeechProvider(OfflineSpeechProvider):
 class PocketSphinxProvider(OfflineSpeechProvider):
     """CMU PocketSphinx via SpeechRecognition's OFFLINE sphinx backend.
 
-    Never calls recognize_google.  Guarded import; ``available`` is
-    False without pocketsphinx + Whisper installed.
+    Never calls recognize_google.  ``available`` is a REAL capability
+    test (v16.5.2 §2): it actually imports ``pocketsphinx`` and runs the
+    shared registry initialization probe (a genuine Decoder build with
+    the default model — the exact object ``recognize_sphinx`` drives).
+    A bare ``hasattr(r, "recognize_sphinx")`` check was the root cause
+    of the v16.5.1 Windows divergence: it is True whenever
+    SpeechRecognition is installed even when pocketsphinx itself is
+    broken, so doctor reported a provider that could not run.
     """
 
     name = "pocketsphinx"
@@ -185,7 +195,15 @@ class PocketSphinxProvider(OfflineSpeechProvider):
             return False
         try:
             r = self._recognizer or self._sr.Recognizer()
-            return hasattr(r, "recognize_sphinx")
+            if not hasattr(r, "recognize_sphinx"):
+                return False
+        except Exception:
+            return False
+        # v16.5.2: the REAL probe — cached in asr_registry (≈0.25 s)
+        try:
+            from .asr_registry import PROBE_POCKETSPHINX
+            PROBE_POCKETSPHINX()
+            return True
         except Exception:
             return False
 
@@ -193,10 +211,12 @@ class PocketSphinxProvider(OfflineSpeechProvider):
         try:
             r = self._recognizer or self._sr.Recognizer()
             text = r.recognize_sphinx(audio)
-            return Transcript(text=str(text or ""), confidence=0.6,
-                              provider=self.name)
+            # §12: PocketSphinx exposes no reliable confidence —
+            # report 0.0 with confidence_known=False, never a made-up %
+            return Transcript(text=str(text or ""), confidence=0.0,
+                              provider=self.name, confidence_known=False)
         except Exception:
-            return Transcript(provider=self.name)
+            return Transcript(provider=self.name, confidence_known=False)
 
 
 class VoskProvider(OfflineSpeechProvider):
@@ -313,13 +333,30 @@ provider_registry: Dict[str, Callable[..., OfflineSpeechProvider]] = {
 
 
 def detect_providers() -> Dict[str, bool]:
-    """Which offline providers are usable on THIS machine (honest report)."""
+    """Which offline providers are usable on THIS machine (honest report).
+
+    v16.5.2: delegated to the authoritative
+    :class:`airmouse.asr_registry.ASRProviderRegistry` — the ONE
+    detection implementation doctor, transcribe, voice-status and this
+    function all share.  ``True`` means the engine genuinely passed its
+    capability probe (real initialization for PocketSphinx; verified
+    import for vosk/whisper with the model loading on first use).
+    """
     out: Dict[str, bool] = {}
-    for name, factory in provider_registry.items():
-        try:
-            out[name] = bool(factory().available())
-        except Exception:
-            out[name] = False
+    try:
+        from .asr_registry import registry
+        discovered = registry.discover()
+        for name, row in discovered.items():
+            out[name] = row.state in ("INITIALIZABLE", "AVAILABLE", "ACTIVE")
+    except Exception:
+        # registry import/probe itself failed — fall back to the raw
+        # provider constructors rather than reporting nothing at all
+        for name, factory in provider_registry.items():
+            try:
+                out[name] = bool(factory().available())
+            except Exception:
+                out[name] = False
+    out.setdefault("simulated", True)  # ships with the package
     return out
 
 

@@ -94,6 +94,13 @@ class DoctorReport:
 
     sections: List[DoctorSection] = field(default_factory=list)
 
+    #: v16.5.2 §16 — the ACTIVE ASR provider name (or the built-in
+    #: grammar label).  Set by :func:`run_doctor` from THE authoritative
+    #: registry — the same selection the transcribe runtime uses, so
+    #: ``doctor.active_asr_provider == transcribe.selected_provider``
+    #: holds by construction (the release invariant).
+    active_asr_provider: str = ""
+
     # -- aggregation ---------------------------------------------------------
 
     def all_components(self) -> List[Component]:
@@ -161,7 +168,15 @@ def run_doctor(verbose: bool = False) -> DoctorReport:
             buckets[section].append(comp)
     sections = [DoctorSection(name=name, components=buckets[name])
                 for name in SECTION_NAMES]
-    return DoctorReport(sections=sections)
+    doc = DoctorReport(sections=sections)
+    # v16.5.2 §16 — the invariant anchor: from THE registry, the same
+    # instance the transcribe runtime selects through
+    try:
+        from .asr_registry import active_asr_provider
+        doc.active_asr_provider = active_asr_provider()
+    except Exception:
+        doc.active_asr_provider = "Built-in command recognition"
+    return doc
 
 
 def format_doctor_report(report: DoctorReport, verbose: bool = False) -> str:

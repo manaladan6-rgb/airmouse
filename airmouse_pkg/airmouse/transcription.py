@@ -231,6 +231,7 @@ class StreamingProviderAdapter:
         self._current_target: List[str] = []  # words of the in-flight utterance
         self._partial_words: List[str] = []
         self._current_confidence = 0.0
+        self._confidence_known = True
         self._last_final = Transcript(provider=getattr(provider, "name", ""))
 
     @property
@@ -243,12 +244,14 @@ class StreamingProviderAdapter:
         except Exception:
             return False
 
-    def push_utterance(self, text: str, confidence: float = 0.95) -> None:
+    def push_utterance(self, text: str, confidence: float = 0.95,
+                       confidence_known: bool = True) -> None:
         """Queue an utterance (used by the simulated provider + tests)."""
         words = str(text or "").split()
         if words:
             self._pending.append(words)
             self._current_confidence = max(0.0, min(1.0, float(confidence)))
+            self._confidence_known = bool(confidence_known)
 
     def feed_audio(self, chunk: Any) -> str:
         """Feed audio; returns the current partial transcript (may be '').
@@ -271,10 +274,12 @@ class StreamingProviderAdapter:
         """Finalize the current utterance."""
         text = " ".join(self._partial_words).strip()
         conf = self._current_confidence
+        known = self._confidence_known
         self._partial_words = []
         self._current_target = []
         t = Transcript(text=text, confidence=conf, provider=self.name,
-                       duration=0.0, timestamp=time.time())
+                       duration=0.0, timestamp=time.time(),
+                       confidence_known=known)
         if text:
             self._last_final = t
         return t
@@ -336,11 +341,15 @@ class TranscriptSegment:
     finalization_delay: float = 0.0    # speech end → final text seconds
     partial_count: int = 0
     edited: bool = False               # correction applied post-hoc
+    #: v16.5.2 §12 — False when the provider supplies no real confidence;
+    #: renderers show "confidence: unavailable" instead of a fake %
+    confidence_known: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "text": self.text[:MAX_SEGMENT_CHARS],
             "confidence": round(self.confidence, 4),
+            "confidence_known": self.confidence_known,
             "provider": self.provider,
             "start_ts": round(self.start_ts, 4),
             "end_ts": round(self.end_ts, 4),
@@ -480,6 +489,7 @@ class LiveTranscriptionEngine:
             duration=max(0.0, now - (self._speech_start or now)),
             finalization_delay=0.0,
             partial_count=self._partial_count,
+            confidence_known=bool(getattr(t, "confidence_known", True)),
         )
         self._speech_start = 0.0
         self._partial = ""

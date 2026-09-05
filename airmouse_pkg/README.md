@@ -84,22 +84,34 @@ memory lifecycle (export / reset / delete) that you control.
   `PHYSICAL PRACTICE REQUIRED — needs camera/microphone; never
   auto-passed` and marks NOTHING complete. Only live sensors can
   pass a live lesson.
-- **The voice stack is honest:** `airmouse voice-status` now shows a
-  per-machine provider panel — ✓ Built-in command recognition (always
-  real: a deterministic offline grammar), ○ Local ASR / ○ Whisper /
-  ○ Vosk / ○ Microphone, one `Active:` line, and the plain sentence
-  *"Command recognition still works — it is deterministic grammar,
-  not ASR."* Optional local ASR engines (Vosk / Whisper /
-  PocketSphinx) are auto-detected the moment you pip-install them —
+- **The voice stack is honest and SINGLE-SOURCED (v16.5.2):** one
+  authoritative ASR provider registry (`asr_registry`) drives doctor,
+  transcribe, `voice-status` and the academies — they can never
+  disagree again (the v16.5.1 Windows bug where doctor said
+  `pocketsphinx [ACTIVE]` while transcribe ran `simulated_stream` is
+  fixed at the root: ACTIVE now requires a REAL engine
+  initialization, not an import flag).  `airmouse voice-status
+  [--verbose]` is the debugging tool: MICROPHONE (devices, backend,
+  rate), ASR PROVIDERS (installed / importable / model /
+  initialization / runtime / role, with exact failure reasons under
+  `--verbose`) and TRANSCRIPTION (offline: YES, audio storage: NONE,
+  network: NOT REQUIRED).  Optional local ASR engines (PocketSphinx
+  default — lightweight; Vosk / Whisper optional, never
+  auto-downloaded) are detected the moment you pip-install them —
   AirMouse never installs anything for you.
 - **Live transcription:** `airmouse transcribe` runs a local session
-  (REPL: `pause | resume | save [json] | clear | status | stop |
-  quit`). Every segment carries a timestamp + confidence; history is
-  bounded (500 segments); saving is EXPLICIT and lands only under
-  `<home>/transcripts/` — text only, audio is never stored. Without
-  an ASR engine the session runs on a deterministic provider that is
-  banner-labelled `⚠ SIMULATED provider` — never passed off as real
-  recognition.
+  — with a real engine + microphone it is **MIC LIVE**
+  (sounddevice-first capture → VAD → local ASR; `--mic N` picks a
+  device, `--text` forces explicitly-labelled TEXT PRACTICE,
+  `--provider` pins the engine) — (REPL: `pause | resume |
+  save [json] | clear | status | stop | quit`).  Segments carry a
+  timestamp + real confidence (`conf: unavailable` when the engine
+  supplies none — never invented); history is bounded (500
+  segments); saving is EXPLICIT and lands only under
+  `<home>/transcripts/` — text only, audio is never stored.  Without
+  a usable engine the session runs on a deterministic provider that
+  is banner-labelled `⚠ SIMULATED provider` with the WHY (per
+  engine) and the FIX — never passed off as real recognition.
 - **`airmouse help-me [question]`** answers from real capability
   data — the same gesture map `gestures.py` and the spine use (22
   rows, including the honest note that two-hand rotate/drag are

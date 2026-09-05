@@ -422,17 +422,29 @@ def _offer_pack_if_needed(out: Any, input_fn: Optional[Callable],
 # ---------------------------------------------------------------------------
 
 def _capture_transcript(
-        provider: Any, timeout_s: float = 6.0
+        provider: Any, timeout_s: float = 6.0,
+        device: Optional[str] = None
 ) -> Tuple[Optional[str], float]:
-    """One REAL utterance through the shipped stack.
+    """One REAL utterance through the shipped stack (v16.5.2 §4/§5/§10).
 
-    Microphone capture via SpeechRecognition (PyAudio backend), then the
-    chosen local ASR provider.  Audio is adapted per engine: AudioData
-    for PocketSphinx, a temp WAV file for Whisper / Vosk.  Returns
-    ``(transcript, confidence)``; ``transcript is None`` means capture
-    failed honestly (noise, timeout, no device) — never a fabricated
-    phrase.  Never raises.
+    Primary path: sounddevice capture (lightest existing stack — no
+    PyAudio hard requirement) → EnergyVAD → the chosen local ASR
+    provider, via :mod:`airmouse.mic_capture`.  When the sounddevice
+    backend cannot start, the legacy SpeechRecognition (PyAudio) ear is
+    used as fallback.  Audio is adapted per engine: AudioData for
+    PocketSphinx, a temp WAV file for Whisper / Vosk (deleted
+    immediately — nothing is ever stored).
+
+    Returns ``(transcript, confidence)``; ``transcript is None`` means
+    capture failed honestly (noise, timeout, no device) — never a
+    fabricated phrase.  Never raises.
     """
+    try:
+        from .mic_capture import capture_transcript as _real_capture
+        return _real_capture(provider, device=device, timeout_s=timeout_s)
+    except Exception:
+        pass
+    # legacy path (mic_capture itself failed to import — defensive)
     try:
         import speech_recognition as sr
     except Exception:

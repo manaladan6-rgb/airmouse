@@ -385,3 +385,31 @@ Stage Summary:
 ## FINAL_RELEASE — SHIPPED
 - https://github.com/manaladan6-rgb/airmouse/releases/tag/v16.0.0 (5 assets)
 - Tags: v3.1.0…v15.2.0 + v16.0.0 all intact; no force-push; history preserved
+---
+Task ID: v16.5.2
+Agent: Z.ai Code (session continuation)
+Task: AIRMouse v16.5.2 — LIGHTWEIGHT LOCAL VOICE RUNTIME HOTFIX (25-section mission)
+
+Work Log:
+- Re-cloned repo; recorded pre-flight git state: HEAD 6bdb2a0 == origin/main == v16.5.1 (annotated), tree clean.
+- Installed test env (pytest, mediapipe, opencv, pynput, pocketsphinx, sounddevice, SpeechRecognition; PyAudio unavailable in sandbox — acceptable, mission §4 makes it optional).
+- Baseline suite: 1952 passed / 4 env-shifted fails / 2 skipped — the 4 fails were tests assuming "sandbox has no ASR" while pocketsphinx was now installed.
+- ROOT CAUSE (§1): doctor used offline_voice.detect_providers() whose PocketSphinxProvider.available() was a bare hasattr(sr.Recognizer, "recognize_sphinx") (always True when SpeechRecognition exists — never imports pocketsphinx) → false ACTIVE; transcribe used voice_stack.pick_provider() with a strict find_spec gate → None → simulated_stream. Two detection implementations disagreeing on one machine.
+- Implemented airmouse/asr_registry.py: ASRProviderRegistry (discover/available/select/active/diagnose), 7 contract states (NOT_INSTALLED/INSTALLED/AVAILABLE/INITIALIZABLE/ACTIVE/FAILED/DISABLED), real-init probe PROBE_POCKETSPHINX (actual pocketsphinx.Decoder build, 0.35-0.42s, cached), deterministic lightweight-first selection (explicit config [voice] asr_provider / env AIRMOUSE_ASR_PROVIDER / CLI --provider → persisted working provider (<home>/asr_provider.json, new paths.asr_provider_file()) → pocketsphinx → vosk → whisper → simulation only; "none"/"off" honoured as DISABLED).
+- Implemented airmouse/mic_capture.py: sounddevice-first VAD utterance capture (30ms frames → shipped EnergyVAD), SpeechRecognition/PyAudio fallback ear, MicCaptureError with actionable .reason/.fix (busy/invalid/permission/no-speech), resolve_device (default|index|name-substring), zero audio storage (temp WAV deleted same call).
+- Fixed PocketSphinxProvider.available() to run the real probe; fabricated confidence 0.6 → confidence_known=False ("conf: unavailable", §12) plumbed Transcript → TranscriptSegment → export JSON.
+- voice_stack: pick_provider delegates to registry; _detect_microphone uses unified asr_registry.detect_microphone (sounddevice-first, PyAudio fallback); default order pocketsphinx > vosk > whisper (mission §2); added render_voice_status(verbose) — the §8 authoritative view.
+- transcribe_session: provider pick via registry (+ prefer), selection_detail WHY lines per engine on fallback, simulate always forces text mode (latent v16.5.1 MIC-LIVE-for-simulated bug caught by suite), --text forces labelled TEXT PRACTICE, --mic/--provider plumbed, honest --offline banner, _conf_str renders unavailable honestly.
+- capabilities: Transcription providers row from registry (ACTIVE requires real init pass; installed-but-failed engines get WARNING rows with reason+FIX); Microphone row via unified detector. doctor: DoctorReport.active_asr_provider set by run_doctor from THE registry.
+- __main__: --text/--provider flags added (--mic reused, existing v5 int flag); voice-status rewritten to render_voice_status.
+- voice_academy._capture_transcript: sounddevice-first capture via mic_capture (SR fallback preserved).
+- tests: conftest autouse fixture isolates registry singleton + neutralizes persistence; fixed 4 env-shifted tests + 2 order-contract tests to fake whole environments self-consistently (find_spec + probe + ctor); NEW tests/test_asr_registry.py — 35 tests: discovery/selection/mic/invariant/record-loop/safety matrices incl. THE invariant (doctor.active_asr_provider == transcribe.selected_provider) and no-eval/exec/os.system/shell=True/subprocess scan.
+- Gates: suite 1992 passed / 2 skipped / 0 failed; verify 12/12 automated PASS; offline-test 18/18; doctor 0 WARNING/FAILED; clean-venv wheel battery green (version banner, voice-status §8, transcribe provider, --offline/--text labels).
+- Perf (§18): registry discover 424ms one-time (real Decoder init, cached); selection 0.4ms; per-utterance pipeline 0.1-0.5ms; VAD loop ≈0ms CPU/30ms frame; peak RSS 118MB.
+- Docs: CHANGELOG v16.5.2 entry, README voice-stack + transcription bullets, CLI_REFERENCE (voice-status/transcribe rows + flags), VERIFICATION_REPORT v16.5.2 5-part report, WINDOWS_REAL_WORLD_TEST Step 16i (THE hotfix drill) + pass criteria + honesty footer.
+- Version 16.5.1 → 16.5.2 (pyproject + __init__).
+
+Stage Summary:
+- THE invariant holds by construction and is regression-tested: IF doctor reports pocketsphinx [ACTIVE] THEN transcribe launches provider: pocketsphinx (local ASR engine) / mode: MIC LIVE when a mic exists.
+- Wheel: airmouse-16.5.2-py3-none-any.whl, SHA256 3b26639d928cd4217b275647dd32b52ef619c413ae2878b1556ba90874ddf1d4.
+- Real-mic validation handed to user via WINDOWS_REAL_WORLD_TEST.md Step 16i (honestly labelled).

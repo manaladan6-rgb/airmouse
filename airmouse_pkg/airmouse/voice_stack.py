@@ -18,9 +18,13 @@ This module is the honest face of that stack:
   ``Built-in command recognition`` — the deterministic grammar is a REAL
   command system, not simulated ASR, and it keeps working without any
   engine.
-* :func:`pick_provider` — the best AVAILABLE local ASR provider
-  (vosk > whisper > pocketsphinx by default, ``prefer`` overrides).
-  Constructors are guarded; a broken engine is skipped, never raised.
+* :func:`pick_provider` — the best AVAILABLE local ASR provider.
+  v16.5.2: DELEGATES to the authoritative
+  :class:`airmouse.asr_registry.ASRProviderRegistry` — the ONE
+  selection implementation shared with doctor / transcribe /
+  voice-status.  Default priority is now lightweight-first
+  (pocketsphinx > vosk > whisper; ``prefer`` overrides).  Constructors
+  are guarded; a broken engine is skipped, never raised.
 * :func:`install_guidance` — exact optional-install commands.  NO
   auto-install, NO network calls, ever.
 * :func:`offer_voice_pack` — the §5 opt-in prompt.  It prints guidance
@@ -57,6 +61,7 @@ __all__ = [
     "pick_provider",
     "install_guidance",
     "offer_voice_pack",
+    "render_voice_status",
     "BUILT_IN_ACTIVE_LABEL",
 ]
 
@@ -70,9 +75,11 @@ _ENGINE_MODULES: Dict[str, tuple] = {
     "pocketsphinx": ("pocketsphinx",),
 }
 
-#: default preference order for local ASR engines (mission §5: pluggable,
-#: never one mandatory engine); ``prefer`` overrides the order
-_ENGINE_ORDER = ("vosk", "whisper", "pocketsphinx")
+#: default preference order for local ASR engines (v16.5.2 §2:
+#: LIGHTWEIGHT FIRST — PocketSphinx is the minimal installed provider;
+#: vosk/whisper are the higher-quality optional engines; ``prefer``
+#: and explicit configuration override the order)
+_ENGINE_ORDER = ("pocketsphinx", "vosk", "whisper")
 
 #: engine name → constructor global (kept separate so tests can
 #: monkeypatch either the flags or the constructors)
@@ -101,15 +108,15 @@ def _spec_found(module: str) -> bool:
 def _detect_microphone() -> bool:
     """True only when input hardware is actually detectable.
 
-    Requires PyAudio (the only microphone backend wired today) plus a
-    successful device enumeration through SpeechRecognition.  A headless
-    sandbox has neither → ``False``.  Never raises.
+    v16.5.2: uses the ONE unified detector
+    (:func:`airmouse.asr_registry.detect_microphone`) — sounddevice /
+    PortAudio FIRST (the lightest existing stack; PyAudio is NOT a
+    hard requirement), with the SpeechRecognition/PyAudio enumeration
+    as fallback.  A headless sandbox reports ``False``.  Never raises.
     """
-    if not _spec_found("pyaudio"):
-        return False
     try:
-        import speech_recognition as sr  # optional dependency
-        return bool(sr.Microphone.list_microphone_names())
+        from .asr_registry import detect_microphone as _unified
+        return bool(_unified().get("available"))
     except Exception:
         return False
 
@@ -166,36 +173,21 @@ def _engine_ctor(name: str) -> Optional[Callable[..., OfflineSpeechProvider]]:
 def pick_provider(prefer: Optional[str] = None) -> Optional[OfflineSpeechProvider]:
     """Best AVAILABLE local ASR provider, or ``None`` when none exists.
 
-    Default preference: vosk > whisper > pocketsphinx.  ``prefer``
-    (engine name, case-insensitive) is tried first; every candidate must
-    still prove itself via ``available()`` — a missing or broken engine
-    is skipped, never faked.  Constructed defensively: a constructor
-    that raises simply disqualifies that engine.  Never raises.
+    v16.5.2: delegates to the authoritative
+    :class:`airmouse.asr_registry.ASRProviderRegistry.select()` so
+    doctor, transcribe, voice-status and this function can never
+    disagree again.  Default priority is lightweight-first
+    (pocketsphinx > vosk > whisper); ``prefer`` acts as the explicit
+    configuration override.  Every candidate must prove itself via the
+    registry's importability gate + real initialization probe +
+    ``available()`` — a missing or broken engine is skipped, never
+    faked.  Never raises.
     """
-    order = list(_ENGINE_ORDER)
-    want = str(prefer or "").strip().lower()
-    if want:
-        matched = [n for n in order if n == want]
-        if matched:
-            order.remove(matched[0])
-            order.insert(0, matched[0])
-    for name in order:
-        mods = _ENGINE_MODULES.get(name, ())
-        if mods and not any(_spec_found(m) for m in mods):
-            continue  # honest gate: the engine package is not importable
-        ctor = _engine_ctor(name)
-        if ctor is None:
-            continue
-        try:
-            provider = ctor()
-        except Exception:
-            continue
-        try:
-            if provider is not None and provider.available():
-                return provider
-        except Exception:
-            continue
-    return None
+    try:
+        from .asr_registry import registry
+        return registry.select(prefer=prefer)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +222,112 @@ def status_panel() -> str:
         lines.append("Full speech recognition is not installed.")
         lines.append("Command recognition still works — it is deterministic "
                      "grammar, not ASR.")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# v16.5.2 §8 — the AUTHORITATIVE voice-status renderer
+# ---------------------------------------------------------------------------
+
+def render_voice_status(verbose: bool = False) -> str:
+    """``airmouse voice-status [--verbose]`` — THE debugging tool.
+
+    One call to the ONE registry (mission §2/§3/§8): microphone,
+    per-provider honest rows, and the transcription verdict
+    (real-mic availability, offline, storage, network).  ``verbose``
+    adds per-provider detail (probe result + reason + FIX).  Never
+    raises.
+    """
+    try:
+        from .asr_registry import registry
+        diag = registry.diagnose()
+    except Exception as exc:
+        return f"AIRMouse Voice Status\n\nregistry unavailable: {exc}"
+
+    mic = diag.get("microphone", {})
+    providers = diag.get("providers", {})
+    active = diag.get("active")
+
+    lines: List[str] = ["AIRMouse Voice Status", ""]
+
+    # -- MICROPHONE ---------------------------------------------------------
+    lines.append("MICROPHONE")
+    if mic.get("available"):
+        lines.append(f"  {_CHECK_MARK} detected")
+        lines.append(f"  devices: {mic.get('device_count', 0)}")
+        dev = (mic.get("devices") or [{}])[0]
+        lines.append(f"  selected: {dev.get('name', 'Default')}")
+        lines.append(f"  backend: {mic.get('backend', 'PortAudio')}")
+        sr_v = dev.get("sample_rate") or 16000
+        lines.append(f"  sample rate: {sr_v}")
+        lines.append(f"  channels: {dev.get('channels', 1)}")
+    else:
+        lines.append("  ○ not detected")
+        if mic.get("error"):
+            lines.append(f"  error: {mic['error']}")
+        lines.append("  FIX: connect a microphone and grant permission, "
+                     "then re-run this command")
+    lines.append("")
+
+    # -- ASR PROVIDERS --------------------------------------------------------
+    lines.append("ASR PROVIDERS")
+    lines.append("")
+    for name, row in providers.items():
+        lines.append(f"  {name.capitalize()}")
+        installed = bool(row.get("installed"))
+        lines.append(f"    installed: {'YES' if installed else 'NO'}")
+        lines.append(f"    importable: "
+                     f"{'YES' if row.get('importable') else 'NO'}")
+        if name == "pocketsphinx":
+            lines.append("    model: available (bundled en-US, loads with "
+                         "the engine)")
+        else:
+            lines.append("    model: on first use (never auto-downloaded)")
+        init = row.get("initialization", "NOT RUN")
+        lines.append(f"    initialization: {init}")
+        runtime = ("READY" if row.get("state") in
+                   ("INITIALIZABLE", "AVAILABLE", "ACTIVE") else
+                   "FAILED" if row.get("state") == "FAILED" else "NO")
+        lines.append(f"    runtime: {runtime}")
+        lines.append(f"    role: {row.get('role', 'OPTIONAL')}")
+        if verbose and row.get("reason"):
+            lines.append(f"    reason: {row['reason']}")
+        if verbose and row.get("init_seconds"):
+            lines.append(f"    probe time: {row['init_seconds']:.3f}s")
+        lines.append("")
+
+    # -- TRANSCRIPTION --------------------------------------------------------
+    lines.append("TRANSCRIPTION")
+    real = bool(active)
+    lines.append(f"  real microphone: "
+                 f"{'AVAILABLE' if (real and mic.get('available')) else 'NOT AVAILABLE'}")
+    if real:
+        lines.append(f"  provider: {active}")
+        mode = "MIC LIVE" if mic.get("available") else "TEXT INPUT"
+        lines.append(f"  mode: {mode}")
+    else:
+        lines.append("  provider: none (built-in command grammar + "
+                     "simulated stream only)")
+    lines.append(f"  offline: "
+                 f"{'YES' if diag.get('offline') else 'UNKNOWN'}")
+    lines.append(f"  audio storage: {diag.get('audio_storage', 'NONE')}")
+    lines.append(f"  network: "
+                 f"{'NOT REQUIRED' if not diag.get('network_required') else 'REQUIRED'}")
+    lines.append("")
+    if not real:
+        lines.append("Install the lightweight local ASR (no cloud, no "
+                     "telemetry):")
+        lines.append("  pip install pocketsphinx SpeechRecognition")
+        lines.append("Then re-run: airmouse voice-status")
+    if verbose:
+        lines.append("")
+        lines.append("Commands that use this stack:")
+        lines.append("  airmouse transcribe          # MIC LIVE when a real "
+                     "provider + mic exist")
+        lines.append("  airmouse transcribe --text   # explicit TEXT PRACTICE")
+        lines.append("  airmouse transcribe --mic N  # pick an input device")
+        lines.append("  airmouse teach voice         # lessons through the "
+                     "real pipeline")
     return "\n".join(lines)
 
 

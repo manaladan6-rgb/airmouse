@@ -6,25 +6,35 @@ normalization → storage.  :class:`TranscribeSession` wraps the shipped
 :class:`airmouse.transcription.LiveTranscriptionEngine` and the §6
 controls around it:
 
-* **Provider selection is honest**: a real LOCAL ASR engine
-  (``voice_stack.pick_provider``) is used when one is installed, wrapped
-  through :class:`airmouse.transcription.StreamingProviderAdapter`;
-  otherwise the deterministic :class:`SimulatedStreamingProvider` runs
-  under a loud banner — ``SIMULATED provider — install a local ASR
-  engine for real transcription (see: airmouse voice-status)``.  The
-  session never pretends a simulated stream is real ASR.
+* **Provider selection is THE REGISTRY's job (v16.5.2 §2/§3)**: the
+  session calls the authoritative
+  :class:`airmouse.asr_registry.ASRProviderRegistry.select()` — the
+  exact same implementation ``doctor`` reports from, so the invariant
+  ``doctor.active_provider == transcribe.selected_provider`` holds by
+  construction.  A real LOCAL ASR engine is wrapped through
+  :class:`airmouse.transcription.StreamingProviderAdapter`; the
+  deterministic :class:`SimulatedStreamingProvider` runs ONLY when no
+  usable provider initialized (mission §0 rule 10) — under a loud
+  banner that says exactly WHY each engine was rejected and what to
+  do about it.  The session never pretends a simulated stream is real
+  ASR and never silently downgrades REAL → SIMULATED.
 * **Works headless**: there is no microphone in a sandbox, so the REPL
   runs in TEXT-INPUT mode — typed lines are pushed through the FULL
   provider pipeline (push → word-by-word partials → finalize) exactly
-  like spoken utterances would be.  Microphone capture itself remains
-  **PHYSICAL TEST REQUIRED** and is labelled as such.
+  like spoken utterances would be.  ``--text`` forces this mode
+  explicitly (labelled TEXT PRACTICE, §6).
+* **MIC LIVE mode**: when the registry selected a real provider AND
+  the unified microphone detector finds input hardware, a bare Enter
+  records one REAL utterance (sounddevice-first capture → VAD → local
+  ASR → partial → final, with timestamp; confidence shown as
+  ``unavailable`` when the engine supplies none, §12).
 * **Privacy by construction**: history is BOUNDED (default 500
   segments), nothing is written unless the user explicitly says
   ``save`` — and only the finalized TEXT segments are written to
   ``paths.transcripts_dir()/transcript-<unixts>.txt|.json``.  NO AUDIO
   IS EVER STORED.
 
-``run_transcribe(...)`` is the interactive text-REPL control loop
+``run_transcribe(...)`` is the interactive control loop
 (pause / resume / save [json] / clear / status / stop / quit; any other
 text is treated as a spoken utterance).  rc 0 on clean stop/quit.
 ``render_transcript_panel`` is the pure §6-style panel renderer.
@@ -54,15 +64,47 @@ __all__ = [
 
 DEFAULT_HISTORY_LIMIT = 500
 
-_SIMULATED_BANNER = ("SIMULATED provider — install a local ASR engine for "
-                     "real transcription (see: airmouse voice-status)")
+_SIMULATED_BANNER = ("SIMULATED provider — real transcription is not "
+                     "available on this machine (see: airmouse "
+                     "voice-status --verbose)")
 _PHYSICAL_NOTE = ("live microphone capture is PHYSICAL TEST REQUIRED; "
                   "this session exercises the pipeline via text input")
 _TEXT_INPUT_NOTE = "text-input mode (microphone capture needs hardware)"
+_TEXT_PRACTICE_NOTE = ("TEXT PRACTICE — typed input through the real "
+                       "pipeline; this is NOT microphone validation")
 
 _COMMANDS_LINE = ("commands: pause | resume | save [json] | clear | status "
                   "| stop | quit — any other text is treated as a spoken "
                   "utterance")
+
+
+# ---------------------------------------------------------------------------
+# §7 — WHY no real provider (honest per-engine reasons, never hidden)
+# ---------------------------------------------------------------------------
+
+def _provider_failure_lines(prefer: Optional[str] = None) -> List[str]:
+    """Per-engine WHY lines from THE registry when selection failed.
+
+    Never raises, never invents — the reasons are exactly what the
+    registry's discovery recorded (import failure, initialization
+    failure, not installed, disabled by configuration).
+    """
+    lines: List[str] = []
+    try:
+        from .asr_registry import registry
+        d = registry.discover()
+        for name, row in d.items():
+            if row.state == "DISABLED":
+                lines.append(f"{name}: DISABLED — {row.reason}")
+            elif row.state == "NOT_INSTALLED":
+                lines.append(f"{name}: NOT INSTALLED")
+            elif row.state == "FAILED":
+                lines.append(f"{name}: INITIALIZATION FAILED — {row.reason}")
+            else:
+                lines.append(f"{name}: {row.state}")
+    except Exception as exc:
+        lines.append(f"provider registry unavailable: {exc}")
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +126,8 @@ class TranscribeSession:
                  provider: Optional[Any] = None,
                  simulate: bool = False,
                  history_limit: int = DEFAULT_HISTORY_LIMIT,
-                 engine: Optional[LiveTranscriptionEngine] = None) -> None:
+                 engine: Optional[LiveTranscriptionEngine] = None,
+                 prefer: Optional[str] = None) -> None:
         self.history_limit = max(1, int(history_limit))
         self._saved: List[str] = []
 
@@ -102,7 +145,10 @@ class TranscribeSession:
             picked: Optional[OfflineSpeechProvider] = None
             if not simulate:
                 try:
-                    picked = _voice_stack.pick_provider()
+                    # v16.5.2 §2/§3 — THE authoritative registry (the
+                    # same instance doctor reports from)
+                    from .asr_registry import registry
+                    picked = registry.select(prefer=prefer)
                 except Exception:
                     picked = None
             if picked is not None:
@@ -112,6 +158,14 @@ class TranscribeSession:
 
         self.stream = stream
         self.simulated = isinstance(stream, SimulatedStreamingProvider)
+
+        # v16.5.2 §7 — WHY no real provider was selected (honest).
+        # Only computed when simulation was NOT explicitly requested:
+        # a forced --offline run must not claim the machine lacks ASR.
+        self.simulate_requested = bool(simulate)
+        self.selection_detail: List[str] = []
+        if self.simulated and not simulate:
+            self.selection_detail = _provider_failure_lines(prefer)
 
         self.engine = engine or LiveTranscriptionEngine()
         # assign the stream directly: the simulated provider is exercised
@@ -128,6 +182,17 @@ class TranscribeSession:
             self.engine.start()
         except Exception:
             pass
+
+    @property
+    def selected_provider(self) -> str:
+        """Name of the provider this session ACTUALLY runs (invariant).
+
+        When a real engine is active this equals
+        ``doctor.active_provider`` (mission §16); when simulation is
+        running it is ``"simulated_stream"`` — never a real engine's
+        name.
+        """
+        return self.provider_name
 
     # -- recording -----------------------------------------------------------
 
@@ -410,38 +475,39 @@ def _safe_capture(capture: Callable[[], Any]
         return text, 0.95
 
 
-def _make_mic_capture(session: "TranscribeSession"
-                      ) -> Optional[Callable[[], Any]]:
+def _make_mic_capture(session: "TranscribeSession",
+                      device: Optional[str] = None,
+                      ) -> Tuple[Optional[Callable[[], Any]], str]:
     """Build the REAL microphone ear for the session's provider.
 
-    Microphone capture via SpeechRecognition (PyAudio) → the session's
-    local ASR engine — the §8 pipeline.  ``None`` when capture cannot
-    start (honest fallback to text mode).  Never raises.
+    v16.5.2 (mission §4/§5): sounddevice-first capture through
+    :mod:`airmouse.mic_capture` (VAD-bounded utterances), with the
+    legacy SpeechRecognition/PyAudio ear as fallback.  Returns
+    ``(capture_or_None, reason)`` — ``reason`` explains WHY capture
+    could not start so the caller can be honest instead of silently
+    downgrading to text mode.  Never raises.
     """
     provider = getattr(getattr(session.stream, "provider", None),
                        "provider", getattr(session.stream, "provider", None))
     # StreamingProviderAdapter exposes the wrapped OfflineSpeechProvider
-    # as ``.provider``; fall back to a fresh pick when unavailable.
+    # as ``.provider``; fall back to the registry's selection otherwise.
     if not isinstance(provider, OfflineSpeechProvider):
         try:
-            provider = _voice_stack.pick_provider()
+            from .asr_registry import registry
+            provider = registry.select()
         except Exception:
             provider = None
     if provider is None:
-        return None
+        return None, "no local ASR provider is active"
     try:
-        import speech_recognition as _sr  # noqa: F401 — capability probe
+        from .mic_capture import capture_transcript
     except Exception:
-        return None
-    try:
-        from .voice_academy import _capture_transcript
-    except Exception:
-        return None
+        return None, "microphone capture module unavailable"
 
     def _one() -> Any:
-        return _capture_transcript(provider, timeout_s=6.0)
+        return capture_transcript(provider, device=device, timeout_s=6.0)
 
-    return _one
+    return _one, ""
 
 
 def run_transcribe(out: Any = None,
@@ -449,24 +515,32 @@ def run_transcribe(out: Any = None,
                    simulate: bool = False,
                    feed: Optional[Iterable[str]] = None,
                    mic_mode: Optional[bool] = None,
-                   capture_fn: Optional[Callable[[], Any]] = None) -> int:
+                   capture_fn: Optional[Callable[[], Any]] = None,
+                   text_mode: Optional[bool] = None,
+                   mic_device: Optional[str] = None,
+                   prefer_provider: Optional[str] = None) -> int:
     """Interactive transcription session (§8 — auto real mic when possible).
 
-    Mode resolution (honest, automatic):
+    Mode resolution (honest, automatic, deterministic):
 
     * ``mic_mode=None`` (default) — MIC LIVE MODE is used automatically
       when a microphone AND a real local ASR engine are both available;
       otherwise the text-REPL runs (typed lines through the full
-      provider pipeline).
-    * ``simulate=True`` forces the simulated provider and text mode.
+      provider pipeline, labelled TEXT PRACTICE / TEXT-INPUT).
+    * ``text_mode=True`` (CLI ``--text``) forces TEXT PRACTICE — typed
+      input through the real pipeline, explicitly labelled as NOT
+      microphone validation (mission §6).
+    * ``simulate=True`` (CLI ``--offline``) forces the simulated
+      provider AND text mode — simulation never claims MIC LIVE.
     * ``capture_fn`` injects the ear (tests); it implies mic mode.
+    * ``mic_device`` selects the input device (mission §13).
+    * ``prefer_provider`` is the explicit provider choice (CLI
+      ``--provider``, config ``[voice] asr_provider``, env
+      ``AIRMOUSE_ASR_PROVIDER`` — the registry resolves precedence).
 
-    The banner always states the provider, the mode and — in text mode —
-    the PHYSICAL TEST REQUIRED note for live capture.  Commands work in
-    both modes: pause | resume | save [json] | clear | status | stop |
-    quit.  In MIC LIVE MODE a bare Enter records one spoken utterance
-    (Microphone → VAD → local ASR → partial → final, with confidence +
-    timestamp); typed text still works as an utterance fallback.
+    When no real provider can be selected the banner says so loudly and
+    shows WHY each engine was rejected + the FIX (mission §7) — the
+    session NEVER silently downgrades REAL LOCAL ASR to SIMULATED.
 
     Returns 0 on a clean stop/quit/EOF; 1 only on an unexpected error.
     """
@@ -477,40 +551,60 @@ def run_transcribe(out: Any = None,
     except Exception:
         pass
     try:
-        session = TranscribeSession(simulate=simulate)
+        session = TranscribeSession(simulate=simulate,
+                                    prefer=prefer_provider)
     except Exception as exc:  # pragma: no cover - defensive
         _emit(out, f"transcribe session failed to start: {exc}")
         return 1
 
-    # §8 — automatic mode resolution
+    # §8 — automatic mode resolution (v16.5.2: deterministic + honest)
     live = mic_mode
+    if simulate:
+        live = False  # simulate forces text mode — regression-proof
+    if text_mode:
+        live = False
     if live is None:
         live = False
         if not simulate and not session.simulated:
             try:
-                from .voice_stack import detect_voice_stack
-                live = bool(detect_voice_stack().get("microphone"))
+                from .asr_registry import detect_microphone
+                live = bool(detect_microphone().get("available"))
             except Exception:
                 live = False
     if capture_fn is not None:
         live = True
     capture: Optional[Callable[[], Any]] = capture_fn
+    mic_fail_reason = ""
     if live and capture is None:
-        capture = _make_mic_capture(session)
+        capture, mic_fail_reason = _make_mic_capture(session,
+                                                     device=mic_device)
         if capture is None:      # mic capture could not start — honest
             live = False
-            _emit(out, "⚠ microphone capture could not start — falling "
-                       "back to TEXT-INPUT mode (honestly labelled)")
+            _emit(out, f"⚠ microphone capture could not start — falling "
+                       f"back to TEXT-INPUT mode ({mic_fail_reason})")
 
     _emit(out, "══ LIVE TRANSCRIPTION ══")
     if session.simulated:
         _emit(out, f"provider: {session.provider_name}")
-        _emit(out, f"⚠ {_SIMULATED_BANNER}")
+        if session.simulate_requested:
+            _emit(out, "⚠ SIMULATED provider — requested via --offline "
+                       "(deterministic test provider; this is NOT real "
+                       "ASR)")
+        else:
+            _emit(out, f"⚠ {_SIMULATED_BANNER}")
+            # v16.5.2 §7 — WHY + FIX, never a bare "using defaults"
+            for why in session.selection_detail:
+                _emit(out, f"  WHY: {why}")
+            _emit(out, "  FIX: airmouse voice-status --verbose   (install: "
+                       "pip install pocketsphinx SpeechRecognition)")
     else:
         _emit(out, f"provider: {session.provider_name} (local ASR engine)")
     if live:
         _emit(out, "mode: MIC LIVE — speak one utterance per Enter; "
                    "typed commands still work")
+    elif text_mode and not session.simulated:
+        _emit(out, "mode: TEXT PRACTICE")
+        _emit(out, _TEXT_PRACTICE_NOTE)
     else:
         _emit(out, _TEXT_INPUT_NOTE)
         if not session.simulated:
@@ -573,14 +667,14 @@ def run_transcribe(out: Any = None,
                     seg = session.utterance(text, conf)
                     if seg is not None:
                         _emit(out, f'  [{_hhmmss(seg.end_ts)}] '
-                                   f"{max(0.0, min(1.0, seg.confidence)):.0%} "
+                                   f"{_conf_str(seg)} "
                                    f'"{seg.text}"  (final)')
                     continue
                 continue
             seg = session.utterance(line)
             if seg is not None:
                 _emit(out, f'  [{_hhmmss(seg.end_ts)}] '
-                           f"{max(0.0, min(1.0, seg.confidence)):.0%} "
+                           f"{_conf_str(seg)} "
                            f'"{seg.text}"')
             elif session.state == "paused":
                 _emit(out, "(paused — utterance ignored; say 'resume' to "
@@ -597,15 +691,17 @@ def run_transcribe(out: Any = None,
 
     segs = session.segments()
     words = sum(len(str(_seg_field(s, "text", "")).split()) for s in segs)
+    known = [float(_seg_field(s, "confidence", 0.0)) for s in segs
+             if _seg_field(s, "confidence_known", True)]
     try:
-        avg_conf = (sum(float(_seg_field(s, "confidence", 0.0)) for s in segs)
-                    / len(segs)) if segs else 0.0
+        avg_conf = (sum(known) / len(known)) if known else 0.0
     except Exception:
         avg_conf = 0.0
+    avg_str = f"{avg_conf:.0%}" if known else "unavailable"
     _emit(out)
     _emit(out, "─ transcript summary ─")
     _emit(out, f"segments: {len(segs)}   words: {words}   "
-               f"avg confidence: {avg_conf:.0%}   "
+               f"avg confidence: {avg_str}   "
                f"provider: {session.provider_name}   "
                f"mode: {'simulated' if session.simulated else 'local ASR'}"
                f"{' + mic live' if live else ''}")
@@ -615,3 +711,14 @@ def run_transcribe(out: Any = None,
         _emit(out, "(nothing was transcribed this session)")
     _emit(out, "session ended cleanly (no audio was ever stored)")
     return 0
+
+
+def _conf_str(seg: Any) -> str:
+    """§12 — real confidence as %, otherwise the honest 'unavailable'."""
+    if not _seg_field(seg, "confidence_known", True):
+        return "conf: unavailable"
+    try:
+        conf = max(0.0, min(1.0, float(_seg_field(seg, "confidence", 0.0))))
+        return f"{conf:.0%}"
+    except Exception:
+        return "conf: unavailable"

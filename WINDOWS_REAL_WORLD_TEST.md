@@ -663,6 +663,80 @@ can't decode byte 0x97 in position 30`).
   having to guess; the gaze fix command works when run.
 - **FAIL:** any row that only says "using defaults"-style text.
 
+## Step 16i — v16.5.2 lightweight local voice runtime (THE hotfix drill)
+
+This is the regression drill for the v16.5.1 defect where
+`doctor` reported `pocketsphinx [ACTIVE]` while `airmouse transcribe`
+still launched `provider: simulated_stream`.
+
+- **COMMAND:** `airmouse voice-status --verbose`
+- **WHAT SHOULD HAPPEN:** the v16.5.2 §8 view, all from ONE registry:
+  `MICROPHONE` shows `✓ detected`, `devices: 6`, the selected device
+  name, `backend: sounddevice/PortAudio`, sample rate + channels.
+  `ASR PROVIDERS` shows PocketSphinx with `installed: YES`,
+  `importable: YES`, `model: available (bundled en-US…)`,
+  `initialization: PASS`, `runtime: READY`, `role: ACTIVE` (plus the
+  probe time under `--verbose`; vosk/whisper rows honestly say
+  `installed: NO … role: OPTIONAL` unless you installed them).
+  `TRANSCRIPTION` shows `real microphone: AVAILABLE`,
+  `provider: pocketsphinx`, `mode: MIC LIVE`, `offline: YES`,
+  `audio storage: NONE`, `network: NOT REQUIRED`.
+- **PASS:** `initialization: PASS` + `role: ACTIVE` on PocketSphinx
+  (a REAL decoder build, not an import flag) and
+  `real microphone: AVAILABLE`.
+- **FAIL / honest alternate:** if PocketSphinx shows
+  `initialization: FAIL` the row carries the exact reason + the
+  `pip install pocketsphinx SpeechRecognition` fix — that is an
+  HONEST report (record it), not a software bug.
+
+- **COMMAND:** `airmouse transcribe`
+- **WHAT SHOULD HAPPEN:**
+  `══ LIVE TRANSCRIPTION ══` →
+  `provider: pocketsphinx (local ASR engine)` →
+  `mode: MIC LIVE — speak one utterance per Enter; typed commands
+  still work` → `Listening...`.  Press Enter and speak; the utterance
+  goes Microphone → sounddevice → VAD → PocketSphinx → transcript +
+  timestamp (confidence shows `conf: unavailable` — PocketSphinx
+  supplies none, and AirMouse never invents one).
+- **PASS:** the provider line names a real engine and a spoken
+  "hello bro" produces a final transcript segment.  **THE INVARIANT:**
+  the engine named here is exactly the one `voice-status` and
+  `doctor` report as ACTIVE.
+- **FAIL:** `provider: simulated_stream` while `voice-status` shows
+  PocketSphinx `role: ACTIVE` — that is the v16.5.1 bug; any
+  recurrence is a release blocker.
+
+- **COMMAND:** inside the same session, speak/verify the three
+  mission utterances:
+  1. `hello bro this is a real AirMouse voice test` — must appear as
+     a final segment (real ASR, real transcript).
+  2. `open browser` — must appear as a final segment and (voice
+     control live) resolve through the grammar to the OPEN intent.
+  3. `hello bro comma how are you question mark` — dictation chain:
+     spoken punctuation → capitalization →
+     `Hello bro, how are you?`
+- **PASS:** all three produce finals; the summary line reports the
+  session honestly (`provider: pocketsphinx`, `no audio was ever
+  stored`).
+- **FAIL:** finals that appear without audio reaching the engine
+  (they cannot — text fallback is only for typed lines) or a crash.
+
+- **COMMAND:** `airmouse transcribe --text`
+- **WHAT SHOULD HAPPEN:** `mode: TEXT PRACTICE` +
+  `TEXT PRACTICE — typed input through the real pipeline; this is
+  NOT microphone validation`.  Typed lines behave exactly like the
+  text-input mode above.
+- **PASS:** the label is unambiguous.
+- **FAIL:** any wording that calls typed input microphone-validated.
+
+- **COMMAND:** `airmouse doctor --verbose`
+- **WHAT SHOULD HAPPEN (cross-check):**
+  `Transcription providers … READY — local ASR: pocketsphinx
+  [ACTIVE — initialization verified (≈0.4s)]`, and the Microphone
+  row names the backend + device count.  The engine name matches
+  `voice-status` and `transcribe` — one registry, one truth.
+- **PASS:** all three commands name the SAME engine.
+
 ## Step 17 — Recovery and offline tests (simulation)
 
 - **COMMAND:** in the lab, tests **[11/12] Recovery** and **[12/12]
@@ -743,21 +817,31 @@ the hardware is missing); v16.5.1 Steps 16e–16h recorded (16e's
 repair-preserves-content and 16h's WHY/FIX rows are mandatory
 PASSes; 16f/16g's real-microphone passes require a real mic + local
 ASR engine and stay recorded-as-attempted if the hardware is
-missing). Steps 14, 16, 17 must PASS (they are
+missing); **v16.5.2 Step 16i recorded — 16i's invariant (doctor,
+voice-status and transcribe all name the SAME engine) and the
+TEXT-PRACTICE labelling are mandatory PASSes; a recurrence of
+`simulated_stream` while PocketSphinx is ACTIVE is a release
+blocker.  16i's spoken-utterance passes require a real mic + local
+ASR engine and stay recorded-as-attempted if the hardware is
+missing.**  Steps 14, 16, 17 must PASS (they are
 simulation tests — a FAIL here is a software bug, not a hardware
 quirk).
 
 ---
 
-*Honesty footer: AirMouse v16.5.1 — 1957 automated tests green (1
-honest headless skip), simulation suite green, `airmouse verify`
-12/12 automated PASS in the build sandbox; the v16.5.0 Windows
-encoding defect (`0x97` at byte 30) is reproduced byte-for-byte and
-repaired in automated tests, and the repair drill (16e) recreates it
-on real Windows. Physical hardware (webcam,
-microphone, hand tracking, two-hand geometry, gaze, real browser,
-real OS input automation, the v16.5 teaching tour with real sensors,
-live ASR engines, live mic transcription, the temporal HUD under a
-real camera, Windows
-bundles) was NOT tested in the sandbox and CANNOT be — that is what
-this document is for. Windows runtime was not tested in the sandbox.*
+*Honesty footer: AirMouse v16.5.2 — 1992 automated tests green (2
+honest headless skips), simulation suite green, `airmouse verify`
+12/12 automated PASS in the build sandbox.  The v16.5.1
+provider-divergence defect (doctor `pocketsphinx [ACTIVE]` via a
+hasattr flag vs transcribe `simulated_stream`) is reproduced in a
+regression test and fixed by the single authoritative ASR registry;
+the v16.5.0 Windows encoding defect (`0x97` at byte 30) remains
+reproduced byte-for-byte and repaired in automated tests. Physical
+hardware (webcam, microphone, hand tracking, two-hand geometry,
+gaze, real browser, real OS input automation, the v16.5 teaching
+tour with real sensors, live ASR engines, live mic transcription,
+the temporal HUD under a real camera, Windows bundles) was NOT
+tested in the sandbox and CANNOT be — that is what this document is
+for; the real-mic parts of Step 16i are exactly where the lightweight
+local voice runtime must prove itself. Windows runtime was not
+tested in the sandbox.*

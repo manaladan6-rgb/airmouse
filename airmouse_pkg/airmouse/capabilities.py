@@ -696,44 +696,45 @@ def _detect_camera(quick: bool) -> List[Component]:
 
 
 def _detect_microphone(quick: bool) -> List[Component]:
-    ok, info = _try_import("sounddevice", quick=quick)
-    if not ok:
-        state = (ComponentState.NOT_INSTALLED if "not installed" in info
-                 else ComponentState.WARNING)
-        return [_component(
-            "Microphone", "MICROPHONE", state,
-            f"sounddevice unavailable: {info}",
-            'pip install "airmouse[sound]"')]
+    # v16.5.2 §3 — ONE unified microphone detector (sounddevice-first,
+    # PyAudio fallback) shared with voice-status / transcribe / academies
     try:
-        import sounddevice as sd  # noqa: F401
-        devices = sd.query_devices()
-        inputs = 0
-        try:
-            for d in list(devices):
-                try:
-                    if int(d.get("max_input_channels", 0)) > 0:
-                        inputs += 1
-                except Exception:
-                    continue
-        except Exception:
-            inputs = 0
-        if inputs > 0:
-            return [_component(
-                "Microphone", "MICROPHONE", ComponentState.READY,
-                f"{inputs} input device(s) via PortAudio",
-                hardware_state="MICROPHONE DETECTED")]
+        from .asr_registry import detect_microphone
+        m = detect_microphone()
+    except Exception:
+        return [_component(
+            "Microphone", "MICROPHONE", ComponentState.WARNING,
+            "unified microphone detection failed",
+            "check the audio subsystem, then re-run airmouse doctor")]
+    if not m.get("backend"):
+        err = m.get("error") or "sounddevice and PyAudio unavailable"
+        return [_component(
+            "Microphone", "MICROPHONE", ComponentState.NOT_INSTALLED,
+            f"no audio backend available: {err}",
+            'pip install "airmouse[sound]"')]
+    if m.get("error") and not m.get("available"):
         return [_component(
             "Microphone", "MICROPHONE", ComponentState.HARDWARE,
-            "PortAudio works but reported no input devices",
-            "connect a microphone (and grant mic permission), then "
-            "re-run airmouse doctor",
-            hardware_state="UNAVAILABLE")]
-    except Exception as exc:
-        return [_component(
-            "Microphone", "MICROPHONE", ComponentState.HARDWARE,
-            f"audio subsystem probe failed: {exc}",
+            f"backend present but probe failed: {m['error']}",
             "check your audio drivers (PortAudio) and microphone "
             "permissions")]
+    if m.get("available"):
+        first = (m.get("devices") or [{}])[0].get("name", "")
+        default = m.get("default_input")
+        detail = f"{m['device_count']} input device(s) via {m['backend']}"
+        if first:
+            detail += f" — first: {first[:48]}"
+        if default is not None:
+            detail += f" (default #{default})"
+        return [_component(
+            "Microphone", "MICROPHONE", ComponentState.READY, detail,
+            hardware_state="MICROPHONE DETECTED")]
+    return [_component(
+        "Microphone", "MICROPHONE", ComponentState.HARDWARE,
+        f"{m['backend']} works but reported no input devices",
+        "connect a microphone (and grant mic permission), then "
+        "re-run airmouse doctor",
+        hardware_state="UNAVAILABLE")]
 
 
 def _detect_speech(quick: bool) -> List[Component]:
@@ -777,23 +778,55 @@ def _detect_speech(quick: bool) -> List[Component]:
             "reinstall airmouse"))
 
     try:
-        from .offline_voice import detect_providers
-        provs = detect_providers()
-        usable = sorted(k for k, v in provs.items() if v)
-        real = [k for k in usable if k != "simulated"]
-        if real:
+        # v16.5.2 §2/§3 — THE authoritative registry.  doctor reports
+        # exactly what the transcribe runtime selects through, so the
+        # invariant doctor.active_provider == transcribe.selected_provider
+        # holds by construction.  ACTIVE requires a REAL initialization
+        # pass (the anti-hasattr fix for the Windows divergence).
+        from .asr_registry import registry
+        d = registry.discover()
+        active = registry.active()
+        # installed-but-broken engines are ALWAYS surfaced as WARNING
+        # with their exact reason + FIX (§7: failure must be honest)
+        failed = [n for n, r in d.items()
+                  if r.state == "FAILED" and n != active]
+        for n in failed:
+            comps.append(_component(
+                f"ASR engine {n}", "SPEECH", ComponentState.WARNING,
+                f"installed but initialization FAILED — {d[n].reason}",
+                "run: airmouse voice-status --verbose; reinstall the "
+                f"engine (pip install {n}) if the error persists",
+                hardware_state="FAILED"))
+        if active:
+            row = d[active]
+            init = f"initialization verified ({row.init_seconds:.2f}s)" \
+                if row.initialization == "PASS" else "import verified " \
+                                                   "(model loads on first use)"
             comps.append(_component(
                 "Transcription providers", "SPEECH", ComponentState.READY,
-                f"local ASR: {', '.join(real)}",
+                f"local ASR: {active} [ACTIVE — {init}]",
                 hardware_state="ACTIVE"))
         else:
-            comps.append(_component(
-                "Transcription providers", "SPEECH",
-                ComponentState.OPTIONAL,
-                "simulated provider only (deterministic, offline)",
-                "optional: pip install vosk / openai-whisper / "
-                "pocketsphinx for real local ASR",
-                hardware_state="NOT INSTALLED"))
+            disabled = any(r.state == "DISABLED" for r in d.values())
+            if disabled:
+                comps.append(_component(
+                    "Transcription providers", "SPEECH",
+                    ComponentState.OPTIONAL,
+                    "ASR engines disabled by configuration "
+                    "([voice] asr_provider = 'none')",
+                    "set [voice] asr_provider in the config (or remove the "
+                    "key) to re-enable local ASR",
+                    hardware_state="DISABLED"))
+            else:
+                comps.append(_component(
+                    "Transcription providers", "SPEECH",
+                    ComponentState.OPTIONAL,
+                    "no usable local ASR engine (detection = real "
+                    "initialization probe, not an import flag)",
+                    "optional: pip install pocketsphinx SpeechRecognition "
+                    "for the lightweight local ASR (see: airmouse "
+                    "voice-status)",
+                    hardware_state="NOT INSTALLED"))
     except Exception as exc:
         comps.append(_component(
             "Transcription providers", "SPEECH", ComponentState.WARNING,

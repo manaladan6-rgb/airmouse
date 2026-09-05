@@ -77,11 +77,31 @@ def test_cli_learn_runs_all_academies(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_cli_transcribe_eof_clean(monkeypatch, tmp_path):
+    """--offline forces the deterministic test provider: rc 0, honest
+    SIMULATED labelling, never a traceback (env-independent)."""
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))  # immediate EOF
-    rc, out = _run_cli(monkeypatch, tmp_path, ["transcribe"], expect_rc=0)
+    rc, out = _run_cli(monkeypatch, tmp_path, ["transcribe", "--offline"],
+                       expect_rc=0)
     assert "LIVE TRANSCRIPTION" in out
     # honesty: simulated provider is labelled, never passed off as ASR
     assert "SIMULATED" in out
+    assert "simulated_stream" in out
+
+
+def test_cli_transcribe_provider_matches_registry(monkeypatch, tmp_path):
+    """THE v16.5.2 invariant at CLI level: whatever the authoritative
+    registry reports as ACTIVE is exactly what transcribe runs."""
+    from airmouse.asr_registry import active_asr_provider
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    rc, out = _run_cli(monkeypatch, tmp_path, ["transcribe"], expect_rc=0)
+    active = active_asr_provider()
+    if active == "Built-in command recognition":
+        # no ASR engine usable on this machine: simulation + WHY/FIX
+        assert "simulated_stream" in out
+        assert "SIMULATED" in out
+    else:
+        assert f"provider: {active} (local ASR engine)" in out
+        assert "SIMULATED provider" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -107,9 +127,19 @@ def test_cli_help_me_question(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_cli_voice_status_provider_panel(monkeypatch, tmp_path):
+    """v16.5.2 §8 — voice-status is the authoritative debugging view:
+    same registry as doctor/transcribe, honest per-provider rows."""
+    from airmouse.asr_registry import active_asr_provider
     rc, out = _run_cli(monkeypatch, tmp_path, ["voice-status"], expect_rc=0)
-    assert "Built-in command recognition" in out
-    assert "Active:" in out
+    for section in ("MICROPHONE", "ASR PROVIDERS", "TRANSCRIPTION"):
+        assert section in out
+    assert "offline: YES" in out
+    assert "audio storage: NONE" in out
+    assert "network: NOT REQUIRED" in out
+    active = active_asr_provider()
+    if active != "Built-in command recognition":
+        assert f"provider: {active}" in out
+        assert "role: ACTIVE" in out
 
 
 def test_cli_privacy_personalization_summary(monkeypatch, tmp_path):

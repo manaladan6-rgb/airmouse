@@ -39,7 +39,7 @@ __all__ = [
     "profile_interaction_file", "profile_voice_file",
     "profile_gaze_file", "profile_gestures_file",
     "profile_preferences_file",
-    "transcripts_dir",
+    "transcripts_dir", "asr_provider_file",
 ]
 
 #: the single environment variable that overrides the home directory
@@ -176,3 +176,14 @@ def profile_preferences_file() -> str:
 def transcripts_dir() -> str:
     """Directory of user-saved transcription sessions (transcripts/)."""
     return _join("transcripts")
+
+
+def asr_provider_file() -> str:
+    """Persisted working-ASR-provider state (asr_provider.json) — v16.5.2.
+
+    Selection priority 2 of the authoritative registry: the provider
+    that last actually worked is retried first (after explicit user
+    configuration).  Best-effort state only — its absence never
+    disables anything.
+    """
+    return _join("asr_provider.json")

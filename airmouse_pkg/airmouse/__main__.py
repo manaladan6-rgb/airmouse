@@ -581,11 +581,22 @@ def main():
     parser.add_argument("--guided", action="store_true",
                         help="test: run the interactive guided laboratory")
     parser.add_argument("--verbose", action="store_true",
-                        help="doctor: show per-section detail and fixes")
+                        help="doctor: show per-section detail and fixes; "
+                             "voice-status: per-provider probe detail")
     parser.add_argument("--repair-config", action="store_true",
                         dest="repair_config",
                         help="setup: safely repair a broken/legacy-encoded "
                              "config (backup → repair → validate → report)")
+    # ═══ v16.5.2 — transcribe mode/provider flags (mission §6/§2/§13) ═══
+    # (--mic already exists above: v5 microphone index — reused here)
+    parser.add_argument("--text", action="store_true",
+                        help="transcribe: force TEXT PRACTICE (typed input "
+                             "through the real pipeline — explicitly NOT "
+                             "microphone validation)")
+    parser.add_argument("--provider", type=str, default=None,
+                        help="transcribe: explicit local ASR provider "
+                             "(pocketsphinx | vosk | whisper; overrides "
+                             "config/env)")
     parser.add_argument("--json", action="store_true",
                         help="doctor/privacy: machine-readable output")
     parser.add_argument("--to", type=str, default=None,
@@ -807,7 +818,12 @@ def main():
     # ═══ v16.5 — live transcription session (§6) ═══
     if args.command == "transcribe":
         from .transcribe_session import run_transcribe
-        return int(run_transcribe(simulate=bool(args.offline)))
+        mic = getattr(args, "mic", None)
+        return int(run_transcribe(
+            simulate=bool(getattr(args, "offline", False)),
+            text_mode=bool(getattr(args, "text", False)),
+            mic_device=(str(mic) if mic is not None else None),
+            prefer_provider=getattr(args, "provider", None)))
 
     # ═══ v16.5 — contextual help answered locally (§20) ═══
     if args.command == "help-me":
@@ -1110,19 +1126,15 @@ def main():
             print("  no custom mappings (define: see docs §custom gestures)")
         return
     if args.command == "voice-status":
-        from .offline_voice import OfflineVoiceEngine, detect_providers
-        eng = OfflineVoiceEngine({})
-        print(f"  mode: {eng.mode.value}  wake_word_required: {eng.wake_word_required}")
-        print(f"  offline ASR providers: {detect_providers()}")
-        # v16.5: the honest provider panel (built-in grammar vs full ASR)
+        # v16.5.2 §8 — the authoritative voice debugging tool.  ONE call
+        # to THE registry: same detection doctor and transcribe use.
         try:
-            from .voice_stack import status_panel
-            for _line in status_panel().splitlines():
-                print(f"  {_line}")
-        except Exception:
-            pass
-        print("  live engine status requires a running session (HUD / diagnostics)")
-        return
+            from .voice_stack import render_voice_status
+            print(render_voice_status(verbose=bool(args.verbose)))
+        except Exception as exc:
+            print(f"  voice-status failed: {exc}")
+            return 1
+        return 0
     if args.command == "browser":
         from .browser import CDPBrowserBridge
         cdp = CDPBrowserBridge(port=9222)
