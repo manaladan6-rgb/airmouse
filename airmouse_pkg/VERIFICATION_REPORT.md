@@ -1,8 +1,220 @@
-# AirMouse v16.0.0 — Final Verification Report (release candidate)
+# AirMouse v16.5.0 — Final Verification Report (release candidate)
 
 ---
 
-# v16.0.0 Gesture-First Release Verification
+# v16.5.0 Adaptive Multimodal Intelligence Verification
+
+Date: 2026-09-05 (build environment: Linux x86_64 headless sandbox,
+Python 3.12.14). Scope: the v16.5.0 "Adaptive Multimodal Intelligence"
+release candidate — the teacher/onboarding system, the honest voice
+stack + live transcription, the temporal gesture observer, the gaze
+academy + personal interaction profile, `help-me`, the READY panel,
+and the privacy-manifest growth 20 → 24. The v16.0.0 gesture surface
+and execution spine are preserved unchanged. Companion:
+`WINDOWS_REAL_WORLD_TEST.md` (repo root), `docs/CAPABILITY_MATRIX.md`,
+`README.md` §Verification status. **Headline honesty statement:
+physical hardware (webcam, microphone, real hand tracking single- and
+two-handed, real gaze, real browser automation, real OS input
+automation, the first-run tour and academy lessons with real sensors,
+live ASR engines, PyInstaller Windows bundles) was NOT tested in this
+sandbox — it cannot be; the validation procedure is handed to the user
+via `WINDOWS_REAL_WORLD_TEST.md` and `airmouse test --guided`.**
+
+## Part 1 — AUTOMATED VERIFICATION
+
+- **Full suite: 1889 passed / 2 skipped / 0 failed** (re-measured on
+  the v16.5.0 release-candidate tree, 23.4 s, pytest). The 2 skips
+  are honest headless skips: no Chrome binary, no tesseract stack in
+  the sandbox. Baseline history: 1056 (v15.0.0) → 1236 (v15.1.0) →
+  1556 (v15.2.0/v16.0.0) → **1889 (v16.5.0)**; the v16.5 wave added
+  the teacher, voice-academy/stack, transcribe, temporal, gaze-academy
+  (68 tests), profile-store (63 tests), help-me, CLI-wiring (11 new
+  real-main() tests) and startup-probe suites — including probes that
+  drive plain `airmouse` to the frame loop with the temporal observer
+  attached, headless, never blocked by the teaching prompt.
+- **`airmouse verify`** (exit 0): **12/12 automated checks PASS** —
+  Core import (v16.5.0); voice grammar + offline engine determinism;
+  intelligence roundtrip; safety gates + e-stop latch + hierarchy (4
+  safety levels); offline selftest 18/18; simulated browser bridge;
+  agent permission deny-by-default; exclusive lease + challenger
+  refusal; AIP malformed-envelope rejection; pyproject/package version
+  match (16.5.0); **Teacher** — "onboarding ladder + honest grading +
+  help + profile store + learning-loop approval gate + transcribe
+  session OK"; **Temporal** — "temporal recognize+features 293.4
+  us/frame (direction right, lifecycle engaged)". The 5 PHYSICAL rows
+  report ACTION_REQUIRED by design (Part 4).
+- **`airmouse --version`** → `AirMouse v16.5.0 — Adaptive
+  Human-Computer Intelligence Edition` (exit 0); help banner matches.
+- **Teacher + onboarding, measured headless runs (all on this tree,
+  isolated `AIRMOUSE_HOME`):**
+  - `airmouse teach` → the 5-track / 11-lesson plan (Voice ×3, Eyes
+    ×2, Hands ×2, Multimodal ×2, Personalization ×2) with every
+    physical lesson marked `PHYSICAL PRACTICE REQUIRED — needs
+    camera/microphone; never auto-passed`, the closing lines
+    `Headless run: nothing was marked complete — physical lessons are
+    NEVER auto-passed.` + the learning-progress panel
+    (`Sessions: 1 • Phase: IN_PROGRESS` + `Resume anytime: airmouse
+    teach ("Skip for now" always works)`), exit 0.
+  - `teach voice` → Voice track only (3 lessons), exit 0; `teach
+    gesture` → Hands track only, exit 0; `teach resume` → exit 0;
+    `teach nope` → `teach track must be: all | voice | gaze |
+    gesture | fusion | resume`, **exit 1**.
+  - `airmouse learn` → the same full multi-academy plan, exit 0.
+  - Persistence measured: `<home>/profile/onboarding.json` written
+    (schema_version 1, `phase: IN_PROGRESS`, per-track dict, session
+    count); ladder order NEW → IN_PROGRESS → VOICE_COMPLETE →
+    GAZE_COMPLETE → GESTURE_COMPLETE → FUSION_COMPLETE → COMPLETE
+    confirmed from `teacher.PHASE_ORDER`. A deliberately corrupted
+    `onboarding.json` (garbage bytes) measured live → phase NEW +
+    `corrupted_last_load: True` (fail-safe, never raises).
+- **Voice stack, measured:**
+  - `airmouse voice-status` (exit 0): legacy provider dict
+    `{simulated: True, pocketsphinx: True, vosk: False, whisper:
+    False}` (the SpeechRecognition sphinx backend wrapper is
+    importable) followed by the v16.5 honest engine-level panel:
+    `✓ Built-in command recognition`, `○ Local ASR available`,
+    `○ Whisper available`, `○ Vosk available`, `○ Microphone
+    detected`, `Active: Built-in command recognition`,
+    `Full speech recognition is not installed.`, `Command recognition
+    still works — it is deterministic grammar, not ASR.` The panel
+    checks the actual engine packages; no engine is installed here.
+  - Voice grammar: 30-phrase deterministic grammar counted live from
+    `voice_control.COMMANDS`; the 75-command / 10-namespace registry
+    is unchanged.
+- **`airmouse transcribe`, measured (piped stdin; rc 0):** banner
+  `provider: simulated_stream` + `⚠ SIMULATED provider — install a
+  local ASR engine for real transcription (see: airmouse
+  voice-status)` + `text-input mode (microphone capture needs
+  hardware)`; typed line became `[12:24:40] 95% "Hello world, this is
+  a test"`; `status` showed `history: 2/500 segments` (bounded) +
+  the transcripts dir; `pause` muted input; `clear` emptied history;
+  `save` → `<home>/transcripts/transcript-<ts>.txt` ("17 bytes, text
+  only — no audio is ever stored"); `save json` → `.json` with
+  segments + confidence + provider + timestamps; EOF → summary +
+  `session ended cleanly (no audio was ever stored)`. No file is
+  written unless the user types `save`.
+- **`airmouse help-me`, measured (rc 0):** overview panel (22-row
+  gesture map incl. the `[refused by default]` OK row and the
+  `NOT MAPPED yet` two-hand note; the 30-phrase grammar with the
+  NOT-ASR note; gaze; teacher; health); `help-me "how do I scroll?"`
+  → the 3 real scroll paths; `help-me "why didn't that work?"` → the
+  gate chain (E-STOP → confidence 0.45/0.60 → destructive policy →
+  0.12 s rate limit → gesture mapping) + `airmouse doctor` pointer.
+- **Privacy, measured:** `privacy_manifest()` length = **24** (was
+  20; +`academy_progress`, `onboarding_state`, `personal_profile`,
+  `transcript_sessions`); `airmouse privacy` prints all with live
+  exists flags and the PERSONALIZATION summary
+  (Gestures learned / Voice patterns / Gaze calibration: Incomplete /
+  Workflows) ending **"Nothing is uploaded."**
+- **Temporal, measured:** the verify Temporal check exercises the
+  real recognizer on synthetic frames each run — 293.4 µs/frame for
+  recognize + features with the pinch lifecycle engaged; `temporal.py`
+  exposes TrajectoryBuffer / PinchLifecycle / TemporalRecognizer /
+  CompositionResolver / Hysteresis / Debouncer /
+  FalsePositiveSuppressor / TrackingRecovery / CameraWatchdog /
+  SensorHealthScore; the live-loop observer (source-verified:
+  PinchLifecycle + TrajectoryBuffer + SensorHealthScore fed every
+  frame → `TMP:`/`SENSOR:` badges + profile learning) dispatches
+  nothing.
+- **`airmouse doctor`** (this tree): READY 32 / OPTIONAL 6 /
+  HARDWARE 2 / WARNING 1 / FAILED 0 → `[PARTIAL — review WARNING
+  items]`. The single WARNING is `Hand tracking model — not downloaded
+  yet` (this reset sandbox has not fetched the ~8 MB model; the
+  documented behaviour since v15.1.0). The OPTIONAL delta vs v16.0.0
+  (7 → 6) is the Speech row, which now reads `Transcription providers
+  READY — local ASR: pocketsphinx` because the SpeechRecognition
+  wrapper's sphinx backend is importable; the engine-level honesty
+  lives in the v16.5 voice-status panel (above).
+
+## Part 2 — SIMULATION VERIFICATION
+
+All simulated runs are honest by contract — labelled at runtime,
+never converted into hardware validation:
+
+- **Transcription without an ASR engine** runs on the deterministic
+  `simulated_stream` provider; the session banner carries
+  `⚠ SIMULATED provider` on every start and the summary reports
+  `mode: simulated` (measured; e.g. `segments: 1 words: 6 avg
+  confidence: 95% provider: simulated_stream mode: simulated`).
+- **Temporal recognizer measurements** run on synthetic sample
+  streams (deterministic landmark sequences) — this proves the
+  software path and its timing, never camera behaviour. The verify
+  Temporal check, the gaze-academy simulated dry-runs (every result
+  labelled SIMULATED, never credited as physical practice) and the
+  profile-store/learning-loop tests all follow the same rule.
+- **Teacher headless plans** are deliberately sensor-free: lessons
+  print `PHYSICAL PRACTICE REQUIRED` and nothing is marked complete
+  (measured); the Voice/Gaze Academy metric pipelines were exercised
+  on synthetic samples in their test suites, always labelled.
+- Simulated-verified subsystems unchanged from v16.0.0: guided lab
+  7/7 simulation PASS (`[SIMULATION]` labels; 0/5 hardware rows,
+  overall PARTIALLY VERIFIED), simulated browser bridge, twin, world
+  model, goals/tasks/skills, recovery2, target resolver, AIP EXECUTE
+  without `--aip-real` (labelled `simulated: true`, fail-closed with
+  no grants), simulator, failure injection.
+- The Gesture Lab remains a deliberate simulation instrument (REAL
+  spine, dry-run executor, destructive refusal demonstrable without
+  hardware).
+
+## Part 3 — REAL WINDOWS VALIDATION
+
+**NOT PERFORMED IN SANDBOX** (unchanged truth). No Windows machine
+was available; the build environment is a headless Linux sandbox. The
+Windows 10/11 validation procedure is handed to the user step by
+step (COMMAND / WHAT TO DO / WHAT SHOULD HAPPEN / PASS / FAIL /
+HOW TO FIX): **`WINDOWS_REAL_WORLD_TEST.md`** — now **28 steps**: the
+previous 24 plus the v16.5 steps 16a–16d (first-run tour + onboarding
+resume, `transcribe` with a real ASR engine, gesture-lab/academy with
+the `TMP:` HUD badge visible, and a `help-me` sanity drill). Until
+that procedure is executed by a human on real Windows hardware, every
+Windows-runtime claim in the docs is marked "expected", not
+"verified".
+
+## Part 4 — PHYSICAL HARDWARE VERIFICATION
+
+**NOT TESTED** — the sandbox is headless and has no peripherals.
+`airmouse verify` and `airmouse test` report the five physical areas
+as **ACTION_REQUIRED** (they can never auto-pass by design). The
+v16.5-specific physical areas, explicitly:
+
+| v16.5 physical area | Sandbox status | Where it is validated |
+|---|---|---|
+| First-run tour with a real TTY + camera/mic (`teach`, the auto-offer) | NOT TESTED — headless runs only ever print the honest plan; the offer is TTY-gated and proven never to block headless | WINDOWS_REAL_WORLD_TEST.md step 16a |
+| Voice Academy microphone practice (L1 pass requires hearing you) | NOT TESTED (no microphone; typed practice path is the text-side fallback) | step 16a / guided test [5/12] |
+| Gaze Academy live lessons (camera + eyes; passes only from real gaze samples) | NOT TESTED (synthetic samples only, always labelled SIMULATED) | step 16c / guided test [4/12] |
+| Live ASR engines (vosk / whisper / pocketsphinx) — provider panel flips to real, segments from real audio | NOT TESTED — no engine installed in the sandbox; detection + honest labelling measured | step 16b |
+| Dictation via microphone (VoiceTypingEngine end-to-end) | NOT TESTED (text-side engine verified; audio path untested) | guided test [6/12] |
+| Temporal HUD under a real camera (`TMP:` / `SENSOR:` badges live) | NOT TESTED (observer code + startup probes only; on-screen look unverified) | step 16c |
+| Two-hand geometry (unchanged) | NOT TESTED | step 10d |
+| PyInstaller Windows bundles | NOT PRODUCED / NOT EXECUTED on real Windows | build.py path exists |
+
+## Part 5 — NOT AVAILABLE / limitations (honest, non-negotiable)
+
+- **Temporal proposals do not dispatch OS actions** — the observer
+  PROPOSES ONLY; the gesture_spine remains the sole dispatcher and no
+  parallel execution path exists (source-scan enforced). Temporal OS
+  dispatch for new compositions: NOT AVAILABLE.
+- **Two-hand ROTATE / DRAG** are detected honestly (report dict,
+  help-me, teacher all say so) but have NO OS mapping — only two-hand
+  ZOOM drives real ctrl+wheel. NOT AVAILABLE (row 25).
+- **ASR engines are not bundled and are never auto-installed** —
+  vosk/whisper/pocketsphinx are OPTIONAL; the install path is
+  text-only guidance the user runs themselves (no subprocess, no
+  network). ASR auto-execution: NOT AVAILABLE (row 79).
+- **Command grammar ≠ ASR** — the built-in 30-phrase grammar is
+  deterministic phrase matching, not speech recognition; the
+  voice-status panel states this in plain text on machines without
+  an engine.
+- **RF hardware, cloud/telemetry integrations, the v15 one-choice
+  onboarding interview, automatic `selftune_apply`** — unchanged, NOT
+  AVAILABLE by design (rows 64, 69, 70, 60).
+- Gaze personalization suggestions, temporal badges and profile
+  learning are proposals/display only — nothing auto-applies
+  (PREDICTION ≠ EXECUTION).
+
+---
+
+# AirMouse v16.0.0 Gesture-First Release Verification — preserved below
 
 Date: 2026-09-04 (build environment: Linux x86_64 headless sandbox,
 Python 3.12.14). Scope: the v16.0.0 gesture-first release candidate —

@@ -1,5 +1,174 @@
 # Changelog
 
+## v16.5.0 — ADAPTIVE MULTIMODAL INTELLIGENCE (release candidate, 2026-09-05)
+
+The teaching release. v16.0.0 made the gesture surface trustworthy;
+v16.5.0 teaches it: a multi-track teacher with persisted, resumable
+onboarding progress that can never auto-pass a physical skill, an
+honest voice stack (deterministic grammar ≠ ASR, stated in plain
+text), a live transcription session, capability answers from real
+data (`help-me`), a deterministic temporal gesture observer that
+PROPOSES but never executes, and a local-first personal interaction
+profile with PREDICTION ≠ EXECUTION enforcement. Version bump
+16.0.0 → **16.5.0**. Every claim below was re-measured on the
+release-candidate tree in a headless Linux sandbox.
+
+### Teacher + onboarding (new)
+
+- `teacher.py` + CLI: `airmouse teach [all|voice|gaze|gesture|fusion|resume]`
+  and `airmouse learn` (all academies). Headless measured: full plan
+  (5 tracks / 11 lessons), every physical lesson marked
+  `PHYSICAL PRACTICE REQUIRED — needs camera/microphone; never
+  auto-passed`, "nothing was marked complete", exit 0; `teach nope` →
+  `teach track must be: all | voice | gaze | gesture | fusion | resume`,
+  exit 1. Teacher prints a self-diagnostic hardware panel and adapts
+  practice deterministically (strong skill → skip, weak skill → gentle
+  repeat, never blames).
+- **First-run auto-teaching**: plain `airmouse` on a TTY offers the
+  3–5 minute tour (phase NEW) or asks `Continue your training?`
+  (phase IN_PROGRESS); decline ("Skip for now"), EOF and non-TTY all
+  proceed normally — the prompt is TTY-gated so headless runs are
+  never blocked (enforced by startup-probe tests driving real main()).
+  Wired behind `config.teach_auto` (default true).
+- **Onboarding persistence**: `OnboardingStore` at
+  `<home>/profile/onboarding.json` (schema v1) with the honest ladder
+  NEW → IN_PROGRESS → VOICE_COMPLETE → GAZE_COMPLETE →
+  GESTURE_COMPLETE → FUSION_COMPLETE → COMPLETE; measured: one
+  headless `teach` writes `"phase": "IN_PROGRESS"`, sessions count
+  increments; a corrupted file measured live fail-safes to phase NEW
+  with `corrupted_last_load: True`.
+
+### Voice stack (new)
+
+- `airmouse voice-status` now appends the honest per-machine Voice
+  Provider panel: `✓ Built-in command recognition` (always real — the
+  deterministic grammar ships), `○/✓ Local ASR available`, `○/✓
+  Whisper available`, `○/✓ Vosk available`, `○/✓ Microphone detected`,
+  exactly one `Active:` line, and when no ASR engine is installed:
+  `Full speech recognition is not installed.` +
+  `Command recognition still works — it is deterministic grammar, not
+  ASR.` Measured headless: panel all `○` with `Active: Built-in
+  command recognition`.
+- **Pluggable local ASR providers** (`voice_stack.py` +
+  `offline_voice.py`): Vosk / Whisper (or faster_whisper) /
+  PocketSphinx adapters with guarded imports, auto-detected the moment
+  the engine package is installed (preference vosk > whisper >
+  pocketsphinx; a broken engine is skipped, never faked). Engines are
+  OPTIONAL and NOT bundled; install guidance is text only — AirMouse
+  never runs pip for you (NOT AVAILABLE by design).
+- **`airmouse transcribe`** (`transcribe_session.py`): live local
+  transcription REPL — `pause | resume | save [json] | clear | status
+  | stop | quit`, any other line is a spoken utterance. Measured:
+  segments carry `[HH:MM:SS] confidence% "text"` (e.g.
+  `[12:24:40] 95% "Hello world, this is a test"`); `status` reports
+  `history: n/500 segments` (bounded history); `save` writes only on
+  request, only to `<home>/transcripts/transcript-<ts>.txt` (or
+  `.json` with segments + confidence + provider + timestamps); text
+  only, audio is never stored; EOF ends cleanly (rc 0). Without an
+  installed ASR engine the session runs on a deterministic provider
+  that is banner-labelled every session: `provider: simulated_stream`
+  + `⚠ SIMULATED provider — install a local ASR engine for real
+  transcription (see: airmouse voice-status)`.
+- **Voice Academy** (inside `teach`/`learn`, 4 levels): l1 basic
+  commands, l2 natural language via the REAL grammar matcher, l3
+  dictation with spoken punctuation verified by the REAL
+  `VoiceTypingEngine` (clean retries restore the step-start buffer),
+  l4 personal voice learning via the REAL local-only `VoiceProfile`
+  alias learning. Microphone practice remains PHYSICAL TEST REQUIRED.
+
+### Gesture temporal intelligence (new, observer only)
+
+- `temporal.py`: deterministic temporal recognizer — `TrajectoryBuffer`
+  features (velocity / acceleration / direction / handedness),
+  `PinchLifecycle` START/HOLD/MOVE/RELEASE with hysteresis, debounce,
+  false-positive suppression and tracking grace, `TemporalRecognizer`
+  sequences + compositions, and a robustness toolkit (`Hysteresis`,
+  `Debouncer`, `FalsePositiveSuppressor`, `TrackingRecovery`,
+  `CameraWatchdog`, `SensorHealthScore`).
+- In the LIVE app it runs as an OBSERVER over the same frame stream:
+  HUD badges `TMP:` (pinch lifecycle / proposal) and `SENSOR:` (health
+  degraded/poor). **It PROPOSES ONLY — the gesture_spine remains the
+  sole dispatcher**; there is no parallel execution path (enforced by
+  source-scan tests), so temporal OS dispatch for new compositions is
+  honestly NOT AVAILABLE. Two-hand rotate/drag remain detected-but-
+  NOT-MAPPED (unchanged truth, now also stated by `teach` and
+  `help-me`).
+- Measured performance (`airmouse verify` Temporal check):
+  recognize + features ≈ **293 µs/frame** (293.4 µs this run,
+  direction right, lifecycle engaged).
+
+### Gaze Academy + personal profile (new)
+
+- **Gaze Academy** (5 lessons — l1_acquire, l2_fixation, l3_dwell,
+  l4_blink, l5_eye_assist) with real metric functions; headless runs
+  print the honest plan and mark nothing passed; simulated dry-runs
+  are always labelled SIMULATED and never pass as real. **Gaze
+  personalization** (`GazeLearner` at `<home>/profile/gaze.json`) is
+  bounded and local: dwell clamped to [0.3, 2.0] s, EMA learning gated
+  on VERIFIED observations only, suggestions are proposals that are
+  never auto-applied.
+- **Personal Interaction Profile** (`profile_store.py`):
+  `<home>/profile/{interaction,voice,gestures,preferences}.json` —
+  bounded, content-free (counters/parameters only), atomic writes,
+  corruption fail-closed, reset with backup to `<home>/backups/`.
+  **LearningLoop** enforces PREDICTION ≠ EXECUTION: bounded ring of
+  stage events, proposals that never execute, a single explicit
+  approve path, and `adapt()` converting only approved proposals into
+  profile observations.
+- **Privacy**: manifest grew 20 → **24** entries (added
+  `academy_progress`, `onboarding_state`, `personal_profile`,
+  `transcript_sessions` — all counted live) and every entry stays
+  covered by the memory reset / delete / export lifecycle
+  (`deletion_verifies()`); user-learning artifacts are backed up then
+  deleted, transcripts are user-owned keeps. `airmouse privacy` now
+  prints a PERSONALIZATION summary ending **"Nothing is uploaded."**
+  (measured).
+
+### Help + startup + verification
+
+- **`airmouse help-me [question]`** (`help_registry.py`): answers
+  from REAL capability data — a 22-row gesture map aligned with
+  `gestures.py` and the spine's risk classes (including
+  `[refused by default]` on the Alt+F4 row and the honest two-hand
+  note), the shipped 30-phrase voice grammar with the
+  "It is NOT full speech recognition" note, and gate-level debugging
+  (measured: `"how do I scroll?"` → the 3 real scroll paths;
+  `"why didn't that work?"` → e-stop → confidence floors 0.45/0.60 →
+  destructive policy → 0.12 s rate limit → gesture mapping).
+- **Zero-learning-curve READY panel**: after startup the app prints
+  `AIRMouse READY  Hands: ✓/○ Voice: ✓/○ Gaze: ✓/○ Learning: ✓/paused`
+  + the tip `say "help" anytime` + a `airmouse teach` reminder while
+  training is incomplete. Display-only, gated by `config.ready_panel`
+  (default true; both v16.5 keys land in config.toml `[v10]`).
+- **`airmouse verify` grows to 12 automated checks** (added Teacher +
+  Temporal) + the same 5 physical ACTION_REQUIRED items; measured
+  12/12 PASS, exit 0. CLI surface: 34 subcommand choices (was 30; no
+  new flags).
+- Startup probe tests cover plain `airmouse` reaching the frame loop
+  with the temporal observer attached; 11 new real-main() CLI wiring
+  tests cover the four new commands.
+
+### Verification (measured on the release-candidate tree)
+
+- Full suite: **1889 passed / 2 skipped / 0 failed** (re-measured;
+  the 2 skips are the honest headless skips: no Chrome binary, no
+  tesseract). Baseline history: 1056 (v15.0.0) → 1236 (v15.1.0) →
+  1556 (v15.2.0/v16.0.0) → **1889 (v16.5.0)**.
+- `airmouse verify`: 12/12 automated PASS + 5 physical
+  ACTION_REQUIRED (unchanged truth). `airmouse --version` →
+  `AirMouse v16.5.0 — Adaptive Human-Computer Intelligence Edition`.
+- Docs reset across 6 files with one status tag per capability
+  (capability table now 94 rows: 64 REAL / 5 SIMULATED / 4 OPTIONAL /
+  13 PHYSICAL TEST REQUIRED / 8 NOT AVAILABLE). Physical hardware —
+  including the first-run tour with camera/mic, Voice Academy
+  microphone practice, gaze lessons, live ASR engines, dictation via
+  microphone, the temporal HUD under a real camera, two-hand
+  geometry, and PyInstaller Windows bundles — was NOT TESTED in the
+  sandbox; see `VERIFICATION_REPORT.md` +
+  `WINDOWS_REAL_WORLD_TEST.md` (new steps 16a–16d).
+
+---
+
 ## v16.0.0 — GESTURE-FIRST RELEASE (release candidate)
 
 The gesture-first release. Where v15.2.0 built the one execution

@@ -1,15 +1,18 @@
-# WINDOWS_REAL_WORLD_TEST.md — AirMouse v16.0.0 real-world test (Windows 10/11)
+# WINDOWS_REAL_WORLD_TEST.md — AirMouse v16.5.0 real-world test (Windows 10/11)
 
 **Who this is for:** any Windows 10 or Windows 11 user. No programming
 knowledge needed. Every command is copy-pasteable into Command Prompt.
 
-**Why this file exists (honesty):** AirMouse v16.0.0 was verified in a
-headless Linux build sandbox — **1556 automated tests green (2 honest
-skips), simulation suite green, but NO physical hardware was tested
-there** (no webcam, no microphone, no display, no Windows). The machine
-cannot click a real button or hear a real voice. **You are the hardware
-test.** This document walks you through it, step by step, and ends with
-how to turn your results into a bug report we can act on.
+**Why this file exists (honesty):** AirMouse v16.5.0 was verified in a
+headless Linux build sandbox — **1889 automated tests green (2 honest
+skips), `airmouse verify` 12/12 automated checks PASS, simulation
+suite green, but NO physical hardware was tested there** (no webcam,
+no microphone, no display, no Windows). The machine cannot click a
+real button or hear a real voice, cannot watch you take the v16.5
+teaching tour, and has never heard a real ASR engine. **You are the
+hardware test.** This document walks you through it, step by step,
+and ends with how to turn your results into a bug report we can act
+on.
 
 **How to read each step:** every step has six fields:
 
@@ -60,9 +63,9 @@ saw for every step — you will paste that into the final report
 - **WHAT TO DO:** paste and press Enter. Wait for it to finish
   (1-3 minutes; it downloads OpenCV, MediaPipe and numpy).
 - **WHAT SHOULD HAPPEN:** progress bars, then a final line like
-  `Successfully installed airmouse-16.0.0 ...`.
+  `Successfully installed airmouse-16.5.0 ...`.
 - **PASS:** "Successfully installed" appears and the version is
-  16.0.0 or newer.
+  16.5.0 or newer.
 - **FAIL:** red error text (no internet, permission denied, or
   "pip is not recognized").
 - **HOW TO FIX:** check your internet; retry the same command once;
@@ -451,6 +454,132 @@ saw for every step — you will paste that into the final report
   `python -m airmouse test --guided --debug`, keep the output, and
   put it first in your report.
 
+## Step 16a — First-run tour + onboarding resume (v16.5 teaching; physical)
+
+- **COMMAND:**
+  1. `set AIRMOUSE_HOME=%TEMP%\am-fresh` (fresh home; CMD) — then
+     `airmouse`
+  2. answer **Y** to `Would you like a 3–5 minute interactive tour?
+     [Y/n]`
+  3. complete the VOICE track's typed practice when offered (or press
+     the skip key it shows)
+  4. answer **n** the next time the tour pauses
+  5. `type "%TEMP%\am-fresh\profile\onboarding.json"`
+  6. `airmouse` again → answer **n** to `Continue your training?
+     [Y/n]`
+- **WHAT TO DO:** on a REAL terminal (Command Prompt — it must be a
+  TTY for the offer to appear), accept the tour once, then decline it
+  the second time.
+- **WHAT SHOULD HAPPEN:** (1) with a fresh home and an interactive
+  terminal, plain `airmouse` offers the tour BEFORE the app starts;
+  (2) the tour prints a plan per track and every lesson that needs a
+  sensor says `PHYSICAL PRACTICE REQUIRED — never auto-passed` —
+  lessons with real sensors pass only when the sensor verifies you;
+  (3) `onboarding.json` exists with `"phase": "IN_PROGRESS"` (or
+  `VOICE_COMPLETE` after the voice lesson) and a session count;
+  (4) declining with **n** (or just pressing Enter-on-empty twice,
+  or Ctrl-C) simply starts the app — the teaching prompt NEVER traps
+  you, and the `AIRMouse READY` panel still appears after startup.
+- **PASS:** the offer appears exactly once per fresh home, the state
+  file records your progress, the second launch asks `Continue your
+  training? [Y/n]`, declining proceeds straight into the app, and NO
+  lesson that required a camera/microphone was ever marked complete
+  without the sensor passing you.
+- **FAIL:** the prompt loops forever, blocks startup, marks a
+  physical lesson complete without a sensor, or `onboarding.json` is
+  not created.
+- **HOW TO FIX:** delete the folder `%TEMP%\am-fresh` and retry fresh;
+  if the prompt never appears, check you used a real Command Prompt
+  window (not a pipe); re-run with `python -m airmouse --debug` and
+  keep the output. To disable the offer entirely: set `teach_auto =
+  false` in `%TEMP%\am-fresh\config.toml` (or your real home's
+  config.toml).
+
+## Step 16b — `airmouse transcribe` with a real ASR engine (physical + optional engine)
+
+- **COMMAND:**
+  1. `python -m pip install vosk` (+ download a small vosk model and
+     note its folder) — or `python -m pip install pocketsphinx`
+  2. `airmouse voice-status`
+  3. `airmouse transcribe`
+  4. say a few sentences, then type `status`, `save`, `quit`
+- **WHAT TO DO:** install the engine yourself FIRST (AirMouse never
+  installs anything), then run the session and speak.
+- **WHAT SHOULD HAPPEN:** (2) `voice-status` flips honestly —
+  `✓ Local ASR available` (and `✓ Vosk available` if you installed
+  vosk), `Active:` names the engine, and the microphone row shows ✓
+  once Windows mic permission is granted; (3) the session banner no
+  longer says `⚠ SIMULATED provider` — it names the real engine;
+  segments appear as you speak with `[HH:MM:SS] confidence%
+  "text"`; `status` shows `history: n/500 segments` and the
+  transcripts folder; `save` writes a text file under
+  `%USERPROFILE%\.airmouse\transcripts\` (or your `AIRMOUSE_HOME`).
+- **PASS:** the provider panel and the session banner AGREE with
+  each other and with what you actually installed, segments carry
+  timestamps + confidence, and `save` produces a text-only file (no
+  audio file anywhere).
+- **FAIL:** the banner claims a real provider while `voice-status`
+  says none is installed (or vice versa) — that inconsistency is a
+  top-priority honesty bug; also report no segments appearing despite
+  a working mic in Step 13.
+- **HOW TO FIX:** without an engine the session is SUPPOSED to say
+  `⚠ SIMULATED provider` — that is the honest design, not a bug;
+  re-check the mic privacy toggles from Step 6; keep the transcript
+  file private (it is your content).
+
+## Step 16c — Temporal observer + HUD badges during gestures (physical readout)
+
+- **COMMAND:**
+  1. `airmouse` (live app, camera on)
+  2. pinch, HOLD ~2 seconds, move, release — several times
+  3. cover the camera briefly
+- **WHAT TO DO:** watch the HUD badge row while performing
+  pinch-hold-move-release cycles.
+- **WHAT SHOULD HAPPEN:** a `TMP:` badge appears and changes with
+  your pinch lifecycle (START/HOLD/MOVE/RELEASE and any proposal
+  text); when the camera view degrades (covered lens, bad lighting)
+  a `SENSOR:` badge appears, and it disappears when health recovers.
+  IMPORTANT: the temporal system is an OBSERVER — a proposal must
+  NEVER click, type, or move anything by itself; your normal gesture
+  actions keep going through the same spine as before.
+- **PASS:** `TMP:` tracks your pinch lifecycle, `SENSOR:` appears
+  only when the camera view degrades, and NO OS action fires from a
+  proposal alone.
+- **FAIL:** the badges never appear at all with a working camera
+  (report it), or an OS action (click/key) fires with no matching
+  gesture behind it (STOP, press E-STOP, and report FIRST — that
+  would be a spine-integrity bug, our highest severity).
+- **HOW TO FIX:** lighting first (Step 9's fixes); the badges are
+  status-only by design — if you want to see the underlying data
+  without a camera, `airmouse gesture-lab 30` shows the dry-run
+  observatory.
+
+## Step 16d — `help-me` sanity check (safe, no hardware needed)
+
+- **COMMAND:**
+  1. `airmouse help-me`
+  2. `airmouse help-me "how do I scroll?"`
+  3. `airmouse help-me "why didn't that work?"`
+- **WHAT TO DO:** run all three and read the answers.
+- **WHAT SHOULD HAPPEN:** (1) the capability panel — hand gestures
+  (including `ok … close window (Alt+F4 class) [refused by default]`
+  and the honest two-hand note that rotation/drag are DETECTED but
+  their OS action is NOT MAPPED yet), the offline voice grammar with
+  the "NOT full speech recognition" note, gaze, teacher and health
+  commands; (2) the three real scroll paths (pinch-hold + move,
+  swipe up/down, "scroll up/down" by voice); (3) a gate-by-gate
+  debug list (e-stop → confidence floors → destructive policy → rate
+  limit → gesture mapping) ending with `airmouse doctor`.
+- **PASS:** all three exit 0 with readable answers, and every answer
+  matches what `airmouse gestures` / `airmouse commands` print (the
+  answers are generated from the real capability data, not canned
+  marketing).
+- **FAIL:** an empty answer, a Python traceback, or an answer that
+  contradicts `airmouse gestures`.
+- **HOW TO FIX:** re-run with `python -m airmouse help-me --debug`,
+  keep the output, and report it (the help database is a single
+  module — such a bug is easy for us to fix).
+
 ## Step 17 — Recovery and offline tests (simulation)
 
 - **COMMAND:** in the lab, tests **[11/12] Recovery** and **[12/12]
@@ -500,7 +629,7 @@ machine physically could not. If something failed, help us fix it:
 
 **Where:** open a GitHub issue on the AirMouse repository
 (https://github.com/manaladan6-rgb/airmouse/issues), title:
-`Windows real-world test v16.0.0 — step N failed`.
+`Windows real-world test v16.5.0 — step N failed`.
 
 **Paste these, in this order:**
 
@@ -523,15 +652,21 @@ personal content by design.
 Steps 9, 10, 12, 13, 15 answered Y (hand, mouse, voice, dictation,
 browser); Steps 10a–10e recorded (10c's OK-sign BLOCK and 10e's
 permission_denied are mandatory PASSes — a FAIL there is a software
-bug). Steps 14, 16, 17 must PASS (they are simulation tests — a FAIL
-here is a software bug, not a hardware quirk).
+bug); Steps 16a–16d recorded (16d's `help-me` answers and 16a's
+never-trap/never-auto-pass behaviour are mandatory PASSes — a FAIL
+there is a software bug; 16a/16b/16c pass only with a real TTY /
+ASR engine / camera respectively and stay recorded-as-attempted if
+the hardware is missing). Steps 14, 16, 17 must PASS (they are
+simulation tests — a FAIL here is a software bug, not a hardware
+quirk).
 
 ---
 
-*Honesty footer: AirMouse v16.0.0 — 1556 automated tests green (2
+*Honesty footer: AirMouse v16.5.0 — 1889 automated tests green (2
 honest headless skips), simulation suite green, `airmouse verify`
-10/10 automated PASS in the build sandbox. Physical hardware (webcam,
+12/12 automated PASS in the build sandbox. Physical hardware (webcam,
 microphone, hand tracking, two-hand geometry, gaze, real browser,
-real OS input automation, Windows bundles) was NOT tested there and
-CANNOT be — that is what
+real OS input automation, the v16.5 teaching tour with real sensors,
+live ASR engines, the temporal HUD under a real camera, Windows
+bundles) was NOT tested there and CANNOT be — that is what
 this document is for. Windows runtime was not tested in the sandbox.*

@@ -1,4 +1,4 @@
-# AirMouse v16.0.0 — CLI Reference
+# AirMouse v16.5.0 — CLI Reference
 
 Regenerated **completely** from the live argument parser
 (`airmouse_pkg/airmouse/__main__.py`, the `build_parser`/`main()` section)
@@ -7,12 +7,14 @@ flag below is registered exactly as listed — nothing is invented. The
 executable truth is always `airmouse --help`; this document adds the
 exit codes and `command_arg` semantics the help text does not show.
 
-Measured parser facts (this tree): **30 subcommand choices**, **56
+Measured parser facts (this tree): **34 subcommand choices**, **56
 visible flags + 1 hidden CI flag** (57 `add_argument` flags + 2
-positionals = 59 registrations), help banner currently printed as
-`AirMouse v15.1.1` (the version string in `__init__.py` /
-`pyproject.toml` is bumped to 16.0.0 by step 1 of the release process —
-every capability documented here is independent of that string).
+positionals = 59 registrations — v16.5 added four subcommands, no new
+flags), help banner currently printed as
+`AirMouse v16.5.0 — Adaptive Human-Computer Intelligence Edition` (the
+version string in `__init__.py` / `pyproject.toml` is bumped to 16.5.0
+by step 1 of the release process — every capability documented here is
+independent of that string).
 
 ```bash
 airmouse [FLAGS] [SUBCOMMAND] [COMMAND_ARG]
@@ -25,7 +27,7 @@ python -m airmouse [FLAGS] [SUBCOMMAND] [COMMAND_ARG]   # equivalent, no install
 
 ### 1. `command` — info/diagnostic subcommand (prints and exits)
 
-Exactly these 30 choices (parser `choices=`, in parser order):
+Exactly these 34 choices (parser `choices=`, in parser order):
 
 | # | Command | One-line effect |
 |---|---|---|
@@ -54,11 +56,15 @@ Exactly these 30 choices (parser `choices=`, in parser order):
 | 23 | `setup` | guided setup wizard (11 steps, consent-gated) |
 | 24 | `doctor` | 12-section / 41-component health report |
 | 25 | `test` | guided test laboratory (`--guided` = interactive) |
-| 26 | `verify` | 10 automated checks + 5 physical ACTION_REQUIRED items |
-| 27 | `privacy` | local-first privacy report (+ storage manifest) |
+| 26 | `verify` | 12 automated checks + 5 physical ACTION_REQUIRED items |
+| 27 | `privacy` | local-first privacy report (+ storage manifest + PERSONALIZATION summary) |
 | 28 | `academy` | Gesture Academy — 11-lesson curriculum |
 | 29 | `gesture-lab` | Gesture Lab — live observatory (dry-run spine) |
 | 30 | `profile` | gesture interaction profiles (8 presets) |
+| 31 | `teach` | interactive teacher — plan + tour per track (v16.5) |
+| 32 | `learn` | all academies at once: voice · gaze · gestures · fusion (v16.5) |
+| 33 | `transcribe` | live text transcription session (v16.5; REPL) |
+| 34 | `help-me` | capability answers from real data; ask free-text questions (v16.5) |
 
 ### 2. `command_arg` — optional argument, meaning depends on `command`
 
@@ -70,6 +76,10 @@ Exactly these 30 choices (parser `choices=`, in parser order):
 | `profile` | a profile name (`accessibility`, `creative`, `default`, `developer`, `gaming`, `hands_free`, `media`, `presentation`) | omitted or `list` lists profiles; unknown name → **exit 1** |
 | `doctor` | `verbose`, `-v` or `--verbose` also trigger verbose output | ignored otherwise |
 | `test` | `guided` or `--guided` also triggers the interactive lab | ignored otherwise |
+| `teach` | a track: `all` (default), `voice`, `gaze`, `gesture`, `fusion` or `resume` (exact strings; case-insensitive) | unknown track → prints `teach track must be: all \| voice \| gaze \| gesture \| fusion \| resume`, **exit 1** |
+| `help-me` | a free-text question (e.g. `"how do I scroll?"`); keyword-matched against 8 real topics (overview, scroll, click, drag, zoom, teach, gesture, broken) | omitted / unmatched → the overview capability panel (`broken` / "why didn't that work?" style questions get the gate-by-gate debug answer) |
+| `transcribe` | not used (any value is ignored; the session is the interface) | — |
+| `learn` | not used (always runs all academies) | — |
 | everything else | not used | — |
 
 ---
@@ -196,8 +206,8 @@ Exactly these 30 choices (parser `choices=`, in parser order):
 | `setup` | 11-step consent-gated wizard; never installs without an interactive Y; writes `<home>/.setup_complete` | 0 (also on honest hardware rows) |
 | `doctor` | 12 sections / 41 components, plain "Fix:" lines; verdict `[READY FOR TESTING]` / `[PARTIAL — …]` / `[BLOCKED]`; `--json` supported | 0 READY · 1 PARTIAL · 2 BLOCKED |
 | `test` | 12-test laboratory; physical tests NEVER auto-pass (ACTION_REQUIRED), simulations labelled `[SIMULATION]`; `--guided` = interactive | 0 unless a test FAILs · 1 on FAIL |
-| `verify` | 10 automated checks (import, voice determinism, intelligence roundtrip, safety gates, offline 18/18, simulated browser, permission deny-by-default, lease conflict, AIP validator, packaging match) + 5 physical ACTION_REQUIRED rows | 0 · 1 on any automated FAIL |
-| `privacy` | telemetry/network/model state, store inventory, controls, and the **storage manifest — all 20 on-disk artifacts** with purpose + location + exists flag; `--json` supported | 0 |
+| `verify` | 12 automated checks (import, voice determinism, intelligence roundtrip, safety gates, offline 18/18, simulated browser, permission deny-by-default, lease conflict, AIP validator, packaging match, **Teacher** — onboarding ladder + honest grading + help + profile store + learning-loop approval gate + transcribe session, **Temporal** — recognizer timing ≈293 µs/frame) + 5 physical ACTION_REQUIRED rows | 0 · 1 on any automated FAIL |
+| `privacy` | telemetry/network/model state, store inventory, controls, the **storage manifest — all 24 on-disk artifacts** with purpose + location + exists flag, and the **PERSONALIZATION summary** (learned-counters only, ends `Nothing is uploaded.`); `--json` supported | 0 |
 
 ### v16 gesture surface (new)
 
@@ -220,6 +230,16 @@ adaptive_calibration, two_hand, position_smooth_alpha):
 | `gaming` | confirm 2/2, smoothing 0.90, adaptive calibration OFF (no mid-match drift) |
 | `hands_free` | `two_hand = true`, confirm 5/7, audio ON |
 | `developer` / `media` / `creative` | per-mode tracking/confirm tuning (see `config.py` defaults the profile copies) |
+
+### v16.5 — teacher + voice + help (new)
+
+| Command | Prints / does | Exit codes |
+|---|---|---|
+| `teach [track]` | The teacher. Prints the track plan (per lesson: do this / demo / pass when / status) and, on a TTY, runs the interactive tour. Tracks: `all` (5 tracks — Voice, Eyes, Hands, Multimodal, Personalization; 11 lessons), `voice`, `gaze`, `gesture`, `fusion`, `resume`. Headless (non-TTY stdin): prints the plan with every physical lesson marked `PHYSICAL PRACTICE REQUIRED — needs camera/microphone; never auto-passed`, marks NOTHING complete, and ends with the learning-progress panel (`Sessions: n • Phase: …`). First-run state is persisted to `<home>/profile/onboarding.json` (ladder NEW → IN_PROGRESS → VOICE_COMPLETE → GAZE_COMPLETE → GESTURE_COMPLETE → FUSION_COMPLETE → COMPLETE; a corrupted file fail-safes to NEW with a `corrupted_last_load` flag). The teacher also prints a self-diagnostic hardware panel and adapts practice (a strong skill is skipped, a weak one gets a gentle repeat). Plain `airmouse` on a TTY offers the tour automatically (`config.teach_auto`, default true); decline/EOF/non-TTY always proceeds — headless is NEVER blocked. | 0 (plan or measured session, incl. honest headless degrade) · 1 unknown track |
+| `learn` | Same teacher, all academies at once (identical to `teach all`): the plan covers the Gesture Academy (delegates to `airmouse academy`), the Voice Academy (4 levels — basic commands, natural language, dictation with spoken punctuation, personal voice learning), the Gaze Academy (5 lessons — acquire, fixation, dwell, blink, eye-assist), fusion challenges and the personalization acknowledgment. Headless = honest plan, nothing auto-passed. | 0 |
+| `transcribe` | A live local transcription session. Banner shows the provider (`provider: simulated_stream` + `⚠ SIMULATED provider — install a local ASR engine for real transcription (see: airmouse voice-status)` when no ASR engine is installed — the label is ALWAYS shown in that case, never hidden). With a microphone it captures audio; headless/text-input mode treats typed lines as utterances. REPL: `pause \| resume \| save [json] \| clear \| status \| stop \| quit` — any other text is a spoken utterance. Segments carry `[HH:MM:SS] confidence% "text"`; `status` shows `history: n/500 segments` (bounded) and the transcripts dir; `save` writes ONLY on request, ONLY to `<home>/transcripts/transcript-<ts>.txt` (or `.json` with `save json` — segments + confidence + provider + timestamps), text only, never audio; EOF ends the session cleanly. | 0 (also on clean EOF; the summary line reports the session honestly) |
+| `help-me [question]` | Capability answers built from REAL data: the overview panel lists the hand gestures (22 rows, aligned with `gestures.py` + the spine's risk classes, including `[refused by default]` on the OK/Alt+F4 row and the honest two-hand note `Rotation and two-hand drag are DETECTED but their OS action is NOT MAPPED yet`), the 30-phrase offline voice grammar (with `It is NOT full speech recognition` note), gaze, the teacher commands and health commands. With a question, keywords route to a topic answer: `"how do I scroll?"` → the 3 real scroll paths; `"why didn't that work?"` → the gate-by-gate debug chain (e-stop → confidence floors 0.45/0.60 → destructive policy → 0.12 s rate limit → gesture mapping). | 0 |
+| `voice-status` (v16.5 panel) | Now ALSO prints the honest per-machine Voice Provider panel below the legacy provider dict: `✓ Built-in command recognition` (always — the deterministic grammar ships), `○/✓ Local ASR available`, `○/✓ Whisper available`, `○/✓ Vosk available`, `○/✓ Microphone detected`, exactly one `Active:` line, and when no ASR engine is installed: `Full speech recognition is not installed.` + `Command recognition still works — it is deterministic grammar, not ASR.` Measured headless run: legacy dict `{simulated: True, pocketsphinx: True, vosk: False, whisper: False}` (the SpeechRecognition sphinx backend is importable) while the engine-level panel shows all `○` — the panel checks the actual engine packages, the wrapper is not an engine. Install guidance is printed as text only; NOTHING is ever auto-installed. | 0 |
 
 ### Memory lifecycle
 
@@ -255,7 +275,7 @@ adaptive_calibration, two_hand, position_smooth_alpha):
 
 | Command | Prints | Exit codes |
 |---|---|---|
-| `voice-status` | engine mode, wake-word requirement, offline ASR providers dict (simulated/pocketsphinx/vosk/whisper booleans) | 0 |
+| `voice-status` | engine mode, wake-word requirement, offline ASR providers dict (simulated/pocketsphinx/vosk/whisper booleans) + the v16.5 Voice Provider panel (per-engine ✓/○, one `Active:` line, grammar-≠-ASR note) | 0 |
 | `gestures` | built-in gesture→intent mappings + custom mappings from `gestures.json` | 0 |
 | `commands` | the 75-command grammar across 10 namespaces (engine, mouse, system, window, application, files, text, navigation, media, browser) | 0 |
 | `browser` | `CDP bridge on :9222 -> available: True/False` + start instructions | 0 |
@@ -272,6 +292,7 @@ adaptive_calibration, two_hand, position_smooth_alpha):
 | `test` | no FAIL | a test FAILed | — |
 | `verify` | no automated FAIL | automated FAIL | — |
 | `academy` | ok / honest headless plan | unknown lesson id | — |
+| `teach` | plan / measured session (incl. honest headless) | unknown track | — |
 | `profile` | applied / listed | unknown profile | — |
 | `memory reset/delete` | complete | INCOMPLETE (per-store errors printed) | — |
 | `offline-test`, `diagnostics` | selftest OK | selftest failed | — |
@@ -290,7 +311,18 @@ adaptive_calibration, two_hand, position_smooth_alpha):
 
 ---
 
-## v16 configuration keys (config.toml `[v10]` section)
+## v16.5 storage notes (this tree, measured)
+
+| Location | Written by | Content |
+|---|---|---|
+| `<home>/profile/onboarding.json` | `teach` / `learn` / the first-run offer | onboarding ladder phase, per-track completion, session count (schema_version 1). Corrupted file → treated as NEW + `corrupted_last_load` flag. |
+| `<home>/profile/{interaction,voice,gestures,preferences}.json` | the live app + LearningLoop | bounded, content-free learning (counters/parameters only); unverified observations go under an `unverified.` namespace and are never used for suggestions |
+| `<home>/transcripts/transcript-<ts>.txt\|.json` | `transcribe` — ONLY when you type `save` | the text transcript you explicitly saved (text only; audio is never stored); listed in the privacy manifest as `transcript_sessions` and left intact by `memory reset/delete` (user-owned keeps — delete the folder yourself) |
+| `<home>/profile/gaze.json` | Gaze Academy + GazeLearner | bounded local gaze personalization (dwell clamped to [0.3, 2.0] s etc.); suggestions are proposals, never auto-applied |
+
+---
+
+## v16/v16.5 configuration keys (config.toml `[v10]` section)
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -300,6 +332,8 @@ adaptive_calibration, two_hand, position_smooth_alpha):
 | `gesture_allow_destructive` | `false` | NEVER true by default — Alt+F4 (`close_window`) and macro replay stay refused |
 | `gesture_sequences` | `true` | feed confirmed hand gestures to the custom-sequence registry |
 | `selftune_apply` | `false` | opt-in self-tuning application flag (reserved; see CAPABILITY_MATRIX — no shipped code path applies tuner proposals automatically) |
+| `teach_auto` | `true` | v16.5 — offer the first-run teaching tour when plain `airmouse` runs on a TTY (decline always proceeds; headless is never blocked) |
+| `ready_panel` | `true` | v16.5 — print the zero-learning-curve `AIRMouse READY` panel after startup (display-only: Hands/Voice/Gaze/Learning state + `say "help" anytime` + teach reminder) |
 
 ---
 
@@ -307,6 +341,11 @@ adaptive_calibration, two_hand, position_smooth_alpha):
 
 ```bash
 airmouse                                          # v5 hand+gesture experience (execution spine gates every action)
+airmouse teach                                    # 3–5 min interactive tour (headless = honest plan)
+airmouse teach voice                              # one track: all|voice|gaze|gesture|fusion|resume
+airmouse learn                                    # all academies at once
+airmouse transcribe                               # live text session (save [json] writes to <home>/transcripts/)
+airmouse help-me "how do I scroll?"               # capability answers from real data
 airmouse academy                                  # Gesture Academy — full plan headless, live with a camera
 airmouse academy move                             # practice one lesson
 airmouse gesture-lab 20                           # 20 s dry-run observatory (watch gates refuse actions)

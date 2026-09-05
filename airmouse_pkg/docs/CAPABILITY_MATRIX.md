@@ -1,4 +1,4 @@
-# Capability Matrix — AirMouse v16.0.0
+# Capability Matrix — AirMouse v16.5.0
 
 **Every capability below carries EXACTLY ONE status tag**, from this
 vocabulary (mission §35):
@@ -14,25 +14,30 @@ vocabulary (mission §35):
 **Measurement caveat (read first):** every measured output below was
 captured on a **Linux headless sandbox** (no display, no webcam, no
 microphone, no Chrome) by running the real commands on the real
-v16.0.0 release-candidate tree. It is NOT a Windows measurement.
+v16.5.0 release-candidate tree. It is NOT a Windows measurement.
 Physical hardware behaviour (webcam frames, microphone audio, real
-hand tracking, gaze, browser automation against live Chrome) was NOT
-TESTED and cannot be auto-verified.
+hand tracking, gaze, browser automation against live Chrome, the
+first-run tour and academy lessons with real sensors) was NOT TESTED
+and cannot be auto-verified.
 
-Environment measured: Linux x86_64, Python 3.12.14, numpy 2.1.3,
+Environment measured: Linux x86_64, Python 3.12.14, numpy 2.2.6,
 opencv-python 5.0.0, mediapipe 0.10.35, pynput 1.8.2 (present, no
-display), pytest suite **1556 passed / 2 skipped / 0 failed** (skips
-are honest: no Chrome binary, no tesseract). Storage isolated via
-`AIRMOUSE_HOME=/tmp/am-2g`.
+display), SpeechRecognition 3.17.0 (sphinx backend importable; no ASR
+engine package installed), pytest suite **1889 passed / 2 skipped /
+0 failed** (skips are honest: no Chrome binary, no tesseract). Storage
+isolated via `AIRMOUSE_HOME=/tmp/am-doc165`.
 
 Reproduce with:
 
 ```
 cd airmouse_pkg
-AIRMOUSE_HOME=/tmp/am-2g python3 -m airmouse doctor --json
-AIRMOUSE_HOME=/tmp/am-2g python3 -m airmouse verify
-AIRMOUSE_HOME=/tmp/am-2g python3 -m airmouse academy
-AIRMOUSE_HOME=/tmp/am-2g python3 -m airmouse profile list
+AIRMOUSE_HOME=/tmp/am-doc165 python3 -m airmouse doctor --json
+AIRMOUSE_HOME=/tmp/am-doc165 python3 -m airmouse verify
+AIRMOUSE_HOME=/tmp/am-doc165 python3 -m airmouse teach
+AIRMOUSE_HOME=/tmp/am-doc165 python3 -m airmouse voice-status
+AIRMOUSE_HOME=/tmp/am-doc165 python3 -m airmouse help-me "how do I scroll?"
+AIRMOUSE_HOME=/tmp/am-doc165 python3 -m airmouse academy
+AIRMOUSE_HOME=/tmp/am-doc165 python3 -m airmouse profile list
 ```
 
 ---
@@ -41,14 +46,14 @@ AIRMOUSE_HOME=/tmp/am-2g python3 -m airmouse profile list
 
 | # | Capability | Status | Evidence / how to validate |
 |---|---|---|---|
-| 1 | CLI parser: 30 subcommands, 56 visible flags + 1 hidden CI flag, `command_arg` semantics per command | **REAL** | regenerated `docs/CLI_REFERENCE.md`; `airmouse --help`; every exit code measured |
+| 1 | CLI parser: 34 subcommands, 56 visible flags + 1 hidden CI flag, `command_arg` semantics per command | **REAL** | regenerated `docs/CLI_REFERENCE.md`; `airmouse --help`; every exit code measured |
 | 2 | Config system (TOML round-trip; v16 keys `two_hand`, `gesture_min_confidence_*`, `gesture_allow_destructive=false`, `gesture_sequences`, `selftune_apply`) | **REAL** | `config.py` + profile round-trip tests; `airmouse profile accessibility` wrote a real config.toml in the sandbox |
 | 3 | ONE storage home (`paths.py`: `$AIRMOUSE_HOME` else `~/.airmouse`, resolved fresh per call, no split-brain) | **REAL** | `paths.py`; manifest + memory CLI all honor it (measured) |
 | 4 | Crash-safe persistence (5 stores; atomic writes, schema versioning, checksum quarantine + recovery) | **REAL** | `persistence.py` + test suite |
 | 5 | Memory lifecycle `status` / `export` / `reset` / `delete` incl. real learning artifacts + `deletion_verifies()` | **REAL** | `persistence.py`, `__main__.py` memory branch; artifact coverage: intelligence/*, calibration, gestures, macros, lecture.md |
-| 6 | Privacy report + **storage manifest (20 declared artifacts)** | **REAL** | `privacy.py` `PRIVACY_MANIFEST` = 20 entries (counted); `airmouse privacy` prints each with purpose + exists flag |
-| 7 | Doctor — 41 components, 12 sections, plain fixes, `--json` | **REAL** | measured: READY 32 / OPTIONAL 7 / HARDWARE 2 / WARNING 0 / FAILED 0; exit 0/1/2 |
-| 8 | Verify — 10 automated checks + 5 physical ACTION_REQUIRED rows | **REAL** | measured run: 10/10 PASS, physical never auto-pass |
+| 6 | Privacy report + **storage manifest (24 declared artifacts)** + PERSONALIZATION summary | **REAL** | `privacy.py` `PRIVACY_MANIFEST` = 24 entries (counted live: was 20, +`academy_progress`, `onboarding_state`, `personal_profile`, `transcript_sessions`); `airmouse privacy` prints each with purpose + exists flag and ends `Nothing is uploaded.` |
+| 7 | Doctor — 41 components, 12 sections, plain fixes, `--json` | **REAL** | measured on this tree: READY 32 / OPTIONAL 6 / HARDWARE 2 / WARNING 1 / FAILED 0 → `[PARTIAL — review WARNING items]`; the 1 WARNING is the honest `Hand tracking model — not downloaded yet` row (this reset sandbox never fetched the 8 MB model — the exact documented behaviour since v15.1.0; with the model present the verdict is `[READY FOR TESTING]`); exit 0/1/2 |
+| 8 | Verify — 12 automated checks + 5 physical ACTION_REQUIRED rows | **REAL** | measured run: 12/12 PASS (v16.5 adds Teacher + Temporal; Temporal ≈293 µs/frame), physical never auto-pass |
 | 9 | Setup wizard — 11 steps, consent-gated install, marker file | **REAL** | `setup_wizard.py` + tests; measured non-interactive run |
 | 10 | Guided test laboratory (12 tests; `[SIMULATION]` labels; physical never auto-pass) | **REAL** | measured: 7/7 simulation PASS, 0/5 hardware, exit 0 |
 | 11 | Self-test — 15 components, honest PASS/OPTIONAL/HARDWARE | **REAL** | measured: 13 pass, 1 optional (RealLocalASR), 1 hardware (Camera), 0 fail |
@@ -110,7 +115,31 @@ AIRMOUSE_HOME=/tmp/am-2g python3 -m airmouse profile list
 | 67 | PyInstaller Windows bundles (`build.py --windows`) | **PHYSICAL TEST REQUIRED** | build path exists, model download step documented; no bundle executed on real Windows |
 | 68 | Settings GUI (`--settings`, tkinter) + autostart management (`--autostart on/off`) | **OPTIONAL** | needs a desktop session; Windows autostart path untested on real Windows |
 | 69 | Cloud / telemetry integrations | **NOT AVAILABLE** | none exist by design; OfflineGate structurally blocks them; nothing to test |
-| 70 | First-run onboarding interview (one-choice modality picker) | **NOT AVAILABLE** | `onboarding.py` exists but has zero runtime imports — not wired into startup (README corrected in this release) |
+| 70 | v15 one-choice onboarding interview at startup | **NOT AVAILABLE** | `onboarding.py` exists but has zero runtime imports — the v16.5 TEACHER (`teach` + the TTY-gated first-run offer) is the shipped onboarding; the old module stays unwired |
+| 71 | Teacher CLI — `teach [all\|voice\|gaze\|gesture\|fusion\|resume]` + `learn`: per-track plans (5 tracks / 11 lessons), self-diagnostic hardware panel, adaptive practice (strong skill skipped, weak skill gentle repeat), physical lessons NEVER auto-passed | **REAL** | `teacher.py`; measured: `teach` / `teach voice` / `teach gesture` / `teach resume` all print the honest plan + progress panel and exit 0; `teach nope` → `teach track must be: all \| voice \| gaze \| gesture \| fusion \| resume`, exit 1; headless marks nothing complete |
+| 72 | Teacher LIVE sessions (interactive tour, camera/mic practice, fusion challenges with real sensors) | **PHYSICAL TEST REQUIRED** | needs a real TTY + webcam + microphone; headless sandbox only ever sees the plan; validation via WINDOWS_REAL_WORLD_TEST.md step 16a |
+| 73 | First-run auto-teaching offer (plain `airmouse` on a TTY: NEW → 3–5 min tour offer, IN_PROGRESS → `Continue your training?`; decline/EOF/non-TTY always proceeds; `config.teach_auto`) | **REAL** | `__main__.py` hook (TTY-gated via `stdin.isatty`) + `teacher.maybe_prompt_teach`; startup-probe tests drive real main() headless and are never blocked; decline paths tested |
+| 74 | Onboarding persistence + resume — `<home>/profile/onboarding.json` (schema v1: phase, tracks, sessions), ladder NEW → IN_PROGRESS → VOICE_COMPLETE → GAZE_COMPLETE → GESTURE_COMPLETE → FUSION_COMPLETE → COMPLETE | **REAL** | measured: file created with `"phase": "IN_PROGRESS"` after one headless `teach`; corrupted file measured live → phase NEW + `corrupted_last_load: True` |
+| 75 | Voice Academy — 4 levels (l1 basic commands, l2 natural language via the REAL grammar matcher, l3 dictation with spoken punctuation verified by the REAL `VoiceTypingEngine` + clean retries, l4 personal voice learning via the REAL local-only `VoiceProfile` alias learning) | **REAL** | `voice_academy.py` (`VOICE_LESSONS`, `match_phrase`, `format_dictation`, `apply_spoken_punctuation`, `resolve_voice`) + module tests; text-side mechanics only |
+| 76 | Voice Academy MICROPHONE practice (speak the phrases; L1 pass requires hearing you) | **PHYSICAL TEST REQUIRED** | needs a real microphone; sandbox has none (voice lessons can alternatively be completed by typing the phrase in an interactive session) |
+| 77 | Built-in voice command grammar — 30-phrase deterministic offline grammar (counted live from `voice_control.COMMANDS`), fully offline, wake-word respected | **REAL** | `voice determinism` verify check + offline tests; `airmouse commands` prints the 75-command registry / 10 namespaces it feeds |
+| 78 | Pluggable local ASR engines — Vosk / Whisper (faster_whisper) / PocketSphinx, guarded imports, auto-detected when installed, preference vosk > whisper > pocketsphinx | **OPTIONAL** | engines NOT bundled; measured: no engine package installed → `voice-status` panel shows all `○` + `Full speech recognition is not installed.`; detection itself is tested |
+| 79 | ASR auto-install / network fetch of engines or models by AirMouse | **NOT AVAILABLE** | `voice_stack.install_guidance()` is TEXT ONLY (pip commands shown, never run); no subprocess, no network call in the install path |
+| 80 | `airmouse transcribe` — live transcription session (REPL pause/resume/save [json]/clear/status/stop/quit; segments with timestamp + confidence; bounded history 500; explicit save ONLY to `<home>/transcripts/`; text only, never audio; EOF ends cleanly) | **REAL** | `transcribe_session.py` + `offline_voice` streaming engine; measured full REPL run: segment `[12:24:40] 95% "Hello world, this is a test"`, `history: 2/500 segments`, `save` → `<home>/transcripts/transcript-<ts>.txt` / `.json`; no file written without save |
+| 81 | Simulated streaming ASR provider (deterministic offline stand-in when no engine is installed) | **SIMULATED** | measured banner on every session: `provider: simulated_stream` + `⚠ SIMULATED provider — install a local ASR engine for real transcription`; never passed off as real recognition |
+| 82 | Temporal recognizer — `temporal.py`: `TrajectoryBuffer` features (velocity/acceleration/direction/handedness), `PinchLifecycle` START/HOLD/MOVE/RELEASE with hysteresis + debounce + false-positive suppression + tracking grace, `TemporalRecognizer` sequences + compositions; ≈293 µs/frame recognize+features | **REAL** | `temporal.py` + module tests; measured by the `airmouse verify` Temporal check (293.4 µs/frame, direction right, lifecycle engaged) |
+| 83 | Temporal observer in the LIVE app — HUD badges `TMP:` (pinch lifecycle / proposal) and `SENSOR:` (health degraded/poor); feeds the local profile learning loop | **REAL** | `__main__.py` observer (PinchLifecycle + TrajectoryBuffer + SensorHealthScore fed every frame) + badge renderer + startup-probe tests; on-screen look = row 65 |
+| 84 | Temporal OS dispatch for new compositions (a proposal executing a NEW OS action) | **NOT AVAILABLE** | the observer PROPOSES ONLY — `gesture_spine` remains the sole dispatcher; no parallel execution path exists (enforced by source-scan tests); documented in-app and in `help-me` |
+| 85 | `CompositionResolver` — merges voice + gaze + gesture into ONE intent proposal | **REAL** | `temporal.py` + tests; proposals only (row 84 is the honest boundary) |
+| 86 | Robustness toolkit — `Hysteresis`, `Debouncer`, `FalsePositiveSuppressor`, `TrackingRecovery`, `CameraWatchdog`, `SensorHealthScore` | **REAL** | `temporal.py` + module tests; `SensorHealthScore` drives the live `SENSOR:` HUD badge |
+| 87 | Gaze Academy — 5 lessons (l1_acquire, l2_fixation, l3_dwell, l4_blink, l5_eye_assist) with REAL metric functions (acquisition, jitter, stability, fixation hold, dwell verification, blink events/gaze-lock, drift); headless → honest plan, nothing passed | **REAL** | `gaze_academy.py` (68 tests) + teacher integration; measured headless: plan + `PHYSICAL PRACTICE REQUIRED`, nothing marked complete |
+| 88 | Gaze Academy LIVE lessons (camera + your eyes; passes only from real gaze samples) | **PHYSICAL TEST REQUIRED** | needs webcam + face + calibrated gaze; simulated dry-runs are always labelled SIMULATED and never pass as real |
+| 89 | Gaze personalization — GazeLearner at `<home>/profile/gaze.json`: bounded clamps (dwell [0.3, 2.0] s etc.), EMA learning gated on VERIFIED observations, simulated observations flagged and never used for suggestions, suggestions are proposals (never auto-applied), local-only | **REAL** | `gaze_academy.py` + tests (roundtrip, clamps, corruption recovery, suggestion gating) |
+| 90 | Personal Interaction Profile — `<home>/profile/{interaction,voice,gestures,preferences}.json`: bounded, content-free (counters/parameters only), atomic writes, corruption fail-closed, reset with backup | **REAL** | `profile_store.py` + 63 tests; measured `airmouse privacy` lists them under the manifested `profile/` dir |
+| 91 | LearningLoop — 11 bounded stages, ring buffer, proposals that NEVER execute, single explicit approve path, `adapt()` converts approved proposals into profile observations (PREDICTION ≠ EXECUTION) | **REAL** | `profile_store.py` + tests incl. approval gate; the verify Teacher check asserts the approval gate end-to-end |
+| 92 | `airmouse help-me` — answers from REAL capability data (22-row gesture map aligned with `gestures.py` + spine risk classes, the 30-phrase grammar, honest destructive + two-hand notes, gate-level debug answer) | **REAL** | `help_registry.py` + tests; measured: overview panel, `"how do I scroll?"` → 3 real scroll paths, `"why didn't that work?"` → e-stop → confidence → policy → rate-limit chain |
+| 93 | Zero-learning-curve READY panel — post-startup `AIRMouse READY` (Hands/Voice/Gaze/Learning ✓/○ + `say "help" anytime` + teach reminder); display-only, `config.ready_panel` default true | **REAL** | `__main__.py` panel + config keys (both v16.5 keys measured in `config.py` defaults); on-screen HUD look = row 65 |
+| 94 | New config keys `teach_auto` / `ready_panel` (both default true, written to config.toml `[v10]`) | **REAL** | `config.py` defaults + `save_defaults` lines; round-trip tests |
 
 ---
 
@@ -121,21 +150,27 @@ AIRMouse Doctor
 ===========================
 
 READY:       32
-OPTIONAL:    7
+OPTIONAL:    6
 HARDWARE:    2
-WARNING:     0
+WARNING:     1
 FAILED:      0
 
 Overall:
-[READY FOR TESTING]
+[PARTIAL — review WARNING items]
 ```
 
-41 components across 12 sections (SYSTEM 6, PYTHON 11, AIRMOUSE 4,
-CAMERA 1, MICROPHONE 1, SPEECH 4, INPUT 2, BROWSER 3, INTELLIGENCE 2,
-AGENT 4, OFFLINE 1, SAFETY 2). Non-READY rows are honest headless
+41 components across 12 sections. Non-READY rows are honest headless
 truth: pynput UNAVAILABLE (no display) ×2, voice extras NOT_INSTALLED
-×2, simulated-only transcription providers, absent Chrome/Edge, mock
-executors, webcam + microphone HARDWARE.
+×2, absent Chrome/Edge, mock executors, webcam + microphone HARDWARE.
+The single WARNING is `Hand tracking model — not downloaded yet`
+(this sandbox lost the previously-downloaded model in the environment
+reset; v16.0.0's measurement on the same machine with the model
+present was READY 32 / OPTIONAL 7 / WARNING 0 → `[READY FOR
+TESTING]` — the OPTIONAL delta is the Speech row, which now reports
+`Transcription providers READY — local ASR: pocketsphinx` because the
+SpeechRecognition sphinx backend wrapper is importable; the v16.5
+`voice-status` engine-level panel still reports the engines honestly,
+see row 78).
 
 ## 3. Measured output — v16 gesture surface (this tree)
 
@@ -171,59 +206,101 @@ $ python -m airmouse.aip_stdio   (EXECUTE with no grants)
 
 ## 4. Measured output — `airmouse verify` (this tree)
 
-10/10 automated checks PASS (core import, voice determinism,
+12/12 automated checks PASS — Core import; voice determinism,
 intelligence roundtrip, safety gates + e-stop + hierarchy, offline
 18/18, simulated browser, permission deny-by-default, lease conflict,
-AIP validator, packaging match); 5 physical rows ACTION_REQUIRED
-(webcam, microphone, hand tracking, gaze, real browser). Exit 0.
+AIP validator, packaging match (16.5.0), **Teacher** (onboarding
+ladder + honest grading + help + profile store + learning-loop
+approval gate + transcribe session), **Temporal** (recognize+features
+293.4 µs/frame, direction right, lifecycle engaged); 5 physical rows
+ACTION_REQUIRED (webcam, microphone, hand tracking, gaze, real
+browser). Exit 0.
+
+Measured v16.5 headless runs (excerpts):
+
+```
+$ airmouse teach                (headless; rc 0)
+  Headless run: nothing was marked complete — physical lessons are NEVER auto-passed.
+  PHYSICAL PRACTICE REQUIRED — needs camera/microphone; never auto-passed.
+
+$ airmouse teach nope           (rc 1)
+  teach track must be: all | voice | gaze | gesture | fusion | resume
+
+$ airmouse transcribe < /dev/null   (rc 0)
+  provider: simulated_stream
+  ⚠ SIMULATED provider — install a local ASR engine for real transcription (see: airmouse voice-status)
+  session ended cleanly (no audio was ever stored)
+
+$ airmouse help-me "how do I scroll?"   (rc 0)
+Scrolling, three ways:
+  1. PINCH + HOLD, then move your hand up/down (vertical pinch = scroll).
+  2. SWIPE UP / SWIPE DOWN — a fast vertical hand sweep.
+  3. Say "scroll up" or "scroll down" (voice).
+```
 
 ## 5. Measured performance (same sandbox, unchanged budgets)
 
-| Command | Wall time (measured) | Pinned budget (`tests/test_release_perf.py`) |
+| Command | Wall time (measured, v16.5.0 tree) | Pinned budget (`tests/test_release_perf.py`) |
 |---|---:|---:|
-| `python -m airmouse --version` | ≈ 1.5 s | 6.0 s |
-| `python -m airmouse doctor` | ≈ 2.6 s | 12.0 s |
-| `python -m airmouse verify` | ≈ 1.6 s | 8.0 s |
-| `python -m airmouse test` | ≈ 1.6 s | 8.0 s |
+| `python -m airmouse --version` | ≈ 0.8 s | 6.0 s |
+| `python -m airmouse doctor` | ≈ 1.0 s | 12.0 s |
+| `python -m airmouse verify` | ≈ 1.5 s | 8.0 s |
+| `python -m airmouse test` | ≈ 0.9 s | 8.0 s |
 
-## 6. Status tally (this document, rows 1–70)
+Temporal recognizer (measured inside `airmouse verify`):
+recognize + features ≈ 293 µs/frame (budget: trivial at any realistic
+frame rate; the check itself asserts the measurement happens and the
+lifecycle engages).
+
+## 6. Status tally (this document, rows 1–94)
 
 | Status | Count |
 |---|---:|
-| REAL | 47 |
-| SIMULATED | 4 |
-| OPTIONAL | 3 |
-| PHYSICAL TEST REQUIRED | 10 |
-| NOT AVAILABLE | 6 |
-| **Total** | **70** |
+| REAL | 64 |
+| SIMULATED | 5 |
+| OPTIONAL | 4 |
+| PHYSICAL TEST REQUIRED | 13 |
+| NOT AVAILABLE | 8 |
+| **Total** | **94** |
 
 - PHYSICAL TEST REQUIRED rows: 28 (academy live lessons), 30 (lab
   live readout), 38 (mic voice control), 41 (live gaze), 42 (fusion
   modes live), 45 (browser against live Chrome/Edge), 46 (live OS
   control on a real desktop), 65 (HUD overlays), 66 (macro
-  record/replay live), 67 (PyInstaller Windows bundles).
+  record/replay live), 67 (PyInstaller Windows bundles), 72 (teacher
+  live sessions with sensors), 76 (Voice Academy microphone
+  practice), 88 (Gaze Academy live lessons).
 - NOT AVAILABLE rows: 22 (default actions for thumbs_down/four/five),
   25 (two-hand rotate/drag OS actions), 60 (automatic
   `selftune_apply`), 64 (RF hardware), 69 (cloud/telemetry
-  integrations), 70 (onboarding interview).
+  integrations), 70 (v15 one-choice onboarding interview), 79 (ASR
+  auto-install — guidance is text only), 84 (temporal OS dispatch for
+  new compositions — proposals only).
 - OPTIONAL rows: 37 (local ASR engines), 39 (TTS), 68 (settings GUI +
-  autostart management).
+  autostart management), 78 (pluggable local ASR engine
+  auto-detection).
 - SIMULATED rows: 36 (simulated ASR provider), 43 (simulated browser
   bridge), 50 (AIP EXECUTE without `--aip-real`), 61 (deterministic
-  simulator + failure injection).
+  simulator + failure injection), 81 (simulated streaming ASR
+  provider in `transcribe`).
 
 ## 7. Honesty summary
 
-- AUTOMATED VERIFICATION PASS: **1556 tests** (2 honest skips),
-  verify 10/10, offline 18/18, doctor 41 components.
+- AUTOMATED VERIFICATION PASS: **1889 tests** (2 honest skips),
+  verify 12/12, offline 18/18, doctor 41 components.
 - SIMULATION PASS: guided lab 7/7 simulation tests; simulated browser
-  bridge; simulated ASR provider; deterministic simulator + failure
-  injection; AIP EXECUTE without `--aip-real` (labelled `simulated`).
+  bridge; simulated ASR provider; simulated streaming transcription
+  provider (banner-labelled every session); deterministic simulator +
+  failure injection; AIP EXECUTE without `--aip-real` (labelled
+  `simulated`).
 - PHYSICAL HARDWARE NOT TESTED: webcam, microphone, real hand
   tracking (single- and two-hand), real gaze, real browser CDP,
   real OS input automation, live HUD, macro replay, PyInstaller
-  Windows bundles — ACTION_REQUIRED by design.
+  Windows bundles, the first-run tour and academy lessons with real
+  sensors, live ASR engines (vosk/whisper) — ACTION_REQUIRED by
+  design.
 - NOT AVAILABLE (never described as working): two-hand rotate/drag OS
-  actions, default actions for thumbs_down/four/five, automatic
-  `selftune_apply`, RF hardware, cloud/telemetry integrations, the
-  onboarding interview.
+  actions, temporal OS dispatch for new compositions (proposals
+  only), default actions for thumbs_down/four/five, automatic
+  `selftune_apply`, ASR auto-install, RF hardware, cloud/telemetry
+  integrations, the v15 one-choice onboarding interview.
