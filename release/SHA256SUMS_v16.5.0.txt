@@ -1,0 +1,2 @@
+11e49bd57c9dcd9325b9b22441f0e8ba5ac5aba8108a9474801bdfa3aa1daa96  airmouse-16.5.0-py3-none-any.whl
+cbd22cbfe60ec754bdee6a328577d3840da7bf5e8902c2eb7923681863146723  airmouse-16.5.0.tar.gz
