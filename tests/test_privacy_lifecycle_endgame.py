@@ -116,6 +116,23 @@ def _create_all_learning_artifacts(home) -> dict:
             b'{"events": [{"t": 0.1, "event": "zoom"}]}',
         "lecture.md":
             b"# lecture\nverbatim user notes live here\n",
+        # v16.5 artifacts (privacy manifest: academy_progress /
+        # onboarding_state / personal_profile — all user_learning=True,
+        # so the lifecycle must delete them)
+        "academy_progress.json":
+            b'{"move": {"passes": 2, "attempts": 3}}',
+        "profile/onboarding.json":
+            b'{"phase": "IN_PROGRESS", "voice": false, "gaze": false}',
+        "profile/interaction.json":
+            b'{"frequent_intents": {"left_click": 12}}',
+        "profile/voice.json":
+            b'{"commands": {"click": 9}, "aliases": {}}',
+        "profile/gaze.json":
+            b'{"dwell": 0.8, "quality": 0.91}',
+        "profile/gestures.json":
+            b'{"preferred": ["pinch", "peace"]}',
+        "profile/preferences.json":
+            b'{"hint_level": "compact"}',
     }
     for rel, data in raw.items():
         _write(h, rel, data)
@@ -133,6 +150,11 @@ def _create_keep_artifacts(home) -> dict:
         "hand_landmarker.task": _write(
             h, "hand_landmarker.task", b"\x00\x01third-party-model"),
         "tutorial_done": _write(h, "tutorial_done", b""),
+        # v16.5: user-saved transcripts are user-owned copies (not
+        # learning data) — the lifecycle must leave them alone
+        "transcripts/session-1.json": _write(
+            h, "transcripts/session-1.json",
+            b'{"segments": [{"text": "saved by the user"}]}'),
     }
 
 

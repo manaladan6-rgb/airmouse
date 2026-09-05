@@ -591,6 +591,57 @@ PRIVACY_MANIFEST = [
         "user_learning": False,
     },
     {
+        "name": "academy_progress",
+        "purpose": "per-lesson progress of the Gesture Academy",
+        "location": lambda: _academy_progress_file(), "kind": "file",
+        "data_type": "lesson ids, pass counts and timestamps (no media, "
+                     "no content)",
+        "created_by": "academy.run_academy (live lesson pass)",
+        "read_by": "academy.load_progress; teach/learn resume",
+        "deleted_by": "memory_reset (backup+clear); memory_delete (remove)",
+        "exported_by": "memory_export",
+        "user_learning": True,
+    },
+    {
+        "name": "onboarding_state",
+        "purpose": "persisted first-run teaching state (v16.5 onboarding)",
+        "location": lambda: _onboarding_file(), "kind": "file",
+        "data_type": "onboarding phase, per-track completion + learner "
+                     "stats (no media, no content)",
+        "created_by": "teacher.OnboardingStore.save (teach/learn/first run)",
+        "read_by": "teacher.OnboardingStore.load; first-run detection",
+        "deleted_by": "memory_reset (backup+clear); memory_delete (remove)",
+        "exported_by": "memory_export",
+        "user_learning": True,
+    },
+    {
+        "name": "personal_profile",
+        "purpose": "personal interaction profile learned on-device",
+        "location": lambda: _profile_dir(), "kind": "dir",
+        "data_type": "bounded learned parameters: dwell/confidence "
+                     "preferences, voice phrase counts, gaze quality, "
+                     "frequent intents (no raw audio/video, no typed "
+                     "content)",
+        "created_by": "profile_store.ProfileStore.save (learning loop)",
+        "read_by": "profile_store.ProfileStore.load; teacher adaptivity; "
+                   "privacy status",
+        "deleted_by": "memory_reset (backup+clear); memory_delete (remove)",
+        "exported_by": "memory_export (stores bundle)",
+        "user_learning": True,
+    },
+    {
+        "name": "transcript_sessions",
+        "purpose": "user-saved transcription sessions (explicit save only)",
+        "location": lambda: _transcripts_dir(), "kind": "dir",
+        "data_type": "text transcripts the user explicitly chose to save "
+                     "(never written automatically)",
+        "created_by": "transcribe_session save command (user action)",
+        "read_by": "the user; transcribe export",
+        "deleted_by": "not deleted automatically (user-owned copies)",
+        "exported_by": "is the save output area",
+        "user_learning": False,
+    },
+    {
         "name": "backups",
         "purpose": "pre-reset/pre-delete backups of user data",
         "location": lambda: _backups_dir(), "kind": "dir",
@@ -668,6 +719,27 @@ def _backups_dir() -> str:
 def _exports_dir() -> str:
     from . import paths as _paths
     return _paths.exports_dir()
+
+
+def _academy_progress_file() -> str:
+    from . import paths as _paths
+    import os as _os
+    return _os.path.join(_paths.airmouse_home(), "academy_progress.json")
+
+
+def _onboarding_file() -> str:
+    from . import paths as _paths
+    return _paths.onboarding_file()
+
+
+def _profile_dir() -> str:
+    from . import paths as _paths
+    return _paths.profile_dir()
+
+
+def _transcripts_dir() -> str:
+    from . import paths as _paths
+    return _paths.transcripts_dir()
 
 
 def privacy_manifest() -> list:

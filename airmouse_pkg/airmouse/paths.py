@@ -35,6 +35,11 @@ __all__ = [
     "calibration_file", "gaze_calibration_file", "gestures_file",
     "macros_dir", "model_file", "lecture_file", "tutorial_done_file",
     "config_file", "backups_dir", "exports_dir",
+    "profile_dir", "onboarding_file",
+    "profile_interaction_file", "profile_voice_file",
+    "profile_gaze_file", "profile_gestures_file",
+    "profile_preferences_file",
+    "transcripts_dir",
 ]
 
 #: the single environment variable that overrides the home directory
@@ -127,3 +132,47 @@ def backups_dir() -> str:
 def exports_dir() -> str:
     """Directory where user-directed export bundles land by default."""
     return _join("exports")
+
+
+# ---------------------------------------------------------------------------
+# v16.5 — personal interaction profile + teaching state
+# ---------------------------------------------------------------------------
+
+def profile_dir() -> str:
+    """Directory of the personal interaction profile (profile/)."""
+    return _join("profile")
+
+
+def onboarding_file() -> str:
+    """Persisted onboarding/teaching state (profile/onboarding.json)."""
+    return _join("profile", "onboarding.json")
+
+
+def profile_interaction_file() -> str:
+    """Learned interaction summary (profile/interaction.json)."""
+    return _join("profile", "interaction.json")
+
+
+def profile_voice_file() -> str:
+    """Learned voice preferences (profile/voice.json)."""
+    return _join("profile", "voice.json")
+
+
+def profile_gaze_file() -> str:
+    """Learned gaze preferences (profile/gaze.json)."""
+    return _join("profile", "gaze.json")
+
+
+def profile_gestures_file() -> str:
+    """Learned gesture preferences (profile/gestures.json)."""
+    return _join("profile", "gestures.json")
+
+
+def profile_preferences_file() -> str:
+    """Teaching/preference settings (profile/preferences.json)."""
+    return _join("profile", "preferences.json")
+
+
+def transcripts_dir() -> str:
+    """Directory of user-saved transcription sessions (transcripts/)."""
+    return _join("transcripts")

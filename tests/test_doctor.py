@@ -370,6 +370,7 @@ def test_format_doctor_report_ends_with_contract_shape():
     assert text.startswith("AIRMouse Doctor\n===========================\n")
     assert report.overall() in ("[READY FOR TESTING]",
                                 "[PARTIAL — fix FAILED items]",
+                                "[PARTIAL — review WARNING items]",
                                 "[BLOCKED]")
 
 

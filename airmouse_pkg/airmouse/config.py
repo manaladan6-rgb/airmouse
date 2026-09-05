@@ -298,6 +298,10 @@ class Config:
     gesture_sequences = True                # feed hand gestures to the custom-sequence registry
     selftune_apply = False                  # opt-in: let SelfTuner apply bounded parameter proposals
 
+    # ═══ v16.5 — ADAPTIVE MULTIMODAL INTELLIGENCE (teaching layer) ═══
+    teach_auto = True                # offer the first-run "Teach Me" experience
+    ready_panel = True               # show the zero-learning-curve READY panel
+
     def save_defaults(self):
         """Save current config as TOML (creates template for user editing)."""
         if tomllib is None:
@@ -447,6 +451,8 @@ class Config:
             f"gesture_allow_destructive = {str(self.gesture_allow_destructive).lower()}",
             f"gesture_sequences = {str(self.gesture_sequences).lower()}",
             f"selftune_apply = {str(self.selftune_apply).lower()}",
+            f"teach_auto = {str(self.teach_auto).lower()}             # v16.5 offer first-run teaching",
+            f"ready_panel = {str(self.ready_panel).lower()}            # v16.5 zero-learning-curve READY panel",
         ]
         with open(CONFIG_PATH, "w") as f:
             f.write("\n".join(lines) + "\n")
