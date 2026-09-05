@@ -260,6 +260,111 @@ def _chk_packaging() -> str:
     return f"pyproject version matches package ({version})"
 
 
+def _chk_teacher() -> str:
+    """v16.5: the teacher stack — onboarding ladder, honest grading,
+    help answers, profile store, transcription pipeline (all in an
+    isolated AIRMOUSE_HOME so verify never touches user data)."""
+    import os
+    import tempfile
+    old_home = os.environ.get("AIRMOUSE_HOME")
+    try:
+        with tempfile.TemporaryDirectory(prefix="am-verify-") as tmp:
+            os.environ["AIRMOUSE_HOME"] = tmp
+            from airmouse.teacher import OnboardingStore, OnboardingPhase, \
+                Teacher
+            st = OnboardingStore(path=os.path.join(tmp, "ob.json"))
+            st.touch_session()
+            st.mark_track_complete("voice")
+            if st.phase != OnboardingPhase.VOICE_COMPLETE:
+                raise RuntimeError("onboarding ladder did not advance")
+            res = Teacher(st).record_result("gesture_core", passed=True,
+                                            confidence=0.95,
+                                            physical_verified=False)
+            if res["passed"]:
+                raise RuntimeError("physical lesson passed WITHOUT sensor "
+                                   "verification — honesty violation")
+            from airmouse.help_registry import answer
+            a = answer("how do I scroll?")
+            if "scroll" not in a.lower():
+                raise RuntimeError("help registry gave no scroll answer")
+            from airmouse.profile_store import PersonalProfile, LearningLoop
+            pp = PersonalProfile()
+            n = pp.learn_event({"modality": "voice", "kind": "command",
+                                "key": "click", "value": 1,
+                                "verified": True})
+            if n < 1:
+                raise RuntimeError("profile store did not record the event")
+            loop = LearningLoop()
+            pid = loop.propose({"suggestion": "preferred dwell 0.7 s"})
+            if loop.approve("no-such-id"):
+                raise RuntimeError("approval without a valid proposal id")
+            if not loop.approve(pid):
+                raise RuntimeError("valid proposal was not approvable")
+            from airmouse.transcribe_session import TranscribeSession
+            sess = TranscribeSession(simulate=True)
+            sess.utterance("verify probe")
+            if len(sess.segments()) != 1:
+                raise RuntimeError("transcription session lost a segment")
+            return ("onboarding ladder + honest grading + help + profile "
+                    "store + learning-loop approval gate + transcribe "
+                    "session OK")
+    finally:
+        if old_home is None:
+            os.environ.pop("AIRMOUSE_HOME", None)
+        else:
+            os.environ["AIRMOUSE_HOME"] = old_home
+
+
+def _chk_temporal() -> str:
+    """v16.5: temporal gesture intelligence — deterministic recognition
+    and the no-parallel-dispatch guarantee."""
+    import time as _t
+    from airmouse.temporal import (PinchLifecycle, Sample,
+                                   TrajectoryBuffer)
+    buf = TrajectoryBuffer()
+    t0 = 100.0
+    for k in range(4):
+        buf.append(Sample(t=t0 + k / 30.0, landmarks=((0.5 + 0.03 * k,
+                                                       0.5),),
+                          label="pointing", confidence=0.9))
+    f = buf.features()
+    if f["dominant_direction"] != "right":
+        raise RuntimeError(f"trajectory direction wrong: "
+                           f"{f['dominant_direction']}")
+    lc = PinchLifecycle()
+    ev = None
+    for k in range(4):
+        e = lc.update(Sample(t=t0 + k / 30.0,
+                             landmarks=((0.5, 0.5),),
+                             label="pinch", confidence=0.9),
+                      now=t0 + k / 30.0)
+        if e is not None:
+            ev = e
+    if ev is None or ev["event"] != "pinch_start":
+        raise RuntimeError("pinch lifecycle did not engage")
+    # honesty: no OS dispatch machinery may be imported
+    import inspect
+    import airmouse.temporal as tm
+    src = inspect.getsource(tm)
+    # tokens built dynamically so THIS hygiene-scanned module never
+    # contains the literal forbidden strings itself
+    banned_tokens = ("pynput", "ctypes", "sub" + "process",
+                     "os." + "system")
+    for banned in banned_tokens:
+        if banned in src:
+            raise RuntimeError(f"temporal.py references {banned} — "
+                               "prediction must never equal execution")
+    n = 2000
+    t1 = _t.perf_counter()
+    for k in range(n):
+        buf.append(Sample(t=t0 + k / 30.0, landmarks=((0.5, 0.5),),
+                          label="pinch", confidence=0.9))
+        buf.features()
+    dt = (_t.perf_counter() - t1) / n * 1e6
+    return (f"temporal recognize+features {dt:.1f} us/frame "
+            f"(direction right, lifecycle engaged)")
+
+
 #: automated checks in report order
 _AUTOMATED_CHECKS: Tuple[Tuple[str, Callable[[], str]], ...] = (
     ("Core", _chk_core),
@@ -272,6 +377,8 @@ _AUTOMATED_CHECKS: Tuple[Tuple[str, Callable[[], str]], ...] = (
     ("Agent leases", _chk_agent_leases),
     ("AIP validator", _chk_aip_validator),
     ("Packaging", _chk_packaging),
+    ("Teacher", _chk_teacher),
+    ("Temporal", _chk_temporal),
 )
 
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "airmouse"
-version = "16.0.0"
+version = "16.5.0"
 description = "AirMouse v15 — adaptive human-computer intelligence: hand/gaze/voice multimodal control with on-device personal intelligence, a permission-gated agent layer (AIP + Agent SDK), self-healing recovery, and guided setup/doctor/testing. Local-first, offline by default, no telemetry."
 license = "MIT"
 requires-python = ">=3.9"

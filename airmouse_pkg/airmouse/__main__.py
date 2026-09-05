@@ -107,7 +107,7 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
               voice_caption=None, voice_active=False, zoom_active=False,
               recording=False, kalman_on=False, cal_ready=False,
               v9_state=None, v10_state=None, v115_state=None,
-              v15_state=None):
+              v15_state=None, v165_state=None):
     """Draw Iron Man HUD overlay with v3.1 enhancements."""
     if frame is None:
         return
@@ -211,6 +211,19 @@ def _draw_hud(frame, gesture_result, spring, fps, config,
                 vcol = (140, 255, 140) if v10_state["verify"] == "passed" \
                     else (255, 170, 80)
                 badges.append((f"VER:{str(v10_state['verify'])[:6].upper()}", vcol))
+        except Exception:
+            pass
+    # v16.5 badges: temporal pinch lifecycle + sensor health
+    if v165_state:
+        try:
+            _tmp = v165_state.get("temporal")
+            if _tmp:
+                badges.append((f"TMP:{str(_tmp)[:12].upper()}",
+                               (170, 255, 170)))
+            _hp = v165_state.get("health")
+            if _hp and _hp != "good":
+                badges.append((f"SENSOR:{str(_hp)[:4].upper()}",
+                               (255, 170, 80)))
         except Exception:
             pass
     # v11.5 badges: intelligence, interaction mode, suggestions, transcript
@@ -577,11 +590,14 @@ def main():
                                  "benchmark",
                                  "setup", "doctor", "test", "verify",
                                  "privacy",
-                                 "academy", "gesture-lab", "profile"],
+                                 "academy", "gesture-lab", "profile",
+                                 "teach", "learn", "transcribe", "help-me"],
                         help="info/diagnostic subcommand (prints and exits)")
     parser.add_argument("command_arg", nargs="?", default=None,
                         help="optional subcommand argument "
-                             "(memory: status|export|reset|delete)")
+                             "(memory: status|export|reset|delete; "
+                             "teach: all|voice|gaze|gesture|fusion|resume; "
+                             "help-me: any question)")
     args = parser.parse_args()
 
     if args.version:
@@ -700,6 +716,13 @@ def main():
                       f" (exists={e.get('exists')})")
         except Exception as _me:
             print(f"  (manifest unavailable: {_me})")
+        # v16.5: the personalization summary — what has been LEARNED
+        try:
+            from .profile_store import PersonalProfile
+            print("  " + PersonalProfile().personalization_summary()
+                  .replace("\n", "\n  "))
+        except Exception:
+            pass
         return 0
 
     # ═══ v16 Gesture Academy — teach MOVE/CLICK/DRAG/... with live feedback ═══
@@ -726,6 +749,45 @@ def main():
         ok, msg = apply_profile(name)
         print(f"  {msg}")
         return 0 if ok else 1
+
+    # ═══ v16.5 — the TEACHER: first-run auto-teaching experience (§2/§23) ═══
+    if args.command == "teach":
+        from .teacher import run_teach
+        track = str(args.command_arg or "all").strip().lower()
+        resume = track == "resume"
+        if resume:
+            track = "all"
+        if track not in ("all", "voice", "gaze", "gesture", "fusion"):
+            print("  teach track must be: all | voice | gaze | gesture | "
+                  "fusion | resume")
+            return 1
+        try:
+            interactive = sys.stdin.isatty()
+        except Exception:
+            interactive = False
+        return int(run_teach(track=track, resume=resume,
+                             input_fn=input if interactive else None,
+                             camera=(not args.no_cam) if interactive else None))
+
+    # ═══ v16.5 — airmouse learn: every academy in one command (§23) ═══
+    if args.command == "learn":
+        from .teacher import run_learn
+        try:
+            interactive = sys.stdin.isatty()
+        except Exception:
+            interactive = False
+        return int(run_learn(input_fn=input if interactive else None,
+                             camera=(not args.no_cam) if interactive else None))
+
+    # ═══ v16.5 — live transcription session (§6) ═══
+    if args.command == "transcribe":
+        from .transcribe_session import run_transcribe
+        return int(run_transcribe(simulate=bool(args.offline)))
+
+    # ═══ v16.5 — contextual help answered locally (§20) ═══
+    if args.command == "help-me":
+        from .help_registry import run_help_me
+        return int(run_help_me(topic=str(args.command_arg or "")))
 
     # ═══ v15.1 memory lifecycle (§10): status | export | reset | delete ═══
     mem_arg = str(args.command_arg or "").strip().lower()
@@ -1027,6 +1089,13 @@ def main():
         eng = OfflineVoiceEngine({})
         print(f"  mode: {eng.mode.value}  wake_word_required: {eng.wake_word_required}")
         print(f"  offline ASR providers: {detect_providers()}")
+        # v16.5: the honest provider panel (built-in grammar vs full ASR)
+        try:
+            from .voice_stack import status_panel
+            for _line in status_panel().splitlines():
+                print(f"  {_line}")
+        except Exception:
+            pass
         print("  live engine status requires a running session (HUD / diagnostics)")
         return
     if args.command == "browser":
@@ -1105,6 +1174,29 @@ def main():
             else:
                 print("  Failed to disable auto-start.")
         return
+
+    # ═══ v16.5 — first-run auto-teaching (mission §2/§24) ═══
+    # A brand-new user running plain `airmouse` on a TTY is offered the
+    # interactive tour; an interrupted one is offered to resume.  Every
+    # decline path ("Skip for now", EOF, non-TTY) proceeds normally —
+    # the user is NEVER trapped inside onboarding.
+    if args.command is None and not args.skip and not args.aip_stdio:
+        try:
+            from .teacher import (OnboardingStore, maybe_prompt_teach,
+                                  run_teach)
+            stdin_tty = sys.stdin.isatty() if hasattr(sys.stdin,
+                                                      "isatty") else False
+            if stdin_tty:
+                _st = OnboardingStore()
+                if not _st.is_complete and maybe_prompt_teach(store=_st):
+                    teach_rc = run_teach(track="all", resume=True,
+                                         input_fn=input,
+                                         camera=not args.no_cam)
+                    if teach_rc not in (0, 1):
+                        teach_rc = 0
+                    print()  # spacer before the app continues
+        except Exception:
+            pass  # teaching must never block the app
 
     config = Config()
     config.load()
@@ -1208,8 +1300,10 @@ def main():
             print(f"  !! two-hand engine unavailable ({_th}) — "
                   "single-hand mode continues")
 
-    # Tutorial check
-    tutorial_done_file = os.path.join(os.path.expanduser("~"), ".airmouse", "tutorial_done")
+    # Tutorial check (v16.5: resolves through the authoritative paths
+    # module — was hardcoded to ~/.airmouse, ignoring $AIRMOUSE_HOME)
+    from .paths import tutorial_done_file as _tutorial_done_file
+    tutorial_done_file = _tutorial_done_file()
     should_tutorial = args.tutorial or (not args.skip and not os.path.exists(tutorial_done_file))
 
     if should_tutorial:
@@ -1823,6 +1917,59 @@ def main():
             print(f"  !! voice dispatch error: {e}")
         return False
 
+    # ═══ v16.5 — temporal intelligence observer (mission §10/§14/§16) ═══
+    # A lightweight OBSERVER over the same frame stream: pinch lifecycle
+    # (START/HOLD/MOVE/RELEASE), trajectory features and sensor health.
+    # It feeds the HUD badge and the local profile learning loop.  It
+    # PROPOSES — the spine disposes: nothing here dispatches OS actions,
+    # so the single-owner execution architecture is preserved.
+    temporal_obs = None
+    try:
+        from .temporal import (PinchLifecycle as _PLC, Sample as _TSample,
+                               SensorHealthScore as _SHS,
+                               TrajectoryBuffer as _TBuf)
+        _tbuf = _TBuf()
+        _tlc = _PLC()
+        _thealth = _SHS()
+        v165_state = {"temporal": "", "health": "good"}
+
+        def _temporal_tick(hand_data, gesture_result, now):
+            """Feed one frame; update the HUD state dict. Never raises."""
+            frame_ok = bool(hand_data.get("hand_found")) if hand_data \
+                else False
+            label = str(gesture_result.get("gesture", "")) \
+                if gesture_result else ""
+            conf = float(gesture_result.get("confidence", 0.0) or 0.0) \
+                if gesture_result else 0.0
+            pos = None
+            lm = gesture_result.get("landmarks") if gesture_result else None
+            if frame_ok and lm is not None and len(lm) > 8:
+                try:
+                    pos = (float(lm[8].x), float(lm[8].y))
+                except (AttributeError, TypeError, IndexError, ValueError):
+                    pos = None
+            lms = ((pos[0], pos[1]),) if pos is not None else None
+            sample = _TSample(t=now, landmarks=lms,
+                              label=(label if frame_ok else "none"),
+                              confidence=(conf if frame_ok else 0.0))
+            if frame_ok:
+                _tbuf.append(sample)
+                _thealth.feed(True, conf)
+            else:
+                _thealth.feed(False)
+            ev = _tlc.update(sample, now)
+            if ev is not None:
+                tag = str(ev.get("event") or "")
+                if ev.get("proposal"):
+                    tag += ":" + str(ev["proposal"])
+                v165_state["temporal"] = tag
+            v165_state["health"] = _thealth.rating()
+
+        temporal_obs = {"tick": _temporal_tick}
+    except Exception:
+        temporal_obs = None
+        v165_state = {"temporal": "", "health": "good"}
+
     # Banner
     print()
     print("  +==================================================+")
@@ -1848,6 +1995,32 @@ def main():
     if precision_mode:
         print(f"  Mode: PRECISION (power={config.precision_power}, scale={config.precision_scale})")
     _show_quick_reference()
+    # ═══ v16.5 — zero-learning-curve READY panel (mission §19) ═══
+    if config.ready_panel:
+        try:
+            _st = None
+            try:
+                from .teacher import OnboardingStore as _OS
+                _st = _OS()
+            except Exception:
+                pass
+            _learn_on = (intelligence_plugin is not None and
+                         intelligence_plugin.state.value == "available" and
+                         bool(config.learning_enabled))
+            print("  " + "─" * 54)
+            print(f"  AIRMouse READY    Hands: {'✓' if tracker else '○'}"
+                  f"  Voice: {'✓' if (voice is not None or voice_engine10 is not None) else '○'}"
+                  f"  Gaze: {'✓' if config.gaze_enabled else '○'}"
+                  f"  Learning: {'✓' if _learn_on else 'paused'}")
+            print("  Tip: say \"help\" anytime — or ask: airmouse help-me")
+            print("  Try:  \"click that\"  ·  pinch to click  ·  peace to "
+                  "right-click")
+            if _st is not None and not _st.is_complete:
+                print("  New here? Run:  airmouse teach   (3–5 min interactive "
+                      "tour)")
+            print("  " + "─" * 54)
+        except Exception:
+            pass
     print()
 
     try:
@@ -1893,6 +2066,14 @@ def main():
                 except Exception:
                     two_hand_report = None
                     two_hand_active = False
+
+            # v16.5: the temporal observer watches every frame (proposals
+            # only — the spine below remains the sole dispatcher)
+            if temporal_obs is not None:
+                try:
+                    temporal_obs["tick"](hand_data, gesture_result, now)
+                except Exception:
+                    pass
 
             if hand_data["hand_found"] and hand_data["landmarks"] is not None:
                 hand_absent_frames = 0  # Reset absent counter
@@ -2590,7 +2771,8 @@ def main():
                           v9_state=v9_summary,
                           v10_state=v10_state,
                           v115_state=v115_state,
-                          v15_state=None)  # agent/task/recovery badges
+                          v15_state=None,  # agent/task/recovery badges
+                          v165_state=v165_state)
                           # populated by the agent runtime at runtime
                 cv2.imshow("AirMouse", hand_data["frame"])
                 key = cv2.waitKey(1) & 0xFF

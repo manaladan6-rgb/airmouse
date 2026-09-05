@@ -732,7 +732,8 @@ class TestNoNetworkGuarantee:
 
         # verify (runs the full offline self-test under the guard too)
         vrep = verify_mod.run_verify()
-        assert len(vrep.automated) == 10
+        # v16.5: +2 automated checks (Teacher, Temporal) — all network-free
+        assert len(vrep.automated) == 12
         assert len(vrep.physical) == 5
         assert all(i.status == verify_mod.ACTION_REQUIRED
                    for i in vrep.physical)
