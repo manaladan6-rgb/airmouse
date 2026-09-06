@@ -40,6 +40,7 @@ __all__ = [
     "profile_gaze_file", "profile_gestures_file",
     "profile_preferences_file",
     "transcripts_dir", "asr_provider_file",
+    "models_dir", "vosk_model_dir",  # v16.5.3 — local ASR model storage
 ]
 
 #: the single environment variable that overrides the home directory
@@ -176,6 +177,22 @@ def profile_preferences_file() -> str:
 def transcripts_dir() -> str:
     """Directory of user-saved transcription sessions (transcripts/)."""
     return _join("transcripts")
+
+
+def models_dir() -> str:
+    """Local ASR model storage (models/) — v16.5.3.
+
+    Downloaded lightweight local ASR models live here (e.g. the
+    official Vosk small en-US model placed by ``airmouse
+    voice-setup``).  Data only — never executable code — and always
+    inside the AirMouse home.
+    """
+    return _join("models")
+
+
+def vosk_model_dir() -> str:
+    """Directory the Vosk model resolves into (models/vosk/) — v16.5.3."""
+    return _join("models", "vosk")
 
 
 def asr_provider_file() -> str:

@@ -73,6 +73,7 @@ __all__ = [
     "ProviderState", "ProviderDiagnosis", "ASRProviderRegistry",
     "registry", "detect_microphone", "active_asr_provider",
     "PROBE_POCKETSPHINX", "PROBE_VOSK", "PROBE_WHISPER",
+    "VoskModelMissing",  # v16.5.3 — engine present, model absent
 ]
 
 
@@ -132,16 +133,42 @@ def PROBE_POCKETSPHINX() -> float:
     return _PS_PROBE_SECONDS
 
 
-def PROBE_VOSK() -> float:
-    """Prove Vosk is importable (model loads on first use — DEFERRED).
+class VoskModelMissing(RuntimeError):
+    """vosk imports but NO local acoustics model resolves (v16.5.3).
 
-    No model download is ever triggered (mission §9).  Raises when the
-    engine package cannot be imported.
+    Distinct from a broken install: the engine itself is fine, the
+    MODEL is the missing capability.  ``airmouse voice-setup`` is the
+    fix (official model, consent-gated, sha256-verified) — the probe
+    itself NEVER downloads anything.
+    """
+
+    def __init__(self, message: str = "vosk engine is installed but no "
+                                      "local acoustics model is available") -> None:
+        super().__init__(message)
+        self.fix = "run: airmouse voice-setup  (installs the official " \
+                   "lightweight en-US model — consent-gated, sha256-verified)"
+
+
+def PROBE_VOSK() -> float:
+    """Prove Vosk can really run HERE: import + model resolution.
+
+    ``import vosk`` loads the native Kaldi binding, so a successful
+    import proves the engine itself.  What vosk additionally NEEDS is a
+    local acoustics model — v16.5.3 resolves it with the deterministic
+    :func:`airmouse.offline_voice.resolve_vosk_model_path` (env /
+    config / AirMouse models dir).  No model → :class:`VoskModelMissing`
+    (honest: engine installed, capability incomplete — never a silent
+    "usable" verdict that would diverge from the engine's own
+    ``available()``).  The model itself is NOT loaded here (first use,
+    DEFERRED) and is NEVER downloaded by the probe.
     """
     t0 = time.perf_counter()
-    import vosk  # noqa: F401
+    import vosk  # noqa: F401 — the REAL importability gate (native lib)
     if not hasattr(vosk, "Model"):
         raise RuntimeError("vosk package lacks Model (broken install)")
+    from .offline_voice import resolve_vosk_model_path
+    if not resolve_vosk_model_path():
+        raise VoskModelMissing()
     return time.perf_counter() - t0
 
 
@@ -353,6 +380,17 @@ class ASRProviderRegistry:
                 d.initialization = "FAIL"
                 d.state = ProviderState.FAILED
                 d.reason = f"{type(exc).__name__}: {exc}"
+                if isinstance(exc, VoskModelMissing):
+                    # v16.5.3 — engine fine, MODEL missing: not FAILED
+                    # (the install is healthy) and not AVAILABLE (it
+                    # cannot run yet).  INSTALLED = importable, init
+                    # unproven — exactly this situation.  The FIX is
+                    # honest and actionable (voice-setup), and the
+                    # engine's own available() agrees (no divergence).
+                    d.importable = True   # the probe DID import vosk
+                    d.initialization = "MODEL MISSING"
+                    d.state = ProviderState.INSTALLED
+                    d.reason = str(exc) + " — " + getattr(exc, "fix", "")
             out[name] = d
         self._diagnoses = out
         return out

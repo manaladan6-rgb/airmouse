@@ -818,14 +818,45 @@ def _detect_speech(quick: bool) -> List[Component]:
                     "key) to re-enable local ASR",
                     hardware_state="DISABLED"))
             else:
+                # v16.5.3 — the FIX comes from the BOOTSTRAP MANAGER, not
+                # a hardcoded pip line: on a Windows/CPython-3.12 machine
+                # "pip install pocketsphinx" fails with a NMake/MSVC
+                # error; the honest fix there is the zero-compiler
+                # voice-setup path (vosk wheel) or the packaging
+                # diagnosis when no wheel exists at all.
+                fix_line = ("optional: pip install pocketsphinx "
+                            "SpeechRecognition for the lightweight local "
+                            "ASR (see: airmouse voice-status)")
+                diagnosis = ""
+                try:
+                    from .voice_bootstrap import (bootstrap_manager,
+                                                  NATIVE_ASR_PACKAGE_UNAVAILABLE)
+                    _rep, plan = bootstrap_manager.recommend_installation()
+                    diagnosis = _rep.diagnosis
+                    wheel_opts = [p for p in plan
+                                  if p.verdict == "WHEEL_AVAILABLE"]
+                    if wheel_opts:
+                        first = wheel_opts[0]
+                        fix_line = ("run: airmouse voice-setup   (installs "
+                                    f"{first.engine} — "
+                                    f"{first.wheel_mb:.1f} MB prebuilt "
+                                    "wheel, NO compiler needed)")
+                    elif diagnosis == NATIVE_ASR_PACKAGE_UNAVAILABLE:
+                        fix_line = ("no prebuilt ASR wheel exists for this "
+                                    "interpreter — this is a package "
+                                    "availability problem, NOT a "
+                                    "microphone failure; see: airmouse "
+                                    "voice-setup --check-only")
+                except Exception:
+                    pass
+                detail = ("no usable local ASR engine (detection = real "
+                          "initialization probe, not an import flag)")
+                if diagnosis:
+                    detail += f" — {diagnosis}"
                 comps.append(_component(
                     "Transcription providers", "SPEECH",
                     ComponentState.OPTIONAL,
-                    "no usable local ASR engine (detection = real "
-                    "initialization probe, not an import flag)",
-                    "optional: pip install pocketsphinx SpeechRecognition "
-                    "for the lightweight local ASR (see: airmouse "
-                    "voice-status)",
+                    detail, fix_line,
                     hardware_state="NOT INSTALLED"))
     except Exception as exc:
         comps.append(_component(

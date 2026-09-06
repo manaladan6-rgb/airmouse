@@ -737,6 +737,88 @@ still launched `provider: simulated_stream`.
   `voice-status` and `transcribe` — one registry, one truth.
 - **PASS:** all three commands name the SAME engine.
 
+## Step 16j — v16.5.3 ZERO-COMPILER voice setup (THE bootstrap drill)
+
+**Why this step exists:** on Windows/CPython 3.12, `pip install
+pocketsphinx` downloads the SOURCE tarball and fails (no CMake, no
+NMake, no MSVC).  That is a packaging fact — PocketSphinx 5.1.1 has
+no CPython 3.12 wheel on ANY platform — not a microphone bug and not
+an AirMouse bug.  v16.5.3 makes real local voice a ONE-COMMAND setup
+using engines whose prebuilt wheels actually fit your Python.  **You
+must NOT install any compiler.**
+
+- **COMMAND:** `airmouse voice-setup`
+- **WHAT TO DO:** run it, read the plan, press **Y** when asked to
+  install the lightweight engine and (once) to fetch the official
+  model.
+- **WHAT SHOULD HAPPEN (expected on Windows 11 + Python 3.12):**
+  microphone READY, `PocketSphinx wheel compatibility… NOT FOUND`
+  (honest — no cp312 wheel exists), `Vosk wheel compatibility… FOUND`,
+  then "Installing lightweight local voice engine (vosk)…" (13.7 MB
+  prebuilt wheel — NO compiler), then "Fetching the official
+  lightweight model…" (41.2 MB, one-time, SHA256-verified), then:
+
+  ```text
+  VOICE READY
+  Provider: Vosk
+  Mode: MIC LIVE
+  Network required: NO
+  Audio uploaded: NO
+  ```
+
+- **PASS:** the panel above (or, if you already had a working engine,
+  `VOICE READY` with that engine's name).  No compiler was installed.
+- **FAIL:** any CMake/NMake/MSVC/compiler output (AirMouse must never
+  start a native build), a pip traceback instead of a panel, or
+  `VOICE SETUP COULD NOT COMPLETE` WITHOUT a clear Reason + next step.
+  If you see `VOICE SETUP COULD NOT COMPLETE`, copy its Reason line —
+  that is the bug report we need.
+- **Also valid:** `airmouse voice-setup --check-only` (plan only,
+  installs nothing) and `airmouse voice-setup --repair` (re-verify +
+  fix an existing install).
+
+- **COMMAND:** `airmouse voice-status --verbose`
+- **WHAT SHOULD HAPPEN:** ASR PROVIDERS shows your engine with
+  `installed: YES`, `importable: YES`, real `initialization` result,
+  `role: ACTIVE`; TRANSCRIPTION shows `real microphone: AVAILABLE`,
+  `provider: <engine>`, `mode: MIC LIVE`, `offline: YES`,
+  `audio storage: NONE`, `network: NOT REQUIRED`.
+- **PASS:** those exact facts, for the engine voice-setup installed.
+
+- **COMMAND:** `airmouse transcribe`
+- **WHAT SHOULD HAPPEN:**
+
+  ```text
+  ══ LIVE TRANSCRIPTION ══
+  provider: vosk (local ASR engine)      ← or pocketsphinx on 3.11/3.13
+  mode: MIC LIVE
+  ```
+
+- **WHAT TO DO:** press bare Enter and speak each of these, one at a
+  time:
+  1. `hello bro this is a real AirMouse voice test`
+  2. `open browser`
+  3. `hello bro comma how are you question mark`
+- **PASS (REAL, MIC LIVE):** each utterance produces a transcript
+  line with a timestamp (confidence may show `unavailable` — vosk
+  small supplies none; that is honesty, not a bug).  Phrase 2 should
+  look like "open browser"; phrase 3 should be punctuated by the
+  dictation layer ("Hello bro, how are you?").  Small-model hearing
+  quirks ("air mouth" for "AirMouse") are EXPECTED and still count —
+  the pipeline is real; only accuracy tuning differs.
+- **FAIL:** `text-input mode` without asking, `simulated_stream`,
+  any cloud claim, or a crash.
+
+- **COMMAND:** `airmouse doctor --verbose` (cross-check)
+- **WHAT SHOULD HAPPEN:** `Transcription providers … READY — local
+  ASR: <engine> [ACTIVE]` — the SAME engine voice-status and
+  transcribe report.  One registry, one truth (v16.5.2 law, still
+  enforced; the invariant is regression-tested).
+
+- **OPTIONAL — measure it:** `airmouse voice-benchmark` (timing +
+  RAM + disclosed sizes) and `airmouse voice-benchmark --wav
+  your-file.wav` (real-speech latency + words/minute).
+
 ## Step 17 — Recovery and offline tests (simulation)
 
 - **COMMAND:** in the lab, tests **[11/12] Recovery** and **[12/12]

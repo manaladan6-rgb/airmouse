@@ -557,7 +557,10 @@ def test_voice_status_without_provider_offers_install(monkeypatch):
     asr.registry._diagnoses = {}
     from airmouse.voice_stack import render_voice_status
     out = render_voice_status(verbose=False)
-    assert "pip install pocketsphinx SpeechRecognition" in out
+    # v16.5.3 — the hint is BOOTSTRAP-AWARE: it points at the
+    # zero-compiler voice-setup path (never a bare pip line that fails
+    # on machines without a prebuilt wheel).
+    assert "airmouse voice-setup" in out
     assert "offline: YES" in out
 
 

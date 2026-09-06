@@ -1,4 +1,117 @@
-# AirMouse v16.5.2 — Final Verification Report (LIGHTWEIGHT LOCAL VOICE RUNTIME HOTFIX)
+# AirMouse v16.5.3 — Final Verification Report (WINDOWS NATIVE ASR BOOTSTRAP & ZERO-COMPILER VOICE RUNTIME)
+
+---
+
+# v16.5.3 Windows ASR Bootstrap Verification
+
+Date: 2026-09-06 (build environment: Linux x86_64 headless sandbox,
+CPython 3.12.14 AND CPython 3.13.5, vosk 0.3.45 + sounddevice 0.5.6 +
+SpeechRecognition 3.17 + mediapipe 1.0.1 installed, pocketsphinx
+installed on the 3.13 interpreter only — mirroring the real PyPI wheel
+matrix — NO microphone hardware).  Scope: the zero-compiler Windows
+voice bootstrap — `voice_bootstrap.ASRBootstrapManager`, the verified
+static wheel matrix, `airmouse voice-setup`, `airmouse
+voice-benchmark`, the vosk model resolution + honest MODEL MISSING
+state, bootstrap-aware doctor/voice-status FIX lines, and the
+`NATIVE_ASR_PACKAGE_UNAVAILABLE` packaging diagnosis.  All v16.5.2
+architecture preserved.
+
+**Headline honesty statement: the sandbox has NO Windows and NO
+microphone.  What IS physically demonstrated here: (1) real local ASR
+on real speech audio — vosk on CPython 3.12 transcribed generated
+speech ("open browser" → exact match → OPEN intent; "hello bro this is
+a real AirMouse voice test" → recognized, ~0.8 s) fully offline; (2)
+PocketSphinx 5.1.1 really installing and initializing from its
+official wheel on CPython 3.13.  The final physical Windows
+microphone drill (voice-setup → voice-status → transcribe → speak)
+remains ACTION_REQUIRED for the user
+(WINDOWS_REAL_WORLD_TEST.md v16.5.3 steps).  No SIMULATED result was
+relabelled hardware PASS.**
+
+## Part 1 — THE PLATFORM FACT (measured from PyPI, §2)
+
+- PyPI JSON API, pocketsphinx 5.1.1: wheels exist ONLY for cp311 and
+  cp313 (win_amd64 / macosx / manylinux / musllinux) — **no cp312
+  wheel on ANY platform**; the sdist requires a C/C++ toolchain.
+  The user's exact failure (`CMake selects NMake → nmake missing →
+  install fails`) is therefore a packaging gap, classified
+  `NATIVE_ASR_PACKAGE_UNAVAILABLE` — NOT a microphone failure and NOT
+  an AirMouse voice failure.  Regression-tested.
+- PyPI JSON API, vosk 0.3.45: `py3-none-win_amd64` (13.7 MB) +
+  manylinux/musllinux/arm wheels — version-independent platform
+  wheels with the native Kaldi library BUNDLED.  Verified live:
+  `pip install vosk` succeeds with zero compilation on CPython 3.12.
+
+## Part 2 — AUTOMATED VERIFICATION (measured on this tree)
+
+- **Full suite (3.12)**: `pytest tests/` → **2027 passed / 2 skipped /
+  0 failed** (~59 s; baseline v16.5.2 1991/2/0 +1 env-shift → +36 new
+  bootstrap tests, zero regressions).
+- **Full suite (3.13)**: **2028 passed / 1 skipped / 0 failed** —
+  AirMouse runs on Python 3.13 unchanged (mediapipe 1.0.1,
+  opencv 5.0.0.93, numpy 2.2.6, pynput 1.8.2, sounddevice 0.5.6,
+  vosk, pocketsphinx all import + initialize there).
+- **The sandbox-reproduced divergence, killed**: with vosk installed
+  but no model, the old registry said AVAILABLE while the engine said
+  unavailable.  Now the probe raises `VoskModelMissing` → registry
+  reports `INSTALLED` + `initialization: MODEL MISSING` + the FIX
+  (`airmouse voice-setup`), `available()` is `[]`, `select()` returns
+  None, and the engine's own `available()` agrees.  Regression-tested
+  both ways (no model → not usable; model resolved → usable).
+- **Never-silently-compile (§4)**: every install command carries
+  `--only-binary :all:`; on a NO_COMPATIBLE_WHEEL engine the refusal
+  happens BEFORE any subprocess (test asserts pip is never invoked);
+  consent-declined installs nothing; offline attempts nothing; a
+  failed verification triggers `rollback_if_failed` (pip uninstall +
+  guarded model-dir cleanup).
+- **Model security (§6)**: the ONLY download is the official
+  alphacephei.com vosk-model-small-en-us-0.15.zip — 41,205,932 bytes,
+  SHA256 `507575b9efd23f96ad2e9c2f226a8b9b50ca1cd894e2b00e7f07b170ffe6b00a`
+  verified BEFORE extraction (mismatch → archive discarded, tested);
+  Zip-Slip members blocked (tested); executable members (.exe/.dll/…)
+  refused (tested); extraction lands only inside the AirMouse home;
+  OFFLINE → `OFFLINE_MODEL_REQUIRED` with the manual URL (tested);
+  no consent → `USER_DECLINED` (tested).  Red-team source scan: no
+  eval/exec/os.system/shell=True/curl-pipe anywhere in the bootstrap.
+- **voice-setup renders (§8)**: `--check-only` installs nothing;
+  a no-path machine gets `VOICE SETUP COULD NOT COMPLETE` +
+  `NATIVE_ASR_PACKAGE_UNAVAILABLE` + a recommended next step (exit 1);
+  the READY path prints the full `VOICE READY / Provider / Mode /
+  Network required: NO / Audio uploaded: NO` panel (exit 0).
+- **voice-benchmark (§22)**: measured live on 3.12 — engine startup
+  0.68 s, first result 0.37 s, average utterance 0.36 s (1 s scripted
+  utterances), CPU 1.13 s, peak RAM 268 MB; WITHOUT speech samples it
+  explicitly refuses to claim accuracy; with a real WAV it reports
+  transcript + latency + words/minute and STILL labels the single
+  sample as no accuracy claim.
+
+## Part 3 — REAL-SPEECH END-TO-END (physically demonstrated here)
+
+Generated speech (TTS → WAV → 16 kHz mono PCM) through the SHIPPED
+pipeline (`registry.select()` → provider.transcribe), fully offline:
+
+| Spoken | Local transcript (vosk, 3.12) | Latency |
+|---|---|---|
+| "open browser" | `open browser` (exact) → OPEN intent, `app: browser` | 0.37 s |
+| "hello bro this is a real AirMouse voice test" | `hello bro this is a real air mouth voice test` | 0.83 s |
+| "hello bro, how are you?" | `hello how are you` | 0.55 s |
+
+`transcribe --text` through the same engine:
+"hello bro comma how are you question mark" → `Hello bro, how are
+you?` (dictation punctuation transform over a REAL local ASR engine).
+On 3.13 the same speech through pocketsphinx's backend path also
+transcribes (both engines verified on their respective interpreters).
+
+## Part 4 — REMAINING ACTION_REQUIRED (honest)
+
+1. The user's Windows 11 machine must run the 3-command drill
+   (`airmouse voice-setup` → `airmouse voice-status --verbose` →
+   `airmouse transcribe` + three spoken phrases).  Everything up to
+   the microphone is verified; the microphone itself cannot be tested
+   from this sandbox.
+2. `--only-binary :all:` wheel identity on the user's machine is pip's
+   own guarantee at install time (the static matrix is knowledge, pip
+   is the authority).
 
 ---
 

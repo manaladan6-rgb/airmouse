@@ -594,9 +594,25 @@ def main():
                              "through the real pipeline — explicitly NOT "
                              "microphone validation)")
     parser.add_argument("--provider", type=str, default=None,
-                        help="transcribe: explicit local ASR provider "
-                             "(pocketsphinx | vosk | whisper; overrides "
-                             "config/env)")
+                        help="transcribe/voice-setup: explicit local ASR "
+                             "provider (pocketsphinx | vosk | whisper; "
+                             "overrides config/env)")
+    # ═══ v16.5.3 — zero-compiler voice bootstrap flags (§8/§9) ═══
+    parser.add_argument("--dry-run", action="store_true", dest="dry_run",
+                        help="voice-setup: inspect + plan only — nothing "
+                             "is installed")
+    parser.add_argument("--check-only", action="store_true",
+                        dest="check_only",
+                        help="voice-setup: same as --dry-run")
+    parser.add_argument("--repair", action="store_true",
+                        help="voice-setup: re-verify + fix an existing "
+                             "voice installation")
+    parser.add_argument("--yes", action="store_true",
+                        help="voice-setup: proceed without the interactive "
+                             "consent prompt (only for scripted installs)")
+    parser.add_argument("--wav", type=str, default=None,
+                        help="voice-benchmark: optional real-speech WAV to "
+                             "measure real transcription latency",)
     parser.add_argument("--json", action="store_true",
                         help="doctor/privacy: machine-readable output")
     parser.add_argument("--to", type=str, default=None,
@@ -615,7 +631,8 @@ def main():
                                  "setup", "doctor", "test", "verify",
                                  "privacy",
                                  "academy", "gesture-lab", "profile",
-                                 "teach", "learn", "transcribe", "help-me"],
+                                 "teach", "learn", "transcribe", "help-me",
+                                 "voice-setup", "voice-benchmark"],
                         help="info/diagnostic subcommand (prints and exits)")
     parser.add_argument("command_arg", nargs="?", default=None,
                         help="optional subcommand argument "
@@ -824,6 +841,23 @@ def main():
             text_mode=bool(getattr(args, "text", False)),
             mic_device=(str(mic) if mic is not None else None),
             prefer_provider=getattr(args, "provider", None)))
+
+    # ═══ v16.5.3 — zero-compiler voice bootstrap (§8/§9) ═══
+    if args.command == "voice-setup":
+        from .voice_bootstrap import run_voice_setup
+        return int(run_voice_setup(
+            dry_run=bool(getattr(args, "dry_run", False)) or
+            bool(getattr(args, "check_only", False)),
+            repair=bool(getattr(args, "repair", False)),
+            verbose=bool(getattr(args, "verbose", False)),
+            provider=getattr(args, "provider", None),
+            yes=bool(getattr(args, "yes", False))))
+
+    # ═══ v16.5.3 — deterministic local ASR benchmark (§22) ═══
+    if args.command == "voice-benchmark":
+        from .voice_benchmark import run_benchmark
+        return int(run_benchmark(out=sys.stdout,
+                                 wav=getattr(args, "wav", None)))
 
     # ═══ v16.5 — contextual help answered locally (§20) ═══
     if args.command == "help-me":

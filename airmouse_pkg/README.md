@@ -99,6 +99,26 @@ memory lifecycle (export / reset / delete) that you control.
   default — lightweight; Vosk / Whisper optional, never
   auto-downloaded) are detected the moment you pip-install them —
   AirMouse never installs anything for you.
+- **Zero-compiler voice bootstrap (v16.5.3):** `airmouse voice-setup`
+  makes real local voice easy on Windows — no CMake, no NMake, no
+  MSVC, ever.  It detects your platform/interpreter, consults a
+  verified wheel-availability matrix (PocketSphinx 5.1.1 has NO
+  CPython 3.12 wheel on ANY platform — a packaging fact, diagnosed as
+  `NATIVE_ASR_PACKAGE_UNAVAILABLE`, never mislabelled a microphone
+  failure), and installs the smallest COMPATIBLE prebuilt engine via
+  `pip --only-binary :all:` (a source build is structurally
+  impossible).  On Windows/CPython 3.12 that engine is **Vosk**
+  (`py3-none-win_amd64` wheel, native library bundled, works on any
+  CPython 3); its official lightweight en-US model (41 MB, Apache-2.0
+  data) is fetched ONCE with your consent, SHA256-verified, and stored
+  under the AirMouse home.  When PocketSphinx's wheel exists
+  (CPython 3.11/3.13) it is chosen first — bundled model, zero extra
+  downloads.  Failure is honest: `VOICE SETUP COULD NOT COMPLETE` with
+  the reason and the next step — never a pip traceback, never a
+  silent downgrade, no cloud, no telemetry, audio storage NONE.
+  `airmouse voice-benchmark` measures startup/latency/CPU/RAM locally
+  and only reports recognition quality when you feed it real speech
+  (`--wav`).
 - **Live transcription:** `airmouse transcribe` runs a local session
   — with a real engine + microphone it is **MIC LIVE**
   (sounddevice-first capture → VAD → local ASR; `--mic N` picks a
@@ -415,6 +435,8 @@ airmouse academy           # learn every gesture (headless = full plan)
 airmouse gesture-lab 20    # watch the safety gates work (dry-run, 20 s)
 airmouse transcribe        # live text transcription session (text only)
 airmouse voice-status      # honest voice provider panel
+airmouse voice-setup       # zero-compiler local voice install (v16.5.3)
+airmouse voice-benchmark   # local ASR timing + footprint (no accuracy claims)
 airmouse privacy           # telemetry/network/storage report + 24-artifact manifest
 airmouse memory status     # local store inventory
 ```

@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import audioop  # stdlib (deprecated in 3.13 but present in 3.12; guarded)
 import math
+import os
 import re
 import threading
 from dataclasses import dataclass, field
@@ -62,6 +63,7 @@ __all__ = [
     "Transcript", "OfflineSpeechProvider", "SimulatedSpeechProvider",
     "PocketSphinxProvider", "VoskProvider", "WhisperProvider",
     "detect_providers", "provider_registry",
+    "resolve_vosk_model_path",  # v16.5.3 — deterministic model lookup
     "EnergyVAD", "WakeWordGate", "DictationBuffer",
     "OfflineVoiceEngine", "voice_match_to_intent",
     "WAKE_MARKERS",
@@ -100,6 +102,96 @@ def _rms(data: bytes, width: int = 2) -> float:
 # ---------------------------------------------------------------------------
 # Transcript + provider abstraction
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# vosk model resolution (v16.5.3) — deterministic, offline, honest
+# ---------------------------------------------------------------------------
+
+def _read_voice_config_str(key: str) -> str:
+    """Read ``[voice] <key>`` from the TOML config (``""`` when absent).
+
+    Tiny guarded duplicate of the registry's reader — this module sits
+    BELOW asr_registry in the import graph (asr_registry imports this
+    module), so it must never import back.  Never raises.
+    """
+    try:
+        try:
+            import tomllib as _toml  # py311+
+        except Exception:  # pragma: no cover - py<3.11
+            import tomli as _toml  # type: ignore[no-redef]
+        from . import paths as _paths
+        cpath = _paths.config_file()
+        if not cpath or not os.path.exists(cpath):
+            return ""
+        with open(cpath, "rb") as fh:
+            data = _toml.load(fh)
+        v = data.get("voice", {})
+        if isinstance(v, dict):
+            return str(v.get(key, "") or "").strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def _looks_like_vosk_model(path: str) -> bool:
+    """True when ``path`` is a directory holding real Vosk model files.
+
+    A valid model folder contains ``conf/`` plus ``am/`` (acoustics) or
+    ``graph/`` — data files only, never executables.  Never raises.
+    """
+    try:
+        if not path or not os.path.isdir(path):
+            return False
+        if not os.path.isdir(os.path.join(path, "conf")):
+            return False
+        return (os.path.isdir(os.path.join(path, "am"))
+                or os.path.isdir(os.path.join(path, "graph")))
+    except Exception:
+        return False
+
+
+def resolve_vosk_model_path(explicit: str = "") -> str:
+    """Deterministically locate a local Vosk acoustics model (v16.5.3).
+
+    Precedence (first hit wins):
+
+    1. ``explicit`` constructor argument (non-empty)
+    2. env ``AIRMOUSE_VOSK_MODEL_PATH``
+    3. config ``[voice] vosk_model_path``
+    4. the shipped model dir (``models/vosk/``, then any
+       ``vosk-model-*`` directory inside ``models/``)
+
+    Returns ``""`` when nothing resolves — the honest "no local model"
+    answer (``airmouse voice-setup`` installs one with consent).  No
+    network is ever touched.  Never raises.
+    """
+    try:
+        for cand in (str(explicit or "").strip(),
+                     os.environ.get("AIRMOUSE_VOSK_MODEL_PATH", "").strip(),
+                     _read_voice_config_str("vosk_model_path")):
+            if cand and _looks_like_vosk_model(cand):
+                return os.path.abspath(cand)
+        try:
+            from . import paths as _paths
+        except Exception:
+            return ""
+        fixed = _paths.vosk_model_dir()
+        if _looks_like_vosk_model(fixed):
+            return fixed
+        root = _paths.models_dir()
+        try:
+            if os.path.isdir(root):
+                for name in sorted(os.listdir(root)):
+                    sub = os.path.join(root, name)
+                    if name.lower().startswith("vosk") and \
+                            _looks_like_vosk_model(sub):
+                        return sub
+        except Exception:
+            return ""
+    except Exception:
+        return ""
+    return ""
 
 
 @dataclass
@@ -220,7 +312,15 @@ class PocketSphinxProvider(OfflineSpeechProvider):
 
 
 class VoskProvider(OfflineSpeechProvider):
-    """Vosk offline ASR (guarded import; model path configurable)."""
+    """Vosk offline ASR (guarded import; model path configurable).
+
+    v16.5.3 — the acoustics model is resolved DETERMINISTICALLY
+    (constructor arg > env ``AIRMOUSE_VOSK_MODEL_PATH`` > config
+    ``[voice] vosk_model_path`` > AirMouse ``models/`` dir) via
+    :func:`resolve_vosk_model_path`.  With no local model the provider
+    reports unavailable — the honest "installed, no model" state that
+    ``airmouse voice-setup`` fixes; nothing is ever downloaded here.
+    """
 
     name = "vosk"
 
@@ -238,7 +338,12 @@ class VoskProvider(OfflineSpeechProvider):
         if self._vosk is None:
             return False
         try:
-            self._model = self._model or self._vosk(self.model_path)
+            if self._model is None:
+                path = resolve_vosk_model_path(self.model_path)
+                if not path:
+                    return False  # honest: engine present, model missing
+                self.model_path = path
+                self._model = self._vosk(path)
             return self._model is not None
         except Exception:
             return False

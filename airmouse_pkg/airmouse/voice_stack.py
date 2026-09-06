@@ -281,6 +281,13 @@ def render_voice_status(verbose: bool = False) -> str:
         if name == "pocketsphinx":
             lines.append("    model: available (bundled en-US, loads with "
                          "the engine)")
+        elif name == "vosk" and \
+                row.get("initialization") == "MODEL MISSING":
+            # v16.5.3 — the engine is fine, the MODEL is the gap;
+            # the fix is voice-setup, never a bare pip line
+            lines.append("    model: MISSING — run: airmouse voice-setup "
+                         "(official lightweight model, consent-gated, "
+                         "sha256-verified)")
         else:
             lines.append("    model: on first use (never auto-downloaded)")
         init = row.get("initialization", "NOT RUN")
@@ -315,9 +322,39 @@ def render_voice_status(verbose: bool = False) -> str:
                  f"{'NOT REQUIRED' if not diag.get('network_required') else 'REQUIRED'}")
     lines.append("")
     if not real:
+        # v16.5.3 — the install hint is BOOTSTRAP-AWARE: on a machine
+        # where `pip install pocketsphinx` would fail (no prebuilt
+        # wheel / would need a compiler) the honest advice is the
+        # zero-compiler voice-setup path instead.
+        hint = ""
+        try:
+            from .voice_bootstrap import bootstrap_manager
+            _rep, plan = bootstrap_manager.recommend_installation()
+            opts = [p for p in plan if p.verdict == "WHEEL_AVAILABLE"]
+            if opts:
+                first = opts[0]
+                extra = f" + {first.model_extra_mb:.1f} MB model" \
+                    if first.model_extra_mb else ""
+                hint = (f"Run: airmouse voice-setup   (installs "
+                        f"{first.engine} — {first.wheel_mb:.1f} MB "
+                        f"prebuilt wheel{extra}, NO compiler, official "
+                        f"sources only)")
+            elif _rep.diagnosis:
+                hint = (f"Diagnosis: {_rep.diagnosis} — a prebuilt local "
+                        f"ASR wheel for this interpreter is not "
+                        f"available (a compiler build is never "
+                        f"attempted).  Run: airmouse voice-setup "
+                        f"--check-only for the full report and options.")
+        except Exception:
+            hint = ""
         lines.append("Install the lightweight local ASR (no cloud, no "
-                     "telemetry):")
-        lines.append("  pip install pocketsphinx SpeechRecognition")
+                     "telemetry, no compiler):")
+        if hint:
+            lines.append(f"  {hint}")
+        else:
+            lines.append("  airmouse voice-setup")
+            lines.append("  (manual option: pip install pocketsphinx "
+                         "SpeechRecognition)")
         lines.append("Then re-run: airmouse voice-status")
     if verbose:
         lines.append("")
@@ -336,26 +373,45 @@ def render_voice_status(verbose: bool = False) -> str:
 # ---------------------------------------------------------------------------
 
 def install_guidance() -> str:
-    """Exact optional-install commands for local ASR engines.
+    """Exact optional-install guidance for local ASR engines.
 
-    Pure text: NO auto-install, NO network calls, no subprocess.  The
-    user runs the pip command themselves if and when they choose.
+    v16.5.3: the PRIMARY path is ``airmouse voice-setup`` — the
+    deterministic, zero-compiler bootstrap (prebuilt wheels only,
+    official sources only, consent-gated model fetch).  Manual pip
+    commands remain listed for users who prefer them.
     """
     return "\n".join([
-        "Optional local voice engines (100% offline — nothing auto-installs):",
+        "Local voice engines (100% offline after setup):",
         "",
+        "  RECOMMENDED: airmouse voice-setup",
+        "    -> zero-compiler bootstrap: picks the smallest COMPATIBLE",
+        "       prebuilt wheel for THIS Python (PocketSphinx, or Vosk),",
+        "       installs via pip --only-binary (never builds from "
+        "source),",
+        "       fetches the official lightweight model with consent +",
+        "       SHA256 verification, then verifies the whole chain.",
+        "",
+        "  Manual alternatives:",
         "  pip install vosk                            # Vosk offline ASR (lightweight)",
         "  pip install SpeechRecognition pocketsphinx  # CMU PocketSphinx (classic)",
         "  pip install faster-whisper                  # Whisper-quality local ASR",
         "",
         "Honesty note:",
-        "- AirMouse NEVER installs anything by itself and makes no network",
-        "  calls for this; you run the command, the engine stays local.",
+        "- No network is used during recognition — no cloud STT, no "
+        "telemetry,",
+        "  no audio upload.  The one-time consented model fetch during "
+        "setup is",
+        "  the only download AirMouse ever makes, and it is "
+        "SHA256-verified.",
+        "- AirMouse never compiles native software and never installs a",
+        "  compiler toolchain; PocketSphinx source builds are refused.",
+        "- On Windows/CPython 3.12 PocketSphinx has NO prebuilt wheel —",
+        "  voice-setup routes to Vosk instead (works on any CPython 3).",
         "- The built-in command recognition is a deterministic grammar — it is",
         "  a real command system, not simulated ASR, but it is NOT free-form",
         "  speech recognition.  Full speech recognition needs one engine above.",
-        "- Models (e.g. a vosk model) download on first use by the ENGINE you",
-        "  installed, after you point AirMouse at it.",
+        "- Models are fetched once with consent, SHA256-verified, stored under",
+        "  the AirMouse home, and never uploaded anywhere.",
     ])
 
 

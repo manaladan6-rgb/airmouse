@@ -1,5 +1,140 @@
 # Changelog
 
+## v16.5.3 — WINDOWS NATIVE ASR BOOTSTRAP & ZERO-COMPILER VOICE RUNTIME (2026-09-06)
+
+The v16.5.2 runtime was honest, and its honesty exposed the FINAL
+blocker on the real Windows 11 machine (CPython 3.12 x64, sounddevice
++ PortAudio working, microphone READY):
+
+```text
+pip install pocketsphinx
+  → downloads pocketsphinx-5.1.1.tar.gz          (sdist — no wheel)
+  → CMake selects NMake
+  → nmake missing / CMAKE_C_COMPILER missing
+  → installation FAILS
+```
+
+**PyPI fact (verified via the PyPI JSON API):** PocketSphinx 5.1.1
+publishes CPython wheels for cp311 and cp313 ONLY — there is no cp312
+wheel on ANY platform, and the sdist needs a C/C++ toolchain.  Vosk
+0.3.45 publishes `py3-none-win_amd64` wheels (13.7 MB) with the native
+Kaldi library BUNDLED — they install on ANY CPython 3 with NO compiler.
+
+The failure was therefore classified as a **platform packaging gap**,
+NOT a microphone bug and NOT an AirMouse voice bug:
+`NATIVE_ASR_PACKAGE_UNAVAILABLE`.
+
+### The zero-compiler law (§4)
+
+- **`airmouse` never compiles native software.**  Every engine install
+  runs `python -m pip install --only-binary :all:` — pip ITSELF
+  refuses source builds, so a NMake/MSVC failure is structurally
+  impossible.  AirMouse never installs or configures a compiler
+  toolchain and never tells the user to.
+- No arbitrary DLLs, no unofficial binaries, no `curl | powershell`.
+  The only network fetches are official PyPI wheels (via pip) and the
+  ONE official lightweight Vosk model archive (alphacephei.com,
+  Apache-2.0 DATA, 41.2 MB zip / 70.9 MB unpacked) — consent-gated,
+  size-disclosed BEFORE download, SHA256-verified
+  (`507575b9…6b00a`) BEFORE extraction, extracted with Zip-Slip
+  protection and executable-member refusal into the AirMouse home only.
+
+### `airmouse voice-setup` (§8/§9) — the user experience
+
+```text
+AIRMouse Voice Setup
+Checking microphone................ READY
+Checking local ASR................. NOT READY
+Checking pocketsphinx wheel compatibility........ NOT FOUND
+Checking vosk wheel compatibility........ FOUND
+Installing lightweight local voice engine (vosk)...
+Fetching the official lightweight model…
+Verifying ASR...................... READY
+VOICE READY
+Provider: Vosk
+Mode: MIC LIVE
+Network required: NO
+Audio uploaded: NO
+```
+
+Flags: `--check-only`/`--dry-run` (inspect + plan, installs nothing),
+`--provider NAME`, `--repair` (re-verify + fix), `--yes` (scripted),
+`--verbose`.  When no compatible runtime exists the command prints the
+honest `VOICE SETUP COULD NOT COMPLETE` panel with the reason and the
+next step — never a mysterious pip traceback.  When nothing is
+installable and the microphone is fine, the machine-level diagnosis is
+`NATIVE_ASR_PACKAGE_UNAVAILABLE` with report-only alternate-runtime
+detection (e.g. `py -3.13`).
+
+### ASRBootstrapManager (§3/§15) — `airmouse/voice_bootstrap.py`
+
+`detect_platform() / detect_python_version() / detect_architecture() /
+detect_installed_engines() / detect_wheel_compatibility() /
+recommend_installation() / install_supported_lightweight_runtime() /
+install_vosk_model() / verify_installation() / rollback_if_failed()` —
+deterministic (a static, versioned, disclosed wheel-knowledge table;
+pip remains the final authority behind `--only-binary :all:`), with
+explicit states `NOT_INSTALLED / INSTALLED_NOT_IMPORTABLE /
+IMPORTABLE_NOT_INITIALIZED / INITIALIZATION_FAILED / READY /
+RUNTIME_FAILED` and obstacles `NO_COMPATIBLE_WHEEL /
+SOURCE_BUILD_REQUIRED / USER_DECLINED / INSTALL_FAILED /
+OFFLINE_MODEL_REQUIRED / VERIFY_FAILED`.
+
+### vosk honesty — the sandbox-reproduced divergence, killed (§14)
+
+The registry previously reported vosk `AVAILABLE` ("model loads on
+first use") even with NO local model, while the engine's own
+`available()` honestly failed — the same divergence class v16.5.2
+killed for pocketsphinx.  Now: the vosk probe resolves the model
+deterministically (`explicit arg > $AIRMOUSE_VOSK_MODEL_PATH >
+config [voice] vosk_model_path > AirMouse models/vosk/`); with no
+model the registry reports `INSTALLED` (importable, initialization
+`MODEL MISSING`) and the FIX is `airmouse voice-setup` — registry and
+engine can never disagree again.
+
+### Doctor / voice-status now bootstrap-aware (§2/§14)
+
+The FIX lines come from the bootstrap manager, not hardcoded pip text:
+on a machine where `pip install pocketsphinx` would fail, doctor and
+voice-status recommend `airmouse voice-setup` (the zero-compiler path)
+or state the `NATIVE_ASR_PACKAGE_UNAVAILABLE` diagnosis with actionable
+official options.
+
+### `airmouse voice-benchmark` (§22)
+
+Deterministic local benchmark: engine startup, first-result latency,
+average utterance latency, CPU time, peak RAM, disclosed
+package/model sizes.  Recognition quality is measured ONLY with real
+speech (`--wav sample.wav`) — never claimed without samples.
+
+### Dual-interpreter evidence (§5/§7)
+
+- **Python 3.12** (the user's machine): vosk installs zero-compiler;
+  REAL speech transcribed end-to-end locally
+  ("hello bro this is a real AirMouse voice test" → recognized, ~0.8 s;
+  "open browser" → exact match → OPEN intent with `app: browser`).
+- **Python 3.13**: the FULL suite is green AND PocketSphinx 5.1.1
+  installs cleanly from its official cp313 wheel (real Decoder init
+  verified) — on 3.13 the lightweight-first registry selects
+  pocketsphinx (bundled model, zero downloads).  AirMouse supports
+  both interpreters; the wheel matrix in the bootstrap knows which
+  engine fits which.
+
+### Tests & gates
+
+Suite: **2027 passed / 2 honest skips / 0 failed** (3.12) and
+**2028 passed / 1 honest skip / 0 failed** (3.13) — baseline
+1991/2/1-env-shift.  New matrix (`tests/test_voice_bootstrap.py`):
+THE cp312 regression, plan determinism, never-silently-compile
+(subprocess never invoked on refusal), consent-decline, offline
+refusal, verify-failure → rollback, state mapping, vosk model
+resolution + registry/engine agreement, SHA256 mismatch → discard,
+Zip-Slip + executable-member refusal, honest §8 failure panel,
+benchmark honesty, red-team source scan (no eval/exec/os.system/
+shell=True; official sources only), and a real-pipeline test with an
+honest skip.  `airmouse verify` 12/12 automated PASS; `offline-test`
+18/18.
+
 ## v16.5.2 — LIGHTWEIGHT LOCAL VOICE RUNTIME HOTFIX (2026-09-05)
 
 A focused integration fix.  The first real v16.5.1 Windows run showed

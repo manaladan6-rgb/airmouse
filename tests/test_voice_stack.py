@@ -42,6 +42,21 @@ def _fake_find_spec(allowed):
     return _fs
 
 
+def _reset_shared_registry(monkeypatch=None):
+    """Clear THE registry's per-process caches AND its persistence
+    channel (v16.5.3 env-shift safety: this machine may have a REAL
+    working provider whose cached verdict or persisted selection must
+    never leak into fake-machine tests)."""
+    try:
+        asr.registry.reset()
+        asr.registry._diagnoses = {}
+        if monkeypatch is not None:
+            monkeypatch.setattr(asr, "_load_persisted", lambda: "")
+            monkeypatch.setattr(asr, "_persist", lambda name: None)
+    except Exception:
+        pass
+
+
 def _fake_engine_env(monkeypatch, working=(), broken_ctor=(),
                      unavailable=()):
     """A self-consistent fake machine: engines in ``working``/
@@ -164,7 +179,14 @@ def test_panel_single_active_line_even_with_engines(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_pick_provider_none_when_nothing_installed(monkeypatch):
+    # v16.5.3: fake a machine with NO usable engine — discovery sees
+    # nothing AND the real constructors disagree (this sandbox may have
+    # a genuinely working provider; the fake machine must not).  The
+    # shared registry cache + persisted selection are neutralized too.
     monkeypatch.setattr(vs, "find_spec", _fake_find_spec([]))
+    monkeypatch.setattr(vs, "VoskProvider",
+                        lambda *a, **k: _FakeEngine("vosk", ok=False))
+    _reset_shared_registry(monkeypatch)
     assert vs.pick_provider() is None
     assert vs.pick_provider(prefer="vosk") is None
 
@@ -196,8 +218,15 @@ def test_pick_provider_skips_unavailable_instances(monkeypatch):
 
 
 def test_pick_provider_gated_on_real_importability(monkeypatch):
-    # flag claims vosk exists, but the real constructor cannot import it
+    # flag claims vosk exists, but the real constructor cannot use it —
+    # v16.5.3: the gate is simulated with a failing constructor because
+    # on THIS sandbox vosk genuinely works; the gate being tested is
+    # "discovery says yes but the runtime says no".
     monkeypatch.setattr(vs, "find_spec", _fake_find_spec({"vosk"}))
+    monkeypatch.setattr(vs, "VoskProvider",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            RuntimeError("vosk broken (fake)")))
+    _reset_shared_registry(monkeypatch)
     assert vs.pick_provider() is None
 
 
