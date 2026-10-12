@@ -170,6 +170,47 @@ _BANNED_SUFFIXES = (".exe", ".dll", ".so", ".bat", ".cmd", ".ps1", ".com",
 _LOCK_FRESH_SECONDS = 30 * 60      # a lock older than this is stale
 
 
+def _pid_alive(pid: int) -> bool:
+    """Platform-correct liveness probe for a lock-owner pid.
+
+    POSIX: ``os.kill(pid, 0)`` — signal 0 does nothing, it only checks.
+    Windows: signal 0 IS ``CTRL_C_EVENT`` there — calling ``os.kill(pid, 0)``
+    would send a real Ctrl+C to the (possibly OUR OWN) process group and
+    interrupt the running installer.  So Windows uses an OpenProcess
+    query instead.  On any probe error the answer is True (assume busy,
+    refuse honestly) — wrongly reaping a live installer's lock could
+    race two installs; refusing is always safe (the user retries).
+    """
+    if not pid or pid <= 0:
+        return False
+    if os.name == "posix":
+        try:
+            os.kill(pid, 0)   # signal 0 = liveness probe (POSIX semantics)
+            return True
+        except PermissionError:
+            return True       # exists, owned by someone else
+        except OSError:
+            return False
+    try:                       # Windows: OpenProcess-based probe
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        k32 = ctypes.windll.kernel32          # type: ignore[attr-defined]
+        handle = k32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return ctypes.getlasterror() == 5  # ERROR_ACCESS_DENIED → exists
+        try:
+            exit_code = ctypes.c_ulong()
+            if k32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return exit_code.value == STILL_ACTIVE
+            return True
+        finally:
+            k32.CloseHandle(handle)
+    except Exception:
+        return True           # cannot prove it is dead → assume busy
+
+
 def _is_staging_name(name: str) -> bool:
     return ".staging-" in os.path.basename(name)
 
@@ -298,15 +339,7 @@ class ModelPipeline:
             ts = float(ts_line) if ts_line else 0.0
         except Exception:
             pid, ts = 0, 0.0
-        alive = False
-        if pid:
-            try:
-                os.kill(pid, 0)   # signal 0 = liveness probe
-                alive = True
-            except PermissionError:
-                alive = True      # exists, owned by someone else
-            except OSError:
-                alive = False
+        alive = _pid_alive(pid)
         if alive and ts and (time.time() - ts) < _LOCK_FRESH_SECONDS:
             return                # genuinely busy — refuse honestly
         try:

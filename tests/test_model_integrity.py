@@ -596,3 +596,36 @@ def test_real_url_pin_matches_ground_truth_record():
     assert mi.VOSK_MODEL.sha512.endswith("f53bc5a")
     assert mi.VOSK_MODEL.members == 20
     assert mi.VOSK_MODEL.root == "vosk-model-small-en-us-0.15"
+
+
+# ---------------------------------------------------------------------------
+# regression (Windows CI): os.kill(pid, 0) is a POSIX liveness probe — on
+# Windows signal 0 IS CTRL_C_EVENT, so reaping a lock whose pid was alive
+# sent a real Ctrl+C to the process group and interrupted the suite.
+# _pid_alive() must probe without ever signaling.
+# ---------------------------------------------------------------------------
+
+def test_pid_alive_never_signals_and_answers_definitely():
+    pid = mi._pid_alive
+    # pid 0 / negative / garbage → not alive, no exception, no signal
+    assert pid(0) is False
+    assert pid(-1) is False
+    # OUR OWN live pid must be reported alive on every platform —
+    # this is exactly the case that used to raise KeyboardInterrupt
+    # on Windows (GenerateConsoleCtrlEvent to our own group)
+    assert pid(os.getpid()) is True
+    # a pid that cannot exist on any supported platform → dead
+    assert pid(2 ** 22) is False
+
+
+def test_reaper_refuses_fresh_lock_of_live_process(tmp_path):
+    raw = build_archive()
+    p = pipeline_for(tmp_path, make_spec(raw))
+    os.makedirs(tmp_path / "models", exist_ok=True)
+    # OUR pid + fresh timestamp → genuinely busy → refuse honestly
+    with open(p._lock(), "w", encoding="utf-8") as fh:
+        fh.write(f"{os.getpid()}\n{__import__('time').time()}\n")
+    with pytest.raises(mi.ModelIntegrityError, match="another installation"):
+        p.install_from_bytes(raw)
+    # and the lock file survives (we did not steal it, we did not signal it)
+    assert os.path.exists(p._lock())
