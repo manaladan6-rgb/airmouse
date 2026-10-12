@@ -1,2 +1,2 @@
-b72c74f5b0fa8d3a8bfc23f4b2df3ab22d8507fae5c36e62ce692a2aec64f28d  airmouse-19.0.0-py3-none-any.whl
-72bf93a1a822aed3555c55a6f0e27396af9ed564c71c1e8efd5943eb53ae1264  airmouse-19.0.0.tar.gz
+3d84d3df69095fa3641d4874d70d7bd1a0035df6ed2a0dc1f99913325a28b0f0  airmouse-19.0.0-py3-none-any.whl
+db7ca44034597867d6b8064651b7316d17a8061c4e4fe886ade5ea9450cf46b5  airmouse-19.0.0.tar.gz

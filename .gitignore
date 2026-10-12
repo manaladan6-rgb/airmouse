@@ -19,3 +19,7 @@ __pycache__/
 .venv/
 bundle/
 .test-assets/
+
+# v19 release artifacts ship as GitHub release assets (not git blobs)
+release/v19/*.whl
+release/v19/*.tar.gz

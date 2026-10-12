@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        include:
+          - os: windows-latest
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e airmouse_pkg
+
+      - name: Run test suite (from repo root)
+        run: python -m pytest tests -q --no-header
+
+  packaging:
+    name: Build + clean-install smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build airmouse_pkg
+          python -m twine check dist/*
+
+      - name: Clean venv install (outside the source tree)
+        run: |
+          python -m venv /tmp/cleanvenv
+          /tmp/cleanvenv/bin/pip install --upgrade pip
+          /tmp/cleanvenv/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/cleanvenv/bin/airmouse --version
+          /tmp/cleanvenv/bin/airmouse doctor --json > /dev/null && echo "doctor --json OK"
+          /tmp/cleanvenv/bin/airmouse capabilities | head -3
+          /tmp/cleanvenv/bin/python -c "import airmouse; print('import OK:', airmouse.__file__)"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

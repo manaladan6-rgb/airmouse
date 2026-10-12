@@ -46,12 +46,28 @@ Handedness convention (important, read before using labels):
 import os
 import urllib.request
 import cv2
-import mediapipe as mp
 import numpy as np
+
+# NOTE: mediapipe is imported LAZILY (PEP 562 module __getattr__ below) —
+# it pulls matplotlib and ~1.0 s of import work, which would otherwise
+# tax every CLI command (`airmouse --version`, doctor, setup, ...) that
+# merely imports this module for the HandTracker class object.  Code and
+# tests can still use ``airmouse.tracker.mp`` exactly as before: the
+# first access imports mediapipe and caches it as a real module global.
 
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".airmouse")
 MODEL_PATH = os.path.join(CACHE_DIR, "hand_landmarker.task")
+
+
+def __getattr__(name):
+    """PEP 562 lazy module attributes — mediapipe only, on first touch."""
+    if name == "mp":
+        global mp
+        import mediapipe as _mp
+        mp = _mp  # cache as a real module global; later lookups skip this
+        return _mp
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class _LM:

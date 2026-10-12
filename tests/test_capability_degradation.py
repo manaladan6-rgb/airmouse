@@ -205,3 +205,23 @@ def test_env_dial_covers_opencv_noise():
     machine does not get scary C++ videoio warnings during doctor."""
     from airmouse import quiet as quiet_mod
     assert quiet_mod._ENV_DIALS.get("OPENCV_LOG_LEVEL") == "ERROR"
+
+
+def test_cli_startup_does_not_pay_mediapipe_import():
+    """Release-audit regression: importing the CLI (or tracker) must not
+    import mediapipe (~1 s of matplotlib-weighted import work).  The
+    lazy PEP 562 hook keeps ``airmouse.tracker.mp`` usable for runtime
+    and tests while every CLI command stays fast."""
+    import subprocess
+    import sys
+    code = (
+        "import sys; import airmouse.__main__;"  # the full CLI module graph
+        "assert 'mediapipe' not in sys.modules, 'mediapipe imported eagerly';"
+        "import airmouse.tracker as t;"
+        "assert 'mediapipe' not in sys.modules, 'tracker eager import';"
+        "_ = t.mp;"                      # first touch imports + caches
+        "assert 'mediapipe' in sys.modules and t.mp is sys.modules['mediapipe']"
+    )
+    r = subprocess.run([sys.executable, "-c", code],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
