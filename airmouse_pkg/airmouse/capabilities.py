@@ -647,6 +647,15 @@ def _detect_camera(quick: bool) -> List[Component]:
             "run a full airmouse doctor with the camera connected",
             hardware_state="AVAILABLE")]
     import cv2  # verified importable above (cheap after first call)
+    # best-effort runtime dial for OpenCV's C++ videoio WARN noise (the
+    # env dial in quiet.py only applies when cv2 was not imported yet);
+    # real OpenCV errors stay visible (LOG_LEVEL_ERROR, not SILENT)
+    try:
+        _cv_log = getattr(getattr(cv2, "utils", None), "logging", None)
+        if _cv_log is not None and hasattr(_cv_log, "setLogLevel"):
+            _cv_log.setLogLevel(getattr(_cv_log, "LOG_LEVEL_ERROR", 2))
+    except Exception:
+        pass
     t0 = time.perf_counter()
     cap = None
     try:

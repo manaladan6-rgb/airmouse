@@ -179,3 +179,29 @@ def test_build_registry_never_raises_and_is_honest():
     assert isinstance(mode, str) and mode
     # evidence labels stay inside the closed vocabulary
     assert all(c.label.reality in set(Reality) for c in rows)
+
+
+# ---------------------------------------------------------------------------
+# regression: v19 release audit — enum repr must never leak into user output
+# ---------------------------------------------------------------------------
+
+def test_gaze_state_is_plain_string_never_enum_repr():
+    """`ComponentState(str, Enum)` members hash like their value, so the
+    mark lookup worked — but f-strings rendered "ComponentState.OPTIONAL"
+    on Python 3.11+.  The registry must carry PLAIN strings everywhere
+    the user can see (release-audit regression)."""
+    reg = build_registry(quick=False)          # exercises the probe path
+    for c in reg.interaction_rows():
+        assert isinstance(c.state, str)
+        assert not c.state.startswith("ComponentState."), \
+            f"raw enum leaked into state for {c.key}: {c.state!r}"
+        assert c.state == str(c.state)
+    rendered = reg.render()
+    assert "ComponentState." not in rendered
+
+
+def test_env_dial_covers_opencv_noise():
+    """quiet._ENV_DIALS must include the OpenCV dial so a camera-less
+    machine does not get scary C++ videoio warnings during doctor."""
+    from airmouse import quiet as quiet_mod
+    assert quiet_mod._ENV_DIALS.get("OPENCV_LOG_LEVEL") == "ERROR"

@@ -262,7 +262,10 @@ def build_registry(quick: bool = False) -> CapabilityRegistry:
                         "gaze" in (comp.name or "").lower():
                     if "gaze" in (comp.name or "").lower():
                         found = True
-                        gaze_state = comp.state
+                        # normalize to the plain value: a raw enum member
+                        # would leak "ComponentState.OPTIONAL" into f-strings
+                        gaze_state = str(getattr(comp.state, "value",
+                                                 comp.state))
                         gaze_detail = comp.detail
                         gaze_fix = comp.remediation or gaze_fix
                         break

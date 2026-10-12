@@ -44,6 +44,10 @@ _ENV_DIALS = {
     "GLOG_minloglevel": "3",          # glog: 3 = ERROR only
     "TF_CPP_MIN_LOG_LEVEL": "3",      # TensorFlow C++: 3 = nothing
     "ABSL_MIN_LOG_LEVEL": "3",        # absl C++ stderr noise
+    # OpenCV C++ videoio WARN noise on machines without a camera
+    # ("can't open camera by index" while the probe honestly reports the
+    # result in AirMouse's own output).  ERROR keeps real OpenCV errors.
+    "OPENCV_LOG_LEVEL": "ERROR",
 }
 
 #: third-party Python loggers that may be dialed down (never airmouse's)
