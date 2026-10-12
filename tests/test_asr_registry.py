@@ -417,6 +417,14 @@ def test_record_utterance_silence_times_out_honestly():
 def test_capture_transcript_end_to_end_with_real_provider_shape():
     """mic → VAD → provider, with a scripted stream and an engine that
     'recognizes' — proves the full local pipeline plumbing offline."""
+    # the engine is pocketsphinx-shaped → the pipeline wraps PCM into a
+    # SpeechRecognition AudioData; without that OPTIONAL extra the honest
+    # pipeline result is (None, 0.0) — skip instead of asserting
+    # behaviour that depends on a dependency we do not have
+    pytest.importorskip(
+        "speech_recognition",
+        reason="pocketsphinx-shaped pipeline needs the optional "
+               "SpeechRecognition extra")
     from airmouse.mic_capture import capture_transcript
 
     class _Engine(_FakeEngine):

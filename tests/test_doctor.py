@@ -7,6 +7,7 @@ detector becomes a FAILED component, never an exception).
 """
 
 import json
+import sys
 import time
 
 import pytest
@@ -139,6 +140,10 @@ def test_required_core_is_healthy_in_this_sandbox(full_report):
 
 
 def test_pynput_unavailable_with_display_remediation(full_report):
+    if sys.platform == "win32":
+        pytest.skip("on a real Windows desktop pynput is genuinely READY — "
+                    "this asserts the headless remediation path (covered "
+                    "by the Linux CI jobs)")
     inp = _by_category(full_report)["INPUT"]
     pynput_row = next(c for c in inp if "pynput" in c.name.lower())
     assert pynput_row.state is ComponentState.UNAVAILABLE

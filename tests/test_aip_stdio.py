@@ -614,12 +614,17 @@ class TestSubprocessSmoke:
         """agent-core's ``stdio://`` client speaks to the wire server
         end-to-end: envelope framing, sequential reply, error codes."""
         _repo_agent_core = _repo / "agent-core"
+        # NOTE: the executable path is embedded in a generated source
+        # string — on Windows it contains backslashes that would become
+        # invalid escape sequences ("\hostedtoolcache"); double them so
+        # the generated literal is correct on every platform.
+        _exe_literal = sys.executable.replace("\\", "\\\\")
         code = "\n".join([
             "import sys",
             "sys.path.insert(0, r'%s')" % _repo_agent_core,
             "from airmouse_agent import AirMouse, AipError",
             "air = AirMouse(transport='stdio://%s -m airmouse.aip_stdio',"
-            "agent_id='core-test')" % sys.executable,
+            "agent_id='core-test')" % _exe_literal,
             "try:",
             "    air.execute(intent='noop')",
             "    print('EXECUTED')",

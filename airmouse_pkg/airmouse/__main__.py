@@ -463,6 +463,26 @@ def _confirm(prompt: str) -> bool:
         return False
 
 
+#: the info/diagnostic subcommands accepted as the positional ``command``
+_COMMAND_CHOICES = [
+    "voice-status", "gestures", "commands",
+    "browser", "offline-test", "diagnostics",
+    "intelligence", "memory", "vocabulary",
+    "workflows", "self-test",
+    "status", "capabilities", "observe",
+    "world", "twin", "skills", "agents",
+    "permissions", "tasks", "protocol",
+    "benchmark",
+    "setup", "doctor", "test", "verify",
+    "privacy",
+    "academy", "gesture-lab", "profile",
+    "teach", "learn", "transcribe", "help-me",
+    "voice-setup", "voice-benchmark",
+    "wizard", "reset", "repair",
+    "uninstall", "update",
+]
+
+
 def main():
     # v16.5.1 §13 — silence third-party diagnostic noise (MediaPipe/
     # Clearcut/TFLite/absl) BEFORE any dependency import; AirMouse's own
@@ -633,28 +653,30 @@ def main():
     parser.add_argument("--debug", action="store_true",
                         help="show technical details when something fails")
     parser.add_argument("command", nargs="?", default=None,
-                        choices=["voice-status", "gestures", "commands",
-                                 "browser", "offline-test", "diagnostics",
-                                 "intelligence", "memory", "vocabulary",
-                                 "workflows", "self-test",
-                                 "status", "capabilities", "observe",
-                                 "world", "twin", "skills", "agents",
-                                 "permissions", "tasks", "protocol",
-                                 "benchmark",
-                                 "setup", "doctor", "test", "verify",
-                                 "privacy",
-                                 "academy", "gesture-lab", "profile",
-                                 "teach", "learn", "transcribe", "help-me",
-                                 "voice-setup", "voice-benchmark",
-                                 "wizard", "reset", "repair",
-                                 "uninstall", "update"],
+                        choices=_COMMAND_CHOICES,
                         help="info/diagnostic subcommand (prints and exits)")
     parser.add_argument("command_arg", nargs="?", default=None,
                         help="optional subcommand argument "
                              "(memory: status|export|reset|delete; "
                              "teach: all|voice|gaze|gesture|fusion|resume; "
                              "help-me: any question)")
-    args = parser.parse_args()
+    args, _extra = parser.parse_known_args()
+    if _extra:
+        # Version-robust positional handling.  Python 3.9–3.11 argparse
+        # refuses a positional that FOLLOWS an option's value ("--to X
+        # garbage") while 3.12+ matches it to command/command_arg — the
+        # same invocation must behave the same on every supported
+        # interpreter.  Strictness is preserved: unknown OPTIONS still
+        # exit 2, and extra positionals beyond command/command_arg error.
+        if any(t.startswith("-") for t in _extra):
+            parser.error("unrecognized arguments: " + " ".join(_extra))
+        for tok in _extra:
+            if args.command is None and tok in _COMMAND_CHOICES:
+                args.command = tok
+            elif args.command_arg is None:
+                args.command_arg = tok
+            else:
+                parser.error("unrecognized arguments: " + " ".join(_extra))
 
     if args.version:
         print(f"AirMouse v{_pkg.__version__} — Adaptive Human-Computer Intelligence Edition")

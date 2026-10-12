@@ -37,6 +37,7 @@ dependencies = [
     "opencv-python>=4.8.0",
     "pynput>=1.7.6",
     "numpy>=1.24.0,<2.3",
+    "tomli>=1.1.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]

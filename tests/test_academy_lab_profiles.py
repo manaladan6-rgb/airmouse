@@ -20,16 +20,27 @@ Covers (Task 2-f):
 import json
 import os
 
+import pytest
+
 try:
     import tomllib
-except ImportError:                              # pragma: no cover
-    tomllib = None
+except ImportError:                              # py<3.11
+    try:
+        import tomli as tomllib                  # declared dependency
+    except ImportError:                          # pragma: no cover
+        tomllib = None                           # tests skip honestly
 
 from airmouse import academy
 from airmouse import gesture_lab
 from airmouse import gesture_profiles as gp
 from airmouse import paths
 from airmouse.gestures import Gesture
+
+#: reading the written config back needs a TOML parser (stdlib on 3.11+,
+#: the declared tomli dependency below that) — skip honestly without one
+_toml_ok = tomllib is not None
+needs_toml = pytest.mark.skipif(not _toml_ok,
+                                reason="no TOML parser on this interpreter")
 
 ALL_PROFILES = {"default", "developer", "presentation", "gaming",
                 "accessibility", "media", "creative", "hands_free"}
@@ -117,6 +128,7 @@ class TestApplyProfile:
         ok, msg = gp.apply_profile(None)
         assert ok is False
 
+    @needs_toml
     def test_apply_valid_writes_real_config_file(
             self, monkeypatch, tmp_path):
         self._tmp_home(monkeypatch, tmp_path)
@@ -155,6 +167,7 @@ class TestApplyProfile:
         assert cfg.adaptive_calibration is False
         assert cfg.tracking_mode == "direct"
 
+    @needs_toml
     def test_apply_preserves_settings_outside_the_profile(
             self, monkeypatch, tmp_path):
         home = self._tmp_home(monkeypatch, tmp_path)
@@ -170,6 +183,7 @@ class TestApplyProfile:
         assert data["gesture"]["confirm_frames"] == 6      # overridden
         assert data["gesture"]["pinch_cooldown"] == 0.5    # preserved
 
+    @needs_toml
     def test_default_profile_restores_factory(self, monkeypatch, tmp_path):
         self._tmp_home(monkeypatch, tmp_path)
         ok, _ = gp.apply_profile("accessibility")
