@@ -51,7 +51,7 @@ Nothing leaves your machine: no cloud AI, no telemetry, no hidden network calls.
 network access AirMouse ever performs is a model download **you explicitly request** with a
 verified checksum, and an update check **you explicitly request**.
 
-## Verified in this release (v19.0.0)
+## Verified in this release (v19.0.1)
 
 Status vocabulary: **REAL** = implemented and verified by automated tests ·
 **SIMULATED** = verified in a labelled simulation only · **OPTIONAL** = available when you
@@ -193,7 +193,7 @@ spine. Details: [V19_ARCHITECTURE.md](airmouse_pkg/docs/V19_ARCHITECTURE.md).
 
 ## Testing & benchmarks
 
-2,114 tests pass at release (2 honest skips: no Chrome binary and no local ASR engine in
+2,117 tests pass at release (2 honest skips: no Chrome binary and no local ASR engine in
 the CI sandbox — each skip names its reason). Skipped hardware tests are never counted as
 passes. Performance numbers are measured, not claimed — `airmouse benchmark` reproduces
 them on your machine. The release audit measured on Linux x86_64 / CPython 3.12

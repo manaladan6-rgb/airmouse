@@ -7,6 +7,30 @@ The detailed per-release engineering notes live in
 [airmouse_pkg/CHANGELOG.md](airmouse_pkg/CHANGELOG.md); this file is the
 user-facing summary.
 
+## [19.0.1] — Public Release Audit hotfixes
+
+### Fixed
+- **Windows**: the model-install lock reaper used the POSIX idiom
+  `os.kill(pid, 0)`; on Windows signal 0 is `CTRL_C_EVENT`, so a stale
+  lock with a live pid interrupted the running process with a real
+  Ctrl+C. The reaper now probes via `OpenProcess` and never signals.
+- **Windows**: piped/redirected CLI output (`airmouse doctor | tool`)
+  could crash on `✓`/`→` characters — stdout/stderr are now UTF-8.
+- **Python 3.9/3.10**: the `tomli` TOML parser was never declared as a
+  dependency, silently degrading config validation. Now declared for
+  `python_version < "3.11"`.
+- **All platforms**: `doctor --json --to X garbage` behaved differently
+  across Python versions (argparse intermix change in 3.12); the CLI
+  parser is now version-robust with strictness preserved.
+- **Windows**: atomic store writes could fail when another thread or
+  process held the target file open; `fileio.replace_atomic` retries
+  sharing violations with a bounded backoff.
+- CLI startup 3.3× faster (lazy mediapipe import); `airmouse
+  capabilities` no longer leaks a raw enum repr; camera-less machines
+  no longer get OpenCV C++ WARN noise during `doctor`.
+
+[19.0.1]: https://github.com/manaladan6-rgb/airmouse/releases/tag/v19.0.1
+
 ## [19.0.0] — Instant Deployment
 
 ### Added

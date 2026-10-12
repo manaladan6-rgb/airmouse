@@ -1,5 +1,33 @@
 # Changelog
 
+## v19.0.1 — Public Release Audit hotfixes (2026-10-12)
+
+Fixes found by the first full cross-platform CI matrix (ubuntu py3.9-3.12
++ windows py3.12 + packaging/clean-install) and the public-release audit:
+
+* **Windows: the model-install lock reaper sent a real Ctrl+C** —
+  `os.kill(pid, 0)` is a POSIX liveness probe; on Windows signal 0 IS
+  CTRL_C_EVENT.  The reaper now uses an OpenProcess-based probe
+  (`_pid_alive`) and never signals; probe errors fail safe ("busy,
+  refuse honestly").
+* **Windows: piped CLI output crashed on '✓'/'→'** — stdout/stderr are
+  now reconfigured to UTF-8 in `main()` (the v16.5.1 encoding contract,
+  completed for pipes/redirects).
+* **py3.9/3.10: no TOML parser at all** — `tomli>=1.1.0;
+  python_version < "3.11"` is now a declared dependency (config parsing
+  silently degraded without it).
+* **CLI: same invocation, different behaviour per Python version** —
+  `doctor --json --to X garbage` errored on py3.9-3.11 and passed on
+  3.12 (argparse intermix change); the parser is now version-robust
+  with strictness preserved (unknown options still exit 2).
+* **Windows: atomic file replace could fail under concurrent access** —
+  `fileio.replace_atomic()` adds a bounded retry on sharing violations;
+  store writes and corruption quarantine use it.
+* Repo front door (README/LICENSE/SECURITY/CONTRIBUTING/CHANGELOG/
+  CODE_OF_CONDUCT), CI matrix, PyPI metadata (readme/URLs/classifiers),
+  CLI startup 3.3x faster (lazy mediapipe), capabilities enum-leak fix,
+  OpenCV WARN-noise dial, and environment-honest test skips.
+
 ## v19.0.0 — INSTANT DEPLOYMENT (2026-10-12)
 
 Built on v16.5.3 reality (fresh-clone audit in `docs/V19_BASELINE.md`).

@@ -1,0 +1,2 @@
+488230538565f12e62df3c4099dd6c70bf5f0fb1f9cc3a228bdb621b2d9360c2  airmouse-19.0.1-py3-none-any.whl
+7bbd727b4e8165aec6cbbfbaebe7f90438d2f82b22f99f6b82cc43c8dfc0f543  airmouse-19.0.1.tar.gz

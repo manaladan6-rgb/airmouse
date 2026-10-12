@@ -23,3 +23,5 @@ bundle/
 # v19 release artifacts ship as GitHub release assets (not git blobs)
 release/v19/*.whl
 release/v19/*.tar.gz
+release/v19.0.1/*.whl
+release/v19.0.1/*.tar.gz
