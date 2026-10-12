@@ -33,7 +33,22 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 PKG = REPO / "airmouse_pkg"
 
-pytest.importorskip("build", reason="python -m build required")
+
+def _build_tool_available() -> bool:
+    """Probe `python -m build` in a SUBPROCESS — importable-in-process
+    is not the contract (a stray build.py can shadow the import)."""
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "build", "--version"],
+            capture_output=True, text=True, timeout=60)
+        return proc.returncode == 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _build_tool_available(),
+    reason="python -m build required (pip install build)")
 
 _BUILD = {"done": False, "wheel": None, "sdist": None}
 
