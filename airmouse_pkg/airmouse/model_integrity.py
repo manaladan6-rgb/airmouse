@@ -195,11 +195,18 @@ def _pid_alive(pid: int) -> bool:
         import ctypes
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         STILL_ACTIVE = 259
-        k32 = ctypes.windll.kernel32          # type: ignore[attr-defined]
+        ERROR_ACCESS_DENIED = 5
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
         handle = k32.OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
         if not handle:
-            return ctypes.getlasterror() == 5  # ERROR_ACCESS_DENIED → exists
+            # with use_last_error=True, ctypes.getlasterror() returns the
+            # error captured from the just-failed OpenProcess call
+            err = ctypes.getlasterror()
+            # ACCESS_DENIED → the process exists (owned by someone else);
+            # INVALID_PARAMETER / not-found → no such process.  Anything
+            # else: assume busy (safe direction — see docstring).
+            return err == ERROR_ACCESS_DENIED
         try:
             exit_code = ctypes.c_ulong()
             if k32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):

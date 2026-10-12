@@ -333,6 +333,10 @@ class TestPersistenceAdversarial:
     def test_readonly_memory_dir_reset_delete_fail_closed(self, home):
         if hasattr(os, "getuid") and os.getuid() == 0:
             pytest.skip("root ignores directory permissions")
+        if sys.platform == "win32":
+            pytest.skip("Windows filesystems ignore the POSIX write bit "
+                        "on directories (readonly needs ACLs) — the "
+                        "fail-closed contract is covered on POSIX CI")
         persistence.ensure_dirs()
         store = persistence.PersistentStore("twin")
         store.save({"keep": 1})

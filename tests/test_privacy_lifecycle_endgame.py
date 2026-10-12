@@ -26,6 +26,7 @@ import base64
 import glob
 import json
 import os
+import sys
 
 import numpy as np
 import pytest
@@ -194,7 +195,12 @@ def test_paths_api_contract(home):
 def test_paths_resolve_dynamically_after_import(tmp_path, monkeypatch):
     """AIRMOUSE_HOME may be set AFTER import — every call re-resolves."""
     monkeypatch.delenv("AIRMOUSE_HOME", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
+    # make `~` resolve into the tmp tree with the PLATFORM's home variable
+    # (POSIX honours HOME; Windows expanduser() reads USERPROFILE)
+    if sys.platform == "win32":
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    else:
+        monkeypatch.setenv("HOME", str(tmp_path))
     assert paths.airmouse_home() == os.path.join(str(tmp_path), ".airmouse")
     assert paths.macros_dir() == \
         os.path.join(str(tmp_path), ".airmouse", "macros")
@@ -475,11 +481,15 @@ def test_memory_export_bundles_stores_and_artifacts(home, tmp_path):
     assert result["artifacts"] >= 10          # learning artifact entries
     assert result["artifacts_captured"] >= 11  # model.bin + jsons + macros…
     by_path = {a["path"]: a for a in bundle["artifacts"]}
-    model_entry = by_path[os.path.join(str(home), "intelligence/model.bin")]
+    # product paths are os.path.join chains — build the expected keys the
+    # same way (a POSIX-style "intelligence/model.bin" literal would be a
+    # mixed-separator key that cannot match on Windows)
+    model_entry = by_path[os.path.join(str(home), "intelligence",
+                                       "model.bin")]
     assert model_entry["encoding"] == "base64"
     assert base64.b64decode(model_entry["data"]) == \
         seeded["intelligence/model.bin"]
-    macro_entry = by_path[os.path.join(str(home), "macros/jiggle.json")]
+    macro_entry = by_path[os.path.join(str(home), "macros", "jiggle.json")]
     assert base64.b64decode(macro_entry["data"]) == seeded["macros/jiggle.json"]
     assert by_path[os.path.join(str(home), "lecture.md")]["exists"] is True
 
