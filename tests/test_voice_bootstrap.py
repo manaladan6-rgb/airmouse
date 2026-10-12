@@ -427,9 +427,15 @@ def test_model_sha256_mismatch_blocks_extraction(monkeypatch, fresh_manager,
         consent=lambda q: True,
         fetch=lambda url, p: b"NOT THE REAL MODEL BYTES")
     assert ok is False
-    assert Obstacle.VERIFY_FAILED in msg
-    assert "SHA256" in msg or "sha256" in msg
+    # v19: the 12-stage pipeline rejects untrusted bytes at the EARLIEST
+    # honest stage — fake bytes (24 B) fail the pinned-size stage before
+    # the SHA256 stage.  The invariant under test is unchanged: nothing
+    # that fails verification is ever extracted, and the failure is
+    # explicit about size or digest.
+    assert Obstacle.VERIFY_FAILED in msg or "mismatch" in msg
+    assert "SHA256" in msg or "sha256" in msg or "size mismatch" in msg
     assert exploded.calls == []                  # nothing was extracted
+    assert not (isolated_home / "models" / "vosk").exists()
 
 
 def test_model_zip_slip_is_blocked(fresh_manager, isolated_home, tmp_path):

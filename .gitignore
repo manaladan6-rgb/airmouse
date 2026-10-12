@@ -18,3 +18,4 @@ __pycache__/
 # local dev environment (v16.5.1)
 .venv/
 bundle/
+.test-assets/

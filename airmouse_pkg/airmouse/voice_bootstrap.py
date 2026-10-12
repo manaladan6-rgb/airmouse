@@ -83,13 +83,18 @@ NATIVE_ASR_PACKAGE_UNAVAILABLE = "NATIVE_ASR_PACKAGE_UNAVAILABLE"
 #: Apache-2.0 model DATA (no executables) and is SHA256-verified.
 VOSK_MODEL_URL = ("https://alphacephei.com/vosk/models/"
                   "vosk-model-small-en-us-0.15.zip")
-#: SHA256 of the official archive, computed from alphacephei.com at
-#: release time and verified BEFORE extraction — a mismatch discards
-#: the archive (§6: only verified, officially sourced data).
-VOSK_MODEL_SHA256 = ("507575b9efd23f96ad2e9c2f226a8b9b50ca1cd894e2b"
-                     "00e7f07b170ffe6b00a")
-VOSK_MODEL_BYTES = 41_205_932  # measured from the official endpoint
-VOSK_MODEL_UNPACKED_MB = 70.9  # measured on the released archive (§16)
+#: SHA256 of the official archive — v19 CORRECTION: the v16.5.3 pin
+#: (507575b9… / 41,205,932 B) was WRONG and made every consented download
+#: fail verification.  Re-measured LIVE in the v19 baseline audit (4th
+#: independent measurement, 2nd complete download; cross-checked against
+#: the independently published Alpine aports digest).  These values now
+#: DELEGATE to airmouse.model_integrity (the single source of truth);
+#: the module-level names are kept for backward compatibility.
+from .model_integrity import VOSK_MODEL as _MI_VOSK_MODEL  # noqa: E402
+
+VOSK_MODEL_SHA256 = _MI_VOSK_MODEL.sha256
+VOSK_MODEL_BYTES = _MI_VOSK_MODEL.size
+VOSK_MODEL_UNPACKED_MB = _MI_VOSK_MODEL.unpacked_mb  # measured (§16)
 
 
 # ---------------------------------------------------------------------------
@@ -658,7 +663,14 @@ class ASRBootstrapManager:
 
         ``fetch`` is injectable for tests (no network in CI).
         """
+        # v19 DELEGATION: the whole acquisition is now owned by
+        # airmouse.model_integrity (the reconstructed 12-stage pipeline:
+        # temp→fsync→bytecount→SHA256→SHA512→CRC→structure→zip-slip→
+        # exec/symlink→staged→validate→ATOMIC + rollback).  This method
+        # keeps its historical (ok, message) contract and adds the
+        # engine-level verification on top.
         try:
+            from . import model_integrity as mi
             from . import paths
             from .offline_voice import _looks_like_vosk_model
             dest = paths.vosk_model_dir()
@@ -712,16 +724,14 @@ class ASRBootstrapManager:
             say = progress or (lambda _s: None)
             say(f"downloading {VOSK_MODEL_BYTES / 1e6:.1f} MB …")
             raw = fetcher(VOSK_MODEL_URL, lambda n: None)
-            digest = hashlib.sha256(raw).hexdigest()
-            if VOSK_MODEL_SHA256 not in ("", "PENDING_VERIFIED_HASH") and \
-                    digest != VOSK_MODEL_SHA256:
-                return (False, f"{Obstacle.VERIFY_FAILED}: SHA256 mismatch "
-                        f"(got {digest[:16]}…, expected "
-                        f"{VOSK_MODEL_SHA256[:16]}…) — the archive was "
-                        f"discarded, nothing was extracted")
-            say("verifying + extracting …")
+            # v19: digest + extraction now owned by model_integrity
+            # (SHA256+SHA512+CRC+structure+zip-slip+atomic+rollback)
+            say("verifying + installing …")
             os.makedirs(os.path.dirname(dest), exist_ok=True)
-            _extract_model_zip(io.BytesIO(raw), dest)
+            pipeline = mi.ModelPipeline(spec=mi.VOSK_MODEL, dest=dest)
+            state, imsg = pipeline.install_from_bytes(raw, progress=say)
+            if state != mi.ModelState.MODEL_READY:
+                return (False, f"{Obstacle.VERIFY_FAILED}: {imsg}")
             if not _looks_like_vosk_model(dest):
                 return (False, f"{Obstacle.VERIFY_FAILED}: extracted data "
                         f"is not a valid Vosk model — removed")
@@ -732,6 +742,17 @@ class ASRBootstrapManager:
                         f"but the engine failed to initialize ({vmsg}) — "
                         f"the model directory was removed")
             return (True, f"model READY at {dest} ({vmsg})")
+        except mi.ModelIntegrityError as exc:
+            # v19: verification-class failures keep the honest obstacle
+            # vocabulary (VERIFY_FAILED / OFFLINE_MODEL_REQUIRED / …)
+            reason = str(exc.reason)
+            if "consent" in reason.lower() or "declined" in reason.lower():
+                return (False, f"{Obstacle.USER_DECLINED}: {exc.detail}")
+            if "offline" in reason.lower():
+                return (False, f"{Obstacle.OFFLINE_MODEL_REQUIRED}: "
+                        f"{exc.detail}")
+            return (False, f"{Obstacle.VERIFY_FAILED}: {exc.reason} — "
+                    f"{exc.detail}")
         except Exception as exc:
             return (False, f"model setup failed honestly: "
                     f"{type(exc).__name__}: {exc}")
