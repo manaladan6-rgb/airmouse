@@ -332,7 +332,10 @@ class TestJsSdk:
         if node.returncode != 0:
             pytest.skip("node not available in sandbox")
         script = (
+            # forward slashes: backslashes in a Windows path would be
+            # invalid escape sequences inside this generated JS literal
             "const am = require('%s/agent-sdk-js/airmouse-agent.js');"
+            % str(_repo).replace("\\", "/") +
             "const handler = (wire) => { const m = JSON.parse(wire);"
             "return JSON.stringify({aip_version:'1.0',"
             "type: m.type==='status'?'status':m.type==='discover'?"
@@ -345,7 +348,7 @@ class TestJsSdk:
             "if (!r.ok) throw new Error('execute failed');"
             "console.log('JS_SDK_OK');"
             "}).catch(e => { console.error(e.message); process.exit(1); });"
-        ) % _repo
+        )
         out = subprocess.run(["node", "-e", script], capture_output=True,
                              text=True, timeout=30)
         assert "JS_SDK_OK" in out.stdout, out.stderr

@@ -395,6 +395,10 @@ class TestSetupAdversarial:
                                                        monkeypatch):
         if hasattr(os, "getuid") and os.getuid() == 0:
             pytest.skip("root ignores directory permissions")
+        if sys.platform == "win32":
+            pytest.skip("Windows filesystems ignore the POSIX write bit "
+                        "on directories (readonly needs ACLs) — the "
+                        "fail-closed steps contract is covered on POSIX CI")
         h = tmp_path / "locked-home"
         h.mkdir()
         (h / "memory").mkdir()

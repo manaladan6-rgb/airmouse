@@ -672,7 +672,7 @@ def test_config_two_hand_save_roundtrip(tmp_path, monkeypatch):
     cfg.two_hand = True
     monkeypatch.setattr(config_mod, "CONFIG_PATH", path, raising=False)
     cfg.save_defaults()
-    text = open(path).read()
+    text = open(path, encoding="utf-8").read()   # the contract: UTF-8
     assert "[v10]" in text
     assert "two_hand = true" in text          # saved next to the v10 flags
     cfg2 = Config()

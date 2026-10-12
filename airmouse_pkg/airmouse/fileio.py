@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any, Dict, Optional, Tuple
 
 __all__ = [
@@ -100,12 +101,35 @@ def read_text(path: str) -> str:
                                 exc.reason) from None
 
 
+def replace_atomic(src: str, dst: str, *, attempts: int = 6,
+                   delay: float = 0.02) -> None:
+    """``os.replace`` with a short retry on Windows sharing violations.
+
+    On POSIX a rename over an open file just works.  On Windows a file
+    held open by another thread/process (antivirus, indexer, a second
+    AirMouse thread mid-read) makes ``os.replace`` raise
+    ``PermissionError`` — a brief bounded retry resolves the common
+    races without ever masking a genuine failure (the last error still
+    propagates).
+    """
+    last_exc: Optional[BaseException] = None
+    for i in range(max(1, attempts)):
+        try:
+            os.replace(src, str(dst))
+            return
+        except PermissionError as exc:
+            last_exc = exc
+            time.sleep(delay * (i + 1))     # linear backoff, bounded
+    assert last_exc is not None
+    raise last_exc
+
+
 def write_text_atomic(path: str, text: str) -> None:
     """Write ``text`` as UTF-8 (no BOM), atomically, contract-guaranteed.
 
-    tmp file in the same directory + ``os.replace`` — a crash mid-write
-    can never leave a truncated config behind.  Creates the parent
-    directory when missing.
+    tmp file in the same directory + :func:`replace_atomic` — a crash
+    mid-write can never leave a truncated config behind.  Creates the
+    parent directory when missing.
     """
     d = os.path.dirname(str(path))
     if d:
@@ -115,7 +139,7 @@ def write_text_atomic(path: str, text: str) -> None:
         f.write(text.encode(TEXT_ENCODING))
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp, str(path))
+    replace_atomic(tmp, str(path))
 
 
 def read_json(path: str) -> Any:

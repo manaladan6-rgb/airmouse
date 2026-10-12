@@ -77,6 +77,7 @@ import tempfile
 import time
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
+from . import fileio as _fileio
 from . import paths as _paths
 
 __all__ = [
@@ -230,7 +231,7 @@ def atomic_write_bytes(path: str, data: bytes) -> None:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        _fileio.replace_atomic(tmp, path)   # Windows sharing-violation safe
     except BaseException:
         try:
             os.unlink(tmp)
@@ -413,7 +414,7 @@ class PersistentStore:
             n += 1
             target = f"{base}-{n}"
         try:
-            os.replace(original, target)  # same dir → atomic rename
+            _fileio.replace_atomic(original, target)  # same dir → atomic
         except OSError:
             self.last_corruption = {"path": original, "reason": reason}
             return {}

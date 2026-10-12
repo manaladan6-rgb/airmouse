@@ -18,9 +18,12 @@ ENV = {**os.environ, "PYTHONPATH": _PKG}
 
 
 def _cli(*args: str, timeout: float = 60.0) -> subprocess.CompletedProcess:
+    # the CLI speaks UTF-8 on stdout/stderr (the v16.5.1 contract now also
+    # enforced for piped output); never decode with the process default
     return subprocess.run(
         [sys.executable, "-m", "airmouse", *args],
-        env=ENV, cwd=_PKG, capture_output=True, text=True, timeout=timeout)
+        env=ENV, cwd=_PKG, capture_output=True, timeout=timeout,
+        text=True, encoding="utf-8", errors="replace")
 
 
 # ── CLI surface ──────────────────────────────────────────────────────────────
@@ -94,7 +97,7 @@ def test_config_v9_section_roundtrip(tmp_path, monkeypatch):
             c.CONFIG_PATH = old
 
     assert os.path.exists(path)
-    text = open(path).read()
+    text = open(path, encoding="utf-8").read()   # the contract: UTF-8
     assert "[v9]" in text and "fusion_mode" in text
 
     cfg2 = Config()

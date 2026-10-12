@@ -484,6 +484,19 @@ _COMMAND_CHOICES = [
 
 
 def main():
+    # v16.5.1 encoding contract — completion: on Windows, output through a
+    # PIPE (airmouse doctor | other-tool, CI capture) defaults to the ANSI
+    # codepage (cp1252), and honest panels contain non-cp1252 characters
+    # ("✓", "→") → UnicodeEncodeError mid-report.  Force UTF-8 for piped
+    # output too; a real console (PEP 528) is already UTF-8 and is not
+    # degraded by this (errors="replace" only guards pathological cases).
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            if hasattr(_stream, "reconfigure"):
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass  # never let encoding plumbing break the app
+
     # v16.5.1 §13 — silence third-party diagnostic noise (MediaPipe/
     # Clearcut/TFLite/absl) BEFORE any dependency import; AirMouse's own
     # errors are never filtered.

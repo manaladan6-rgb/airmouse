@@ -615,7 +615,10 @@ def test_pid_alive_never_signals_and_answers_definitely():
     # on Windows (GenerateConsoleCtrlEvent to our own group)
     assert pid(os.getpid()) is True
     # a pid that cannot exist on any supported platform → dead
-    assert pid(2 ** 22) is False
+    # (Windows pids are always multiples of 4, so an odd value in the
+    # valid range can never be allocated; 2**22 alone is a *valid*
+    # multiple-of-4 value that a busy runner may genuinely own)
+    assert pid(2 ** 22 + 1) is False
 
 
 def test_reaper_refuses_fresh_lock_of_live_process(tmp_path):
