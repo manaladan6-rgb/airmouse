@@ -18,6 +18,9 @@ import hashlib
 import io
 import os
 import struct
+import subprocess
+import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -614,11 +617,20 @@ def test_pid_alive_never_signals_and_answers_definitely():
     # this is exactly the case that used to raise KeyboardInterrupt
     # on Windows (GenerateConsoleCtrlEvent to our own group)
     assert pid(os.getpid()) is True
-    # a pid that cannot exist on any supported platform → dead
-    # (Windows pids are always multiples of 4, so an odd value in the
-    # valid range can never be allocated; 2**22 alone is a *valid*
-    # multiple-of-4 value that a busy runner may genuinely own)
-    assert pid(2 ** 22 + 1) is False
+    # a process we KNOW was allocated and has exited must be dead.  A
+    # made-up pid cannot be used here: Windows pid allocation is an
+    # implementation detail (the "pids are multiples of 4" folklore does
+    # not hold on modern runners — OpenProcess happily answered for a
+    # made-up odd pid), so we prove the contract with a real lifecycle.
+    import subprocess
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    for _ in range(5):                       # tolerate instant pid recycle
+        if pid(proc.pid) is False:
+            break
+        time.sleep(0.05)
+    assert pid(proc.pid) is False, \
+        "an exited process must not be reported alive"
 
 
 def test_reaper_refuses_fresh_lock_of_live_process(tmp_path):

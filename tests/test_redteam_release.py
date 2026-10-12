@@ -163,12 +163,15 @@ class TestCLISurfaceFuzz:
 
     @pytest.mark.parametrize("arg", [
         "", "STATUS", "Status ", "status; rm -rf /", "status|export",
-        "\x00", "éùᚠ𝔘", "x" * 100_000, "export --to /etc/passwd",
+        "\x00", "éùᚠ𝔘", "x" * 20_000, "export --to /etc/passwd",
         "RESET", "delete-all", "help", "../etc", "status\x1b[31m",
     ])
     def test_memory_weird_command_args(self, arg, home):
         """`airmouse memory <weird>` — lifecycle verbs dispatch, anything
         else degrades to the legacy memory view; never a traceback."""
+        # NOTE: the oversized case is 20k (not 100k) because pytest puts
+        # the test ID into PYTEST_CURRENT_TEST and Windows caps env vars
+        # at 32,767 chars — 100k errored the suite at setup on Windows CI.
         code, out, err = _cli(["memory", arg])
         assert code in (0, 1, 2)
         assert "Traceback" not in out + err
