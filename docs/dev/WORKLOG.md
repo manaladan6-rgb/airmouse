@@ -413,3 +413,25 @@ Stage Summary:
 - THE invariant holds by construction and is regression-tested: IF doctor reports pocketsphinx [ACTIVE] THEN transcribe launches provider: pocketsphinx (local ASR engine) / mode: MIC LIVE when a mic exists.
 - Wheel: airmouse-16.5.2-py3-none-any.whl, SHA256 3b26639d928cd4217b275647dd32b52ef619c413ae2878b1556ba90874ddf1d4.
 - Real-mic validation handed to user via WINDOWS_REAL_WORLD_TEST.md Step 16i (honestly labelled).
+
+---
+Task ID: v19-public-release
+Agent: lead release engineer (Z.ai)
+Task: Operation ICONIC OPEN-SOURCE LAUNCH — audit, preserve, clean, secure, package, validate and publicly release the AirMouse repository
+
+Work Log:
+- Preserved first: git bundle (115MB, complete history) at /home/z/airmouse-backup/ + branch backup/pre-v19-release-audit (94ad770) pushed; 7 local-only v19 commits pushed to origin (0b26072..94ad770) after a secret-scan of the unpushed diff (clean)
+- Baseline: 2112 passed / 2 honest skips / 0 failed (43s); CLI surface (41 subcommands) verified live; doctor 1.85s; capabilities/doctor --json/setup --check-only/verify/offline-test/benchmark all honest
+- Security audit: no shell=True/os.system/eval; network = loopback-pinned browser bridge + consent-gated checksum-verified model downloads + explicit check-only update; zip-slip + executable-member refusal verified in model_integrity
+- Fixes (release-audit): capabilities enum leak (ComponentState.OPTIONAL rendered raw on py3.11+), OpenCV WARN-noise dial (quiet.py env + runtime), lazy mediapipe via PEP 562 (CLI startup 1.63s -> 0.47s, 3.3x)
+- Repo front door: root README.md (21-section, honest capability table), LICENSE, CONTRIBUTING.md, SECURITY.md, CHANGELOG.md, CODE_OF_CONDUCT.md, .github/workflows/ci.yml; worklog moved to docs/dev/
+- Packaging: pyproject readme/URLs/classifiers (twine fully clean), release binaries untracked from git (ship as GitHub release assets), artifacts rebuilt + checksums regenerated + manifests updated
+- First CI runs failed: fixed pytest missing in jobs, dist paths; then a series of REAL cross-platform defects found by the matrix (each diagnosed from logs, none guessed): missing tomli dep on py<3.11 (product), argparse intermix version difference (product, strictness preserved), Windows Ctrl+C lock-reaper (os.kill(pid,0) IS CTRL_C_EVENT on Windows — replaced with OpenProcess probe; product, HIGH), cp1252 piped-output crash (product: UTF-8 reconfigure), os.replace sharing violations (product: bounded retry), plus environment-honest test guards (Linux-path openers, headless pynput, uncontrolled-desktop Chrome handshake, Windows env-var/argv caps, real-lifecycle pid test)
+- Final CI: 6/6 jobs SUCCESS (ubuntu 3.9/3.10/3.11/3.12 + windows 3.12 + packaging incl. twine + clean-venv install smoke)
+- Releases: v19.0.0 published (tag re-pointed from the never-pushed local RC to the audited tree, documented in the tag message; RC preserved on the backup branch), then superseded by v19.0.1 (all cross-platform fixes) — both with wheel+sdist+SHA256SUMS+SHA512SUMS as release assets, roundtrip-verified from GitHub
+- Repo metadata: description + 12 topics set via API
+
+Stage Summary:
+- Canonical repo: https://github.com/manaladan6-rgb/airmouse (public, MIT, main @ b0739c3, tags v19.0.0 + v19.0.1)
+- Suite at release: 2117 passed / 2 honest skips / 0 failed (local 3.12); CI 6/6 green
+- Honest open items: physical-hardware validation (WINDOWS_REAL_WORLD_TEST.md), signed Windows installer (roadmap), PyPI publish (maintainer), Chrome DevTools test needs a controlled desktop
