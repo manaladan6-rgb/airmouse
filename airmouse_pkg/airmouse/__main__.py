@@ -614,7 +614,11 @@ def main():
                         help="voice-benchmark: optional real-speech WAV to "
                              "measure real transcription latency",)
     parser.add_argument("--json", action="store_true",
-                        help="doctor/privacy: machine-readable output")
+                        help="doctor/capabilities/privacy: machine-readable output")
+    parser.add_argument("--advanced", action="store_true",
+                        help="doctor: technical diagnostics (same as --verbose)")
+    parser.add_argument("--aip", action="store_true",
+                        help="capabilities: show the AIP agent-protocol view")
     parser.add_argument("--to", type=str, default=None,
                         help="memory export: destination file path")
     parser.add_argument("--debug", action="store_true",
@@ -679,13 +683,30 @@ def main():
     if args.command == "doctor":
         from .capabilities import detect_all
         from .doctor import run_doctor, format_doctor_report
-        verbose = bool(args.verbose) or str(args.command_arg or "").strip().lower() in (
-            "verbose", "-v", "--verbose")
+        verbose = bool(args.verbose) or bool(args.advanced) or \
+            str(args.command_arg or "").strip().lower() in (
+                "verbose", "advanced", "-v", "--verbose", "--advanced")
         if args.json:
-            print(json.dumps(detect_all().to_machine(), indent=2))
+            from .capability_registry import build_registry
+            base = detect_all().to_machine()
+            try:
+                base["interaction_readiness"] = \
+                    build_registry(quick=True).to_machine()
+            except Exception:            # fail-open to the raw record
+                pass
+            print(json.dumps(base, indent=2))
             return 0
         report = run_doctor(verbose=verbose)
         print(format_doctor_report(report, verbose=verbose))
+        # v19 Phase 7 — the human interaction panel on the normal path
+        if not verbose:
+            try:
+                from .capability_registry import build_registry
+                reg = build_registry(quick=True)
+                print()
+                print(reg.render_interaction_panel())
+            except Exception:        # never break the doctor report
+                pass
         verdict = report.overall()
         if "BLOCKED" in verdict:
             return 2
@@ -1023,20 +1044,31 @@ def main():
               f"free core complete)")
         return
     if args.command == "capabilities":
-        from .aip import build_capabilities
-        caps = build_capabilities(
-            {"voice": False, "hand": False, "gaze": False,
-             "keyboard": True, "browser": False, "offline": True},
-            {"click": "mouse.click", "type_text": "type.text",
-             "open_app": "application.launch",
-             "navigate": "browser.navigate",
-             "observe": "observe.screen"})
-        print("  capabilities (AIP discover):")
-        for c in caps:
-            av = "+" if c["available"] else "-"
-            perm = f" perm={c['permission']}" if c.get("permission") else ""
-            print(f"    [{av}] {c['name']} ({c['kind']}){perm}")
-        return
+        # v19 Phase 10 — the user-facing capability registry (default),
+        # with the AIP agent-protocol view preserved under --aip.
+        if args.aip:
+            from .aip import build_capabilities
+            caps = build_capabilities(
+                {"voice": False, "hand": False, "gaze": False,
+                 "keyboard": True, "browser": False, "offline": True},
+                {"click": "mouse.click", "type_text": "type.text",
+                 "open_app": "application.launch",
+                 "navigate": "browser.navigate",
+                 "observe": "observe.screen"})
+            print("  capabilities (AIP discover):")
+            for c in caps:
+                av = "+" if c["available"] else "-"
+                perm = (f" perm={c['permission']}"
+                        if c.get("permission") else "")
+                print(f"    [{av}] {c['name']} ({c['kind']}){perm}")
+            return
+        from .capability_registry import build_registry
+        reg = build_registry(quick=False)   # deliberate check: full probes
+        if args.json:
+            print(json.dumps(reg.to_machine(), indent=2))
+            return 0
+        print(reg.render())
+        return 0
     if args.command == "observe":
         from .simulator import Simulator
         snap = Simulator().observe()
