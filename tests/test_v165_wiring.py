@@ -174,4 +174,8 @@ def test_plain_startup_reaches_loop_with_temporal_observer(
 
 def test_version_still_works(monkeypatch, tmp_path):
     rc, out = _run_cli(monkeypatch, tmp_path, ["--version"], expect_rc=0)
-    assert "16.5" in out
+    # v19: the release line moved to 19.0.0 — the contract is that the
+    # CLI prints its real version, not a specific number forever
+    assert "AirMouse v" in out
+    import airmouse
+    assert airmouse.__version__ in out

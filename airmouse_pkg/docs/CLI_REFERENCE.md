@@ -1,4 +1,4 @@
-# AirMouse v16.5.0 — CLI Reference
+# AirMouse v16.5.0 — CLI Reference (extended in v19)
 
 Regenerated **completely** from the live argument parser
 (`airmouse_pkg/airmouse/__main__.py`, the `build_parser`/`main()` section)
@@ -15,6 +15,13 @@ flags), help banner currently printed as
 version string in `__init__.py` / `pyproject.toml` is bumped to 16.5.0
 by step 1 of the release process — every capability documented here is
 independent of that string).
+
+**v19 update (measured on the v19 tree):** the parser now registers
+**41 subcommand choices** and **66 visible flags + 1 hidden CI flag**
+(67 `add_argument` flags + 2 positionals = 69 registrations). v19 adds
+five subcommands (`wizard`, `reset`, `repair`, `uninstall`, `update`)
+and two flags (`--advanced`, `--aip`). Rows 37–41 below are the v19
+additions; every earlier row is preserved as regenerated.
 
 ```bash
 airmouse [FLAGS] [SUBCOMMAND] [COMMAND_ARG]
@@ -43,7 +50,7 @@ Exactly these 34 choices (parser `choices=`, in parser order):
 | 10 | `workflows` | discovered/approved workflows |
 | 11 | `self-test` | 15-component honest report (PASS / OPTIONAL / HARDWARE) |
 | 12 | `status` | platform banner: protocol, hierarchy, license tier |
-| 13 | `capabilities` | AIP DISCOVER capability list (+/- available, permission) |
+| 13 | `capabilities` | v19: user-facing capability registry with evidence labels (`--json` machine view; `--aip` preserves the AIP DISCOVER agent view) |
 | 14 | `observe` | one observation from the deterministic simulator |
 | 15 | `world` | temporal world model explain + predict_state |
 | 16 | `twin` | Personal Interaction Twin status (facts/observations) |
@@ -54,7 +61,7 @@ Exactly these 34 choices (parser `choices=`, in parser order):
 | 21 | `protocol` | AIP version, concepts and schema names |
 | 22 | `benchmark` | local performance spot-check (twin/world/tasks timings) |
 | 23 | `setup` | guided setup wizard (11 steps, consent-gated) |
-| 24 | `doctor` | 12-section / 41-component health report |
+| 24 | `doctor` | 12-section / 41-component health report; v19 adds the human interaction panel + `--advanced` (verbose alias) |
 | 25 | `test` | guided test laboratory (`--guided` = interactive) |
 | 26 | `verify` | 12 automated checks + 5 physical ACTION_REQUIRED items |
 | 27 | `privacy` | local-first privacy report (+ storage manifest + PERSONALIZATION summary) |
@@ -67,6 +74,11 @@ Exactly these 34 choices (parser `choices=`, in parser order):
 | 34 | `voice-setup` | zero-compiler local ASR bootstrap (v16.5.3) |
 | 35 | `voice-benchmark` | deterministic local ASR benchmark (v16.5.3) |
 | 36 | `help-me` | capability answers from real data; ask free-text questions (v16.5) |
+| 37 | `wizard` | 60-second interaction wizard — six probes + honest verdict (v19) |
+| 38 | `reset` | lifecycle reset — `command_arg`: `config\|models\|all` (also `--config\|--models\|--all`); asks first, explains what (v19) |
+| 39 | `repair` | safe local fixes: home structure, config (backup → repair → validate), model re-verify (corrupted → auto-removed), setup marker; installs nothing (v19) |
+| 40 | `uninstall` | remove the AirMouse home after a content summary + explicit confirmation; prints the exact pip command for the package (v19) |
+| 41 | `update` | check PyPI for a newer release — explicit-only (the invocation IS the consent; `--check` is the conventional spelling), never downloads or installs (v19) |
 
 ### 2. `command_arg` — optional argument, meaning depends on `command`
 
@@ -82,6 +94,8 @@ Exactly these 34 choices (parser `choices=`, in parser order):
 | `help-me` | a free-text question (e.g. `"how do I scroll?"`); keyword-matched against 8 real topics (overview, scroll, click, drag, zoom, teach, gesture, broken) | omitted / unmatched → the overview capability panel (`broken` / "why didn't that work?" style questions get the gate-by-gate debug answer) |
 | `transcribe` | flags only: `--text` (force TEXT PRACTICE), `--mic N` (input device index; omitted = system default), `--provider NAME` (pin the local ASR engine: pocketsphinx \| vosk \| whisper), `--offline` (force the deterministic test provider). A positional value is ignored — the session is the interface. | — |
 | `voice-setup` | flags only: `--check-only` / `--dry-run` (inspect + plan, installs NOTHING), `--provider NAME` (prefer an engine), `--repair` (re-verify + fix an existing installation), `--yes` (skip the interactive consent prompt — scripted installs), `--verbose` (per-engine wheel detail). | — |
+| `reset` | `command_arg`: `config` / `models` / `all` (also accepted as `--config` / `--models` / `--all`; omitted = `config`). `--yes` skips the interactive confirmation (scripted use); anything else prints the usage line and exits 2. | — |
+| `update` | performs the check on ANY invocation (no separate usage mode); the conventional spelling `airmouse update --check` resolves `--check` through argparse prefix-matching of the registered `--check-only` flag — harmless and ignored. | — |
 | `voice-benchmark` | flag only: `--wav <file>` (supply REAL speech to measure real transcription latency + words/minute; without it, timing-only — no accuracy claims). | — |
 | `learn` | not used (always runs all academies) | — |
 | everything else | not used | — |
@@ -194,6 +208,16 @@ Exactly these 34 choices (parser `choices=`, in parser order):
 | `--to TO` | `memory export`: destination file path |
 | `--debug` | show technical details (redacted traceback) when something fails |
 
+### v19 — lifecycle + capability flags (new)
+
+| Flag | Effect |
+|---|---|
+| `--advanced` | `doctor`: technical diagnostics — alias of `--verbose` (also accepted as the `command_arg` `advanced`); `doctor --advanced` is the Diagnostics menu item |
+| `--aip` | `capabilities`: show the AIP agent-protocol view (the pre-v19 DISCOVER list) instead of the default user-facing registry |
+
+(`--yes`, registered in v16.5.3 for `voice-setup`, is reused by `reset`
+and `uninstall` as the scripted-confirmation bypass.)
+
 ### Hidden (registered, suppressed from `--help`)
 
 | Flag | Effect |
@@ -245,7 +269,7 @@ adaptive_calibration, two_hand, position_smooth_alpha):
 | `transcribe` | A live local transcription session over the AUTHORITATIVE provider registry (v16.5.2). Auto mode: with a real local ASR engine AND a microphone → `provider: pocketsphinx (local ASR engine)` + `mode: MIC LIVE` (sounddevice-first capture → VAD → local ASR; a bare Enter records one spoken utterance); with an engine but no mic → text-input mode (typed lines through the real pipeline, labelled); with no usable engine → `provider: simulated_stream` + a LOUD `⚠ SIMULATED provider` banner that lists WHY each engine was rejected (`pocketsphinx: INITIALIZATION FAILED — <reason>` or `NOT INSTALLED`) + the FIX. `--text` forces TEXT PRACTICE (explicitly NOT microphone validation); `--offline` forces the test provider and says so. Confidence is shown as `conf: unavailable` when the engine supplies none — never invented. REPL: `pause \| resume \| save [json] \| clear \| status \| stop \| quit` — any other text is a spoken utterance. `save` writes ONLY on request, ONLY to `<home>/transcripts/transcript-<ts>.txt` (or `.json`), text only, never audio; EOF ends the session cleanly. | 0 (also on clean EOF; the summary line reports the session honestly) |
 | `help-me [question]` | Capability answers built from REAL data: the overview panel lists the hand gestures (22 rows, aligned with `gestures.py` + the spine's risk classes, including `[refused by default]` on the OK/Alt+F4 row and the honest two-hand note `Rotation and two-hand drag are DETECTED but their OS action is NOT MAPPED yet`), the 30-phrase offline voice grammar (with `It is NOT full speech recognition` note), gaze, the teacher commands and health commands. With a question, keywords route to a topic answer: `"how do I scroll?"` → the 3 real scroll paths; `"why didn't that work?"` → the gate-by-gate debug chain (e-stop → confidence floors 0.45/0.60 → destructive policy → 0.12 s rate limit → gesture mapping). | 0 |
 | `voice-status` (v16.5.2 §8) | THE authoritative voice debugging view — ONE call to the same registry doctor and transcribe use. Sections: `MICROPHONE` (✓ detected / devices n / selected device / backend sounddevice\|pyaudio / sample rate / channels, or ○ not detected + FIX), `ASR PROVIDERS` (per engine: installed, importable, model, initialization PASS\|FAIL\|DEFERRED\|MODEL MISSING\|NOT RUN, runtime READY\|FAILED\|NO, role ACTIVE\|FALLBACK\|OPTIONAL\|DISABLED; `--verbose` adds the exact failure reason + probe time), `TRANSCRIPTION` (real microphone: AVAILABLE/NOT AVAILABLE, provider, mode MIC LIVE\|TEXT INPUT, offline: YES, audio storage: NONE, network: NOT REQUIRED). With no usable engine the install hint is BOOTSTRAP-AWARE (v16.5.3): it recommends `airmouse voice-setup` — the zero-compiler path — or states the `NATIVE_ASR_PACKAGE_UNAVAILABLE` diagnosis when no prebuilt wheel exists for this interpreter. | 0 |
-| `voice-setup` (v16.5.3 §8/§9) | The ZERO-COMPILER local voice bootstrap. Inspects microphone + registry + wheel compatibility (static verified matrix: PocketSphinx 5.1.1 = cp311/cp313 only, NO cp312 anywhere; vosk 0.3.45 = py3-none wheels on win_amd64/win32/manylinux — native lib bundled), picks the deterministic lightweight path, installs via `python -m pip install --only-binary :all:` (a source build is structurally impossible — NMake/MSVC can never run), fetches the ONE official lightweight model (vosk small en-US, 41.2 MB, consented, SHA256-verified, Zip-Slip-safe) when the chosen engine needs one, verifies the engine initialization + microphone, runs a deterministic recognition smoke test, and reports `VOICE READY` (Provider/Mode/Network/Audio lines) or the honest `VOICE SETUP COULD NOT COMPLETE` panel with reason + next step. `--check-only`/`--dry-run` never install; consent is asked interactively (or `--yes`). | 0 READY · 1 could-not-complete |
+| `voice-setup` (v16.5.3 §8/§9; v19 pin correction) | The ZERO-COMPILER local voice bootstrap. Inspects microphone + registry + wheel compatibility (static verified matrix: PocketSphinx 5.1.1 = cp311/cp313 only, NO cp312 anywhere; vosk 0.3.45 = py3-none wheels on win_amd64/win32/manylinux — native lib bundled), picks the deterministic lightweight path, installs via `python -m pip install --only-binary :all:` (a source build is structurally impossible — NMake/MSVC can never run), fetches the ONE official lightweight model (vosk small en-US, **41.2 MB = 41,205,931 B — v19 CORRECTED pin: the v16.5.3 pin `507575b9…` / 41,205,932 B was WRONG and broke every download; v19 verifies SHA256 `30f26242…42498` AND SHA512 `d56243ba…3bc5a` through the 12-stage model-integrity pipeline: fsync → byte count → digests → CRC → zip structure → zip-slip → exec/symlink refusal → staged extract → validate → ATOMIC install with rollback; consent-gated, Zip-Slip-safe, executable-member refusal) when the chosen engine needs one, verifies the engine initialization + microphone, runs a deterministic recognition smoke test, and reports `VOICE READY` (Provider/Mode/Network/Audio lines) or the honest `VOICE SETUP COULD NOT COMPLETE` panel with reason + next step. `--check-only`/`--dry-run` never install; consent is asked interactively (or `--yes`). | 0 READY · 1 could-not-complete |
 
 ### Memory lifecycle
 
@@ -266,7 +290,7 @@ adaptive_calibration, two_hand, position_smooth_alpha):
 | `workflows` | discovered workflows (steps, success/failure, destructive flag) | 0 |
 | `self-test` | 15 components (Core, Voice, Transcription, RealLocalASR, Gesture, Gaze, Camera, Browser, Fusion, Intelligence, Memory, Prediction, Safety, Offline, Packaging) → PASS / OPTIONAL / HARDWARE / FAIL | 0 |
 | `status` | version banner, protocol, permission hierarchy, license tier | 0 |
-| `capabilities` | AIP DISCOVER capability rows `[+/-] name (kind) perm=…` | 0 |
+| `capabilities` | v19 default: the user-facing registry — four interaction rows with state, FIX lines and `[REALITY/EPISTEMIC]` evidence labels, the voice-model record (state/license/source), best available mode + readiness (`--json` = machine view; `--aip` = the AIP DISCOVER rows `[+/-] name (kind) perm=…`) | 0 |
 | `observe` | one observation from the deterministic simulator (labelled simulated) | 0 |
 | `world` | temporal world model explain + predict_state | 0 |
 | `twin` | twin facts/observations/corrections/errors | 0 |
@@ -276,6 +300,26 @@ adaptive_calibration, two_hand, position_smooth_alpha):
 | `tasks` | task engine listing | 0 |
 | `protocol` | AIP version + message concepts + schema names | 0 |
 | `benchmark` | twin/world/task import + construct + loop timings | 0 |
+
+### v19 — launcher, wizard + lifecycle (new)
+
+Plain `airmouse` (no args, first run, TTY) shows the **v19 launcher** —
+not a camera window: `[1] Start AirMouse  [2] Test My Hardware
+  [3] Setup  [4] Learn Gestures  [5] Settings  [6] Diagnostics
+(advanced)  [7] Privacy  [0] Help` plus an honest status panel (dots
+probed live via the quick capability registry: `●` READY, `◐` WARNING,
+`○` OPTIONAL, `·` absent, `✗` failed, `?` probe unavailable; verdict
+line `System Ready` or `System: <MODE>`). After `airmouse setup` writes
+the marker, plain `airmouse` starts the app directly. EOF/abort simply
+proceeds — the menu never blocks the app.
+
+| Command | Prints / does | Exit codes |
+|---|---|---|
+| `wizard` | Six teaching steps (camera → hand → gesture → voice → input → verdict); each step PASSES only when its probe succeeded on THIS machine; missing hardware = ACTION_REQUIRED with the exact fix. Verdict: READY (camera+gesture+input all pass) / PARTIAL (something passed) / BLOCKED (nothing). | 0 READY · 1 PARTIAL · 2 BLOCKED |
+| `reset [--config\|--models\|--all]` | Prints exactly what will be removed (per-entry human descriptions; `--all` adds total MB and the profile/transcripts/macros warning), asks `y` (`--yes` for scripts). `--config` backs the config up into `backups/` first; `--models` removes re-downloadable models; `--all` removes the whole home. | 0 done · 1 cancelled/failed · 2 unknown scope |
+| `repair` | Safe local fixes only — home structure, config repair (backup → repair → validate), model re-verification (a `MODEL_CORRUPTED` tree is auto-removed with a note to re-run `voice-setup`), setup marker. Never installs anything; pip is never run (red-team tested). | 0 all repaired · 1 some repairs failed |
+| `uninstall` | Content summary first (every home entry + total MB + the exact `pip uninstall` command), explicit `y` confirmation, then removes `~/.airmouse`. | 0 removed · 1 cancelled/failed |
+| `update --check` | Reads the PyPI JSON API on ANY invocation (the invocation IS the consent; `--check` resolves via argparse prefix-matching of `--check-only` and is ignored), compares numerically against the installed version, prints installed/latest + the upgrade command — NEVER downloads or installs. Offline: an honest "cannot check right now" answer. | 0 (always) |
 
 ### v10 diagnostics
 
@@ -303,6 +347,10 @@ adaptive_calibration, two_hand, position_smooth_alpha):
 | `profile` | applied / listed | unknown profile | — |
 | `memory reset/delete` | complete | INCOMPLETE (per-store errors printed) | — |
 | `offline-test`, `diagnostics` | selftest OK | selftest failed | — |
+| `wizard` | READY | PARTIAL | BLOCKED |
+| `reset` | scope removed | cancelled/failed | usage |
+| `repair`, `uninstall` | complete | cancelled/failed | — |
+| `update --check` | always 0 (result is the printed verdict) | — | — |
 | everything else | 0 | — | — |
 
 ---
@@ -366,4 +414,11 @@ airmouse --offline --voice-mode hybrid --gesture  # hard-offline session with re
 airmouse self-test                                # 15-component honest report
 airmouse offline-test                             # prove the offline story (18/18)
 airmouse memory status                            # local store inventory
+airmouse wizard                                   # 60-second interaction wizard (v19)
+airmouse capabilities                             # user-facing registry + evidence labels (v19)
+airmouse capabilities --aip                       # the AIP agent-protocol view (preserved)
+airmouse doctor --advanced                        # full technical report (v19 alias)
+airmouse repair                                   # safe local fixes — installs nothing (v19)
+airmouse reset --models                           # remove re-downloadable models (asks first, v19)
+airmouse update --check                           # explicit-only PyPI check, never installs (v19)
 ```

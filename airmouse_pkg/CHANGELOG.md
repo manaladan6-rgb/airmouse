@@ -1,5 +1,143 @@
 # Changelog
 
+## v19.0.0 — INSTANT DEPLOYMENT (2026-10-12)
+
+Built on v16.5.3 reality (fresh-clone audit in `docs/V19_BASELINE.md`).
+The lost v16.5.4/v18 subsystems that v19 depends on were RECONSTRUCTED
+from the recorded specs; everything else was implemented against what
+actually exists. No hardware claims anywhere: live Windows validation
+stays PHYSICAL_TEST_REQUIRED.
+
+### P0 fixed — the wrong model pin (trust-anchor repair)
+
+- v16.5.3 pinned the official Vosk en-US model as
+  `507575b9efd23f96…` / **41,205,932 B** — WRONG. Every consented
+  download failed SHA256 verification: the flagship "voice works in
+  five minutes" flow was broken at the trust-anchor level.
+- v19 re-measured LIVE from alphacephei.com (4th independent
+  measurement, 2nd complete download in project history; cross-checked
+  against the independently published Alpine aports digest):
+  **41,205,931 B**, SHA256
+  `30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498`,
+  SHA512
+  `d56243ba75343fd42a238ac358f9deef4acc690bdc9d816f1499930f25504bce87495b6f448089a87b426a8d81b31b80525ae5ed6c0ca4fb95a306576f53bc5a`,
+  20 members, single root, no executables, no symlinks.
+- Historical documents stay untouched; the correction is recorded in
+  `docs/V19_BASELINE.md §3` and the new pin lives in
+  `model_integrity.VOSK_MODEL` (single source of truth;
+  `voice_bootstrap` delegates to it).
+
+### Reconstructed: the 12-stage model integrity pipeline
+
+- NEW `airmouse/model_integrity.py` — temp file → fsync → byte count →
+  SHA256 → SHA512 → CRC → zip structure (+ compression-bomb guard) →
+  zip-slip refusal → executable/symlink-member refusal → staged
+  extract → structure validation → ATOMIC install with rollback.
+  Lock-protected with stale-lock/stale-staging reaping; disk-full
+  (ENOSPC) reports "disk full — nothing was changed" and rolls back; a
+  previous model is never lost to a failed install.
+- NEW 8-state `ModelState` machine: `MODEL_MISSING`,
+  `MODEL_DOWNLOAD_REQUIRED`, `MODEL_DOWNLOADING`, `MODEL_VERIFYING`,
+  `MODEL_INSTALLING`, `MODEL_READY`, `MODEL_CORRUPTED`,
+  `MODEL_INCOMPATIBLE` (`MODEL_UNKNOWN` only when the status record
+  itself fails). Consumed by doctor / capabilities / setup / repair.
+- Bugs caught by my own tests and fixed during reconstruction:
+  SHA512 pin had dropped a character (caught by the real-archive
+  test); the staged-structure walk rejected the staging root `.`;
+  the backup was retired BEFORE post-install verification (rollback
+  would have had nothing to restore); the temp archive leaked on
+  success; the per-member danger scan now runs before the layout
+  check so the precise refusal reason wins.
+
+### Capability layer: registry, degradation, evidence
+
+- NEW `airmouse/evidence.py` — the indivisible Reality
+  (REAL / SIMULATED / OPTIONAL / PHYSICAL_TEST_REQUIRED / NOT_AVAILABLE)
+  × Epistemic (OBSERVED / INFERRED / PREDICTED / UNKNOWN) label. No API
+  returns "just REAL"; only a successful runtime probe can make REAL.
+- NEW `airmouse/degradation.py` — the readiness ladder
+  FULL / DEGRADED / SAFE_MINIMAL / DIAGNOSTIC as a pure function over
+  observed booleans; SAFE_MINIMAL is deliberately NOT usable; losing
+  input automation drops to SAFE_MINIMAL with an explicit reason.
+- NEW `airmouse/capability_registry.py` — fuses the twelve-section
+  probe + the ASR registry + the model record into ONE honest answer to
+  "what can AirMouse do on THIS machine, right now, and how do we
+  know?".
+- CLI: `airmouse capabilities` is now the user-facing registry (evidence
+  labels per row; `--json` machine view; `--aip` preserves the AIP
+  agent view). `airmouse doctor` gains the human interaction panel on
+  the normal path, `--advanced` (verbose alias), and embeds
+  `interaction_readiness` in `--json`.
+
+### Deployment surface: launcher, setup 2.0, lifecycle, wizard
+
+- NEW launcher (`cli_menu.py`): plain `airmouse` on a first run shows
+  the friendly menu — 1 Start AirMouse / 2 Test My Hardware / 3 Setup /
+  4 Learn Gestures / 5 Settings / 6 Diagnostics (advanced) / 7 Privacy /
+  0 Help — plus status dots probed live (never guessed). The menu never
+  blocks the app; after `airmouse setup` writes the marker, plain
+  `airmouse` starts directly.
+- Setup 2.0 (`setup_wizard.py`): 11 → **14 steps** (adds models,
+  interaction, profile) with per-step MEASURED seconds and a
+  "measured setup time" total — actual, not estimated.
+- NEW lifecycle (`lifecycle.py`): `airmouse reset
+  --config|--models|--all` (exact removal list, explicit confirmation,
+  config backed up first; `--all` warns about profiles/transcripts/
+  macros and prints total MB), `airmouse repair` (safe local fixes
+  only — structure, config, model re-verify with corrupted-model
+  auto-removal, marker; pip is NEVER run — red-team tested),
+  `airmouse uninstall` (content summary + MB + the exact pip command
+  BEFORE asking), `airmouse update --check` (explicit-only PyPI JSON
+  check; honest offline answer; never downloads or installs).
+- NEW `airmouse wizard` — the six-step 60-second interaction wizard
+  (camera → hand → gesture → voice → input → verdict); a step passes
+  only when its probe succeeded on THIS machine; verdict
+  READY/PARTIAL/BLOCKED from the same ladder the doctor uses.
+- Home layout completed: `logs/`, `cache/`, `diagnostics/` join the
+  single-home layout (`$AIRMOUSE_HOME` else `~/.airmouse`, resolved
+  fresh on every call).
+
+### Measurement, packaging, distribution
+
+- NEW `scripts/five_minute_test.py` — the automated acceptance harness:
+  a fresh simulated user (temp home, no cached state) through cold
+  import → CLI → doctor → setup → capabilities → wizard → voice plan →
+  offline self-test, every stage MEASURED with perf_counter, budgets
+  enforceable, missing hardware reported PHYSICAL_TEST_REQUIRED, never
+  faked. **Measured 12.6 s total on the Linux sandbox** (budget 300 s).
+- NEW `tests/test_packaging_security.py` (11 tests): real wheel+sdist
+  build; dangerous-member audit (executables/symlinks/path
+  escapes/executable bits); no `.pth`/`sitecustomize` import-time
+  bombs; entry-point contract; v19 modules packaged; corrupted-wheel
+  detection; sdist leakage audit; dependency floor bounds; version
+  consistency; SHA256SUMS round-trip. ROOT-CAUSE FIX caught by the
+  audit: the LICENSE shipped with the executable bit (0o755 → 0644).
+- Distribution decision (Phase 3): **Option C — Python package +
+  bootstrap — is the primary channel**, because it is verifiable from
+  the build environment. Options A (AirMouseSetup.exe) and B (portable
+  folder) are documented as FUTURE WORK requiring real Windows CI
+  (PyInstaller, codesigning) in `docs/PACKAGING.md` — NOT AVAILABLE in
+  v19, never faked.
+- NEW `scripts/airmouse-bootstrap.ps1` — the transparent Windows
+  bootstrap (winget Python with consent → dedicated venv →
+  `--only-binary :all:` PyPI install → `airmouse setup`), trust model
+  in its header. Shipped and script-readable; the end-to-end run on
+  real Windows hardware remains PHYSICAL_TEST_REQUIRED.
+- NEW documentation set: `docs/QUICKSTART.md`, `docs/INSTALL.md`,
+  `docs/WINDOWS.md`, `docs/TROUBLESHOOTING.md`, `docs/PACKAGING.md`;
+  `docs/CLI_REFERENCE.md` and `docs/CAPABILITY_MATRIX.md` extended;
+  `docs/V19_BASELINE.md` records the Phase 0 audit.
+
+### Verification
+
+- Test suite: **2112 passed / 2 skipped / 0 failed**
+  (v16.5.3 baseline 2027 + 85; skips are honest).
+- `airmouse offline-test` 18/18 · `airmouse verify` 12/12 ·
+  `airmouse repair` green on a fresh home.
+- Not done (honestly): any real-Windows execution — bootstrap run,
+  camera flow, microphone flow, voice-setup consent flow, exe build.
+  See `docs/WINDOWS.md` for the PHYSICAL_TEST_REQUIRED checklist.
+
 ## v16.5.3 — WINDOWS NATIVE ASR BOOTSTRAP & ZERO-COMPILER VOICE RUNTIME (2026-09-06)
 
 The v16.5.2 runtime was honest, and its honesty exposed the FINAL

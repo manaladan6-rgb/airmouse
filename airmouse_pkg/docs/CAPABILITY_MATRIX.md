@@ -304,3 +304,47 @@ lifecycle engages).
   only), default actions for thumbs_down/four/five, automatic
   `selftune_apply`, ASR auto-install, RF hardware, cloud/telemetry
   integrations, the v15 one-choice onboarding interview.
+
+---
+
+## 8. v19 additions (this section only — rows 1–94 above are unchanged)
+
+Same vocabulary, same rules. Environment for every measurement below:
+Linux x86_64 sandbox, CPython 3.12.14 (uv venv), no camera, no
+microphone, no display — identical caveat to the top of this file.
+Test suite at v19: **2112 passed / 2 skipped / 0 failed**
+(v16.5.3 baseline 2027 + 85). Hardware Tested = **NO** for anything
+that needs physical sensors; those rows keep the runtime honest
+instead of upgrading themselves.
+
+| # | Capability (v19) | Status | Hardware Tested | Evidence / how to validate |
+|---|---|---|---|---|
+| 95 | **P0 model-pin correction** — v16.5.3 pinned `507575b9…` / 41,205,932 B (WRONG; broke every consented download). v19 pins the live-measured truth: 41,205,931 B, SHA256 `30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498`, SHA512 `d56243ba…3bc5a` (4th independent measurement, 2nd complete download; cross-checked vs the published Alpine aports digest) | **REAL** | NO | `model_integrity.VOSK_MODEL`; `docs/V19_BASELINE.md §3`; pipeline regression tests incl. the real 41 MB archive |
+| 96 | 12-stage model integrity pipeline (temp → fsync → byte count → SHA256 → SHA512 → CRC → zip structure + bomb guard → zip-slip → exec/symlink refusal → staged extract → structure validate → ATOMIC install with rollback; lock + stale-staging reaping) | **REAL** | NO | `model_integrity.py`; end-to-end test on the REAL 41 MB archive (downloaded from alphacephei.com, on disk as a test asset); adversarial tests (SHA mismatch → discard, zip-slip, exec member, disk-full ENOSPC → rollback, nothing left behind) |
+| 97 | 8 `MODEL_*` states (`MODEL_MISSING`, `MODEL_DOWNLOAD_REQUIRED`, `MODEL_DOWNLOADING`, `MODEL_VERIFYING`, `MODEL_INSTALLING`, `MODEL_READY`, `MODEL_CORRUPTED`, `MODEL_INCOMPATIBLE`; `MODEL_UNKNOWN` only when the status record itself fails) | **REAL** | NO | `ModelState` enum; consumed by doctor/capabilities/setup/repair; state-transition tests |
+| 98 | Capability registry — `airmouse capabilities` (user-facing: 4 interaction rows + FIX lines + `[REALITY/EPISTEMIC]` labels + model record + best mode; `--json`; `--aip` preserves the AIP DISCOVER view) | **REAL** | NO | `capability_registry.py` (+15 tests); measured run in this sandbox (all rows honest: UNAVAILABLE/NOT_INSTALLED/OPTIONAL) |
+| 99 | Evidence model — indivisible Reality (REAL/SIMULATED/OPTIONAL/PHYSICAL_TEST_REQUIRED/NOT_AVAILABLE) × Epistemic (OBSERVED/INFERRED/PREDICTED/UNKNOWN); no API returns "just REAL"; only a runtime probe can make REAL | **REAL** | NO | `evidence.py` + tests; labels printed by `capabilities`/doctor panel |
+| 100 | Degradation ladder — FULL / DEGRADED / SAFE_MINIMAL / DIAGNOSTIC; pure function over observed booleans; SAFE_MINIMAL deliberately NOT usable; losing input drops to SAFE_MINIMAL with a stated reason | **REAL** | NO | `degradation.py` + tests; measured: this sandbox reports DIAGNOSTIC (no hardware) |
+| 101 | First-run launcher — plain `airmouse` (first run, TTY) shows the 8-item menu + honest status dots; EOF/abort proceeds; never blocks the app | **REAL** | NO (desktop launch itself = PHYSICAL_TEST_REQUIRED) | `cli_menu.py` MENU_ITEMS; marker contract tested; the five-minute harness verifies the marker |
+| 102 | Setup 2.0 — 14 steps (env, deps, storage, config, cameras, microphones, browsers, asr, permissions, **models**, **interaction**, **profile**, smoke, marker) with per-step MEASURED seconds + "measured setup time" total | **REAL** | NO | `setup_wizard.py` STEP_IDS (14); measured run 1.9 s in the harness; models step reports MODEL_* honestly, never downloads |
+| 103 | Lifecycle `reset --config\|--models\|--all` — exact removal list + explicit confirmation (config backed up first; `--all` warns about profiles/transcripts/macros + total MB) | **REAL** | NO | `lifecycle.py` + tests; cancellation measured (nothing removed, exit 1) |
+| 104 | Lifecycle `repair` — home structure + config repair + model re-verify (corrupted model auto-removed → told to re-run voice-setup) + setup marker; installs nothing, pip never runs | **REAL** | NO | `lifecycle.py` + red-team test proving pip is never invoked; measured run in this sandbox |
+| 105 | Lifecycle `uninstall` — content summary + MB + exact pip command printed BEFORE confirmation; nothing deleted silently | **REAL** | NO | `lifecycle.py` + tests (confirmation-gated) |
+| 106 | `update --check` — explicit-only PyPI JSON check, numeric compare, honest offline answer, never downloads/installs | **REAL** | NO | `lifecycle.check_for_update` + tests; measured run (online path) in this sandbox |
+| 107 | `airmouse wizard` — six teaching steps, probe-honest, verdict READY/PARTIAL/BLOCKED from the same ladder the doctor uses | **REAL as software** (its camera/mic/input steps on real hardware: **PHYSICAL_TEST_REQUIRED**) | NO | `wizard.py` + tests; measured headless run: honest ACTION_REQUIRED rows, verdict PARTIAL, exit 1 |
+| 108 | Five-minute benchmark harness (`scripts/five_minute_test.py`) — measures every software stage, budget-enforceable, hardware stages marked PHYSICAL_TEST_REQUIRED, never faked | **REAL on Linux** (measured 12.6 s total; a real-Windows number: **PHYSICAL_TEST_REQUIRED**) | NO | re-run in this session: PASS, 12.5 s (recorded figure 12.6 s, same machine class) |
+| 109 | Windows bootstrap script (`scripts/airmouse-bootstrap.ps1`) — transparent installer: winget Python WITH consent, dedicated venv, `--only-binary :all:` PyPI install, one consented model later | **OPTIONAL** (script shipped and readable; the end-to-end run on REAL Windows: **PHYSICAL_TEST_REQUIRED**) | NO | the script itself + its trust-model header; no Windows machine has run it |
+| 110 | Windows exe / installer distribution (Option A) | **NOT AVAILABLE in v19** — future CI work (PyInstaller + codesigning on real Windows runners); never described as existing | NO | `docs/PACKAGING.md` records the decision + CI sketch |
+| 111 | Home layout completion — `logs/` + `cache/` + `diagnostics/` added; single home law unchanged (`$AIRMOUSE_HOME` else `~/.airmouse`, resolved fresh per call) | **REAL** | NO | `paths.py` / `persistence.py` SUBDIR_NAMES; `airmouse privacy` manifest |
+
+Honesty notes for this section:
+
+- RECONSTRUCTED components (model pipeline, registry, ladder, evidence
+  labels) are rebuilt from the recorded v16.5.4/v18 specs against
+  v16.5.3 reality — they are REAL here in the "code + automated tests +
+  behaviour works as documented" sense; the lost v17/v18 research layer
+  (omnisense, RF, world waits, head organ) remains NOT AVAILABLE in v19
+  (see `docs/V19_BASELINE.md §4`).
+- No row above was auto-promoted: every REAL status is backed by tests
+  that ran in this environment, and every hardware-dependent claim
+  stays PHYSICAL_TEST_REQUIRED.

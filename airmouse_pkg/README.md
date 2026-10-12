@@ -1,4 +1,4 @@
-# AirMouse v16.5.0 — UNIVERSAL HUMAN + AI INTERACTION PLATFORM
+# AirMouse v19.0.0 — INSTANT DEPLOYMENT
 
 Voice + hand + gaze + RF + keyboard/mouse + screen + browser → one
 **event bus** → fusion → world model → intent → **one execution spine**
@@ -32,6 +32,30 @@ bypass pathway.
 ![Offline](https://img.shields.io/badge/offline-capable-success)
 ![Local](https://img.shields.io/badge/cloud-structurally%20impossible-critical)
 
+## The 60-second answer
+
+| Question | Answer |
+|---|---|
+| **What is AirMouse?** | Control your computer with voice, hands (webcam), eyes (gaze) — locally, offline-capable, no telemetry, no cloud. |
+| **How do I install it?** | `pip install airmouse` (Windows: or `scripts/airmouse-bootstrap.ps1`) |
+| **How do I start it?** | `airmouse setup` once — then just `airmouse` |
+| **What hardware do I need?** | Nothing to try it (simulation mode); a webcam for gestures, a microphone for voice — both optional |
+| **How do I test it?** | `airmouse doctor` (health) · `airmouse wizard` (60-second lesson) · `airmouse verify` (deterministic checks) |
+
+```powershell
+# the whole journey, in under 5 minutes:
+pip install airmouse
+airmouse setup          # detects hardware, picks your best mode, asks nothing it can answer itself
+airmouse                # launcher → [1] Start AirMouse
+# inside: wave to move the cursor, pinch to click,
+#         say "click that" (after: airmouse voice-setup)
+```
+
+If anything misbehaves: `airmouse repair` → `airmouse doctor --advanced`
+→ [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). Full paths:
+[QUICKSTART.md](docs/QUICKSTART.md) · [INSTALL.md](docs/INSTALL.md) ·
+[WINDOWS.md](docs/WINDOWS.md).
+
 ## What AirMouse is
 
 AirMouse is a desktop application (Windows / Linux / macOS, Python
@@ -63,7 +87,53 @@ memory lifecycle (export / reset / delete) that you control.
   SIMULATED / OPTIONAL / PHYSICAL TEST REQUIRED / NOT AVAILABLE, and
   hardware checks can never auto-pass.
 
-## v16.5 — Adaptive Multimodal Intelligence (new)
+## v19 — Instant Deployment (new)
+
+- **One command, five minutes:** `pip install airmouse` → `airmouse
+  setup` → `airmouse`. Setup auto-detects OS/hardware/ASR, picks your
+  best interaction mode and saves it to your profile, creates your
+  first profile, and asks nothing it can answer itself (14 measured
+  steps — the report prints its actual seconds).
+- **A launcher, not a wall of jargon:** plain `airmouse` on a fresh
+  machine shows [1] Start AirMouse · [2] Test My Hardware · [3] Setup ·
+  [4] Learn Gestures · [5] Settings · [6] Diagnostics · [7] Privacy —
+  with honest status dots (probed, never guessed) and the current
+  best interaction mode.
+- **Doctor 2.0:** `airmouse doctor` ends with a human interaction
+  panel (what you can do right now, best mode, what's missing);
+  `--advanced` is the technical view; `--json` is machine-readable.
+- **The model trust anchor is FIXED:** the v16.5.3 pin of the official
+  Vosk model was wrong (one byte off) and made every consented
+  download fail verification. v19 re-measured it live (4th independent
+  measurement) and rebuilt the whole acquisition as a 12-stage
+  integrity pipeline (temp→fsync→byte count→SHA256→SHA512→CRC→
+  structure→zip-slip→executable/symlink refusal→staged→validate→
+  ATOMIC install with rollback) with 8 honest model states
+  (MODEL_MISSING … MODEL_READY / MODEL_CORRUPTED / MODEL_INCOMPATIBLE)
+  surfaced everywhere.
+- **A capability registry that never lies:** `airmouse capabilities`
+  shows what works on THIS machine, each row labeled with an
+  indivisible Reality×Epistemic evidence label (REAL / SIMULATED /
+  OPTIONAL / PHYSICAL_TEST_REQUIRED / NOT_AVAILABLE × OBSERVED /
+  INFERRED / PREDICTED / UNKNOWN). The degradation ladder chooses the
+  best available interaction mode and never dead-ends you.
+- **A 60-second wizard:** `airmouse wizard` — Look · Move · Pinch ·
+  Say · Try · Ready. Each step passes only when its probe really
+  passed here; missing hardware gets the exact next command.
+- **A lifecycle you control:** `airmouse reset --config|--models|--all`
+  (explains first, backs up your config, asks), `airmouse repair`
+  (safe local fixes, never installs), `airmouse uninstall` (summary +
+  exact pip command + confirmation), `airmouse update --check`
+  (explicit only, offline-honest, never installs).
+- **A complete single home:** `~/.airmouse/` now also has `cache/` and
+  `diagnostics/` — every artifact in one documented place.
+- **Measured, not claimed:** `scripts/five_minute_test.py` times the
+  whole fresh-user journey (software stages: **12.8 s** on the build
+  machine); packaging ships with an 11-test security audit (wheel/
+  sdist content, corrupted-wheel detection, dependency bounds,
+  checksums). Real-hardware verification stays PHYSICAL_TEST_REQUIRED.
+
+## v16.5 — Adaptive Multimodal Intelligence
 
 - **A teacher, not a manual:** `airmouse teach
   [all|voice|gaze|gesture|fusion|resume]` prints a personalized plan

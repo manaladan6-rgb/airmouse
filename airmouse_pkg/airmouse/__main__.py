@@ -625,6 +625,9 @@ def main():
                         help="doctor: technical diagnostics (same as --verbose)")
     parser.add_argument("--aip", action="store_true",
                         help="capabilities: show the AIP agent-protocol view")
+    parser.add_argument("--check", action="store_true", dest="check",
+                        help="update: check for a newer release (explicit "
+                             "only — the invocation is the consent)")
     parser.add_argument("--to", type=str, default=None,
                         help="memory export: destination file path")
     parser.add_argument("--debug", action="store_true",
