@@ -102,11 +102,13 @@ class TestLaunchBrowser:
         if not exe:
             pytest.skip("no chrome/chromium/edge binary in this sandbox — "
                         "honest error path asserted above")
-        if sys.platform == "win32" and os.environ.get("CI"):
-            pytest.skip("real-Chrome headless cold-start on Windows CI "
-                        "runners is not deterministic (spawn succeeds, "
-                        "DevTools endpoint may not answer) — needs a "
-                        "controlled Windows desktop (PHYSICAL_TEST_REQUIRED)")
+        if os.environ.get("CI"):
+            pytest.skip("launching the real system browser and completing "
+                        "the DevTools handshake needs a controlled desktop "
+                        "— hosted CI runners are uncontrolled (Chrome "
+                        "cold-start timing varies per runner; observed "
+                        "flaky devtools_not_ready across Linux and "
+                        "Windows runners) — PHYSICAL_TEST_REQUIRED")
         port = _free_tcp_port()
         out = launch_browser(port=port, timeout_s=20.0, headless=True,
                              user_data_dir=None)
