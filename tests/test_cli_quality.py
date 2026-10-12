@@ -21,6 +21,7 @@ from airmouse.cli_menu import (
     marker_path,
     mark_setup_complete,
     render_menu,
+    render_status,
     run_menu,
     should_show_menu,
 )
@@ -272,20 +273,20 @@ def test_guarded_systemexit_passthrough():
         run_cli_guarded(boom)
 
 
-# ═══ menu definition / rendering / choice ═════════════════════════════════
+# ═══ menu definition / rendering / choice (v19 launcher, Phase 4) ══════════
 
 
 def test_menu_items_exact_spec():
+    # v19: user-shaped launcher — Start first, dev jargon gone; the
+    # advanced paths stay reachable (Diagnostics, Privacy, Help).
     assert MENU_ITEMS == [
-        ("1", "Setup", ["setup"]),
-        ("2", "Doctor", ["doctor"]),
-        ("3", "Guided Test", ["test", "--guided"]),
-        ("4", "Start AirMouse", []),
-        ("5", "Voice", ["--voice"]),
-        ("6", "Intelligence", ["intelligence"]),
-        ("7", "Agent", ["agents"]),
-        ("8", "Offline Test", ["offline-test"]),
-        ("9", "Safety", ["self-test"]),
+        ("1", "Start AirMouse", []),
+        ("2", "Test My Hardware", ["doctor"]),
+        ("3", "Setup", ["setup"]),
+        ("4", "Learn Gestures", ["academy", "gesture"]),
+        ("5", "Settings", ["--settings"]),
+        ("6", "Diagnostics (advanced)", ["doctor", "--advanced"]),
+        ("7", "Privacy", ["privacy"]),
         ("0", "Help", ["--help"]),
     ]
 
@@ -293,18 +294,26 @@ def test_menu_items_exact_spec():
 def test_render_menu_exact_shape():
     lines = render_menu("15").splitlines()
     assert lines[0] == "AIRMouse v15"
-    assert lines[1] == "Human + AI Computer Interaction"
-    assert lines[3:13] == [f"[{k}] {lbl}" for k, lbl, _a in MENU_ITEMS]
-    assert lines[13] == ""
-    assert lines[14] == "Choose an option:"
-    assert render_menu("15.1.0").startswith("AIRMouse v15.1.0\n")
+    assert lines[1] == "Human–Computer Intelligence"
+    assert lines[3:11] == [f"[{k}] {lbl}" for k, lbl, _a in MENU_ITEMS]
+    assert render_menu("19.0.0").startswith("AIRMouse v19.0.0\n")
+
+
+def test_render_status_is_honest_and_never_raises():
+    text = render_status()
+    assert text.startswith("Status:")
+    # every probed row uses a closed dot vocabulary — never a fake claim
+    for line in text.splitlines()[1:-1]:
+        assert line.strip()[0] in "●○◐·✗?"
+    assert ("System Ready" in text) or ("System:" in text)
 
 
 def test_handle_choice_mappings():
+    assert handle_choice("1") == []
+    assert handle_choice("1") is not None  # Start is VALID, distinct from None
     assert handle_choice("2") == ["doctor"]
-    assert handle_choice(" 3 ") == ["test", "--guided"]
-    assert handle_choice("4") == []
-    assert handle_choice("4") is not None  # Start is VALID, distinct from None
+    assert handle_choice(" 3 ") == ["setup"]
+    assert handle_choice("6") == ["doctor", "--advanced"]
     assert handle_choice("x") is None
     assert handle_choice("") is None
     assert handle_choice("   ") is None
@@ -312,11 +321,11 @@ def test_handle_choice_mappings():
 
 
 def test_handle_choice_returns_copy():
-    got = handle_choice("1")
-    assert got == ["setup"]
+    got = handle_choice("2")
+    assert got == ["doctor"]
     got.append("--mutated")
-    assert handle_choice("1") == ["setup"]
-    assert MENU_ITEMS[0][2] == ["setup"]
+    assert handle_choice("2") == ["doctor"]
+    assert MENU_ITEMS[1][2] == ["doctor"]
 
 
 # ═══ first-run marker ═════════════════════════════════════════════════════
@@ -371,12 +380,12 @@ def test_run_menu_pick_doctor():
     got = run_menu("15", out=buf, input_fn=lambda: next(inputs))
     assert got == ["doctor"]
     assert "Choose an option:" in buf.getvalue()
-    assert "[2] Doctor" in buf.getvalue()
+    assert "[2] Test My Hardware" in buf.getvalue()
 
 
 def test_run_menu_invalid_then_valid_reprints():
     buf = io.StringIO()
-    inputs = iter(["z", "1"])
+    inputs = iter(["z", "3"])
     got = run_menu("15", out=buf, input_fn=lambda: next(inputs))
     assert got == ["setup"]
     assert buf.getvalue().count("Choose an option:") == 2  # menu reprinted

@@ -1,21 +1,23 @@
-"""First-run menu + first-run marker for AirMouse (v15.1.0 hardening, §9).
+"""AirMouse first-run launcher (v19 Phase 4 — Instant Deployment).
 
-A tiny, deterministic, stdlib-only menu so a brand-new user who just runs
-``airmouse`` with no arguments sees a friendly picker instead of a camera
-window and a tutorial. The coordinator (v15.1.0 __main__.py integration)
-calls :func:`should_show_menu` at the top of ``main()`` and, when it returns
-True, :func:`run_menu` → dispatches the returned argv through the normal
-CLI path. An empty argv (choice 4, "Start AirMouse") is a VALID result and
-means "fall through and start the main app".
+A brand-new user who just runs ``airmouse`` gets a friendly launcher —
+not a camera window, not developer jargon.  The launcher shows the
+interaction status as honest dots (probed, never guessed) and offers
+the shortest paths: start, test hardware, setup, learn, settings.
+
+Coordinator contract (unchanged): ``should_show_menu`` at the top of
+``main()``; when True, ``run_menu`` → the returned argv is dispatched
+through the normal CLI path.  An empty argv (choice 1, "Start
+AirMouse") is a VALID result meaning "fall through and start the app".
 
 The first-run marker lives at ``<airmouse_home>/.setup_complete`` where
-``airmouse_home`` is ``$AIRMOUSE_HOME`` if set, else ``~/.airmouse``. The
-tiny resolution logic is duplicated locally so this module stays
-self-contained; ``persistence`` (built by a parallel agent) is imported
-defensively — only as an optional fallback home-resolution helper — and its
-absence is completely normal.
+``airmouse_home`` is ``$AIRMOUSE_HOME`` if set, else ``~/.airmouse``.
 
-Python 3.9 compatible. No network, no subprocess, fail-closed.
+Fail-closed laws: the menu must NEVER block the app — every probe is
+guarded, every failure degrades into an honest dot, and EOF/abort
+simply proceeds normally.  No network.  No subprocess.
+
+Python 3.9 compatible.
 """
 
 from __future__ import annotations
@@ -25,29 +27,22 @@ import sys
 from typing import Callable, List, Optional, Sequence, TextIO, Tuple
 
 __all__ = [
-    "MENU_ITEMS",
-    "render_menu",
-    "handle_choice",
-    "marker_path",
-    "is_first_run",
-    "mark_setup_complete",
-    "should_show_menu",
-    "run_menu",
+    "MENU_ITEMS", "render_menu", "handle_choice", "marker_path",
+    "is_first_run", "mark_setup_complete", "should_show_menu", "run_menu",
+    "render_status",
 ]
 
-# ── menu definition (spec §9 — pinned, do not reword) ─────────────────────
+# ── launcher definition (v19 Phase 4 — replaces the dev-flavored list) ────
 
 #: (key, label, argv) — empty argv means "start the main app".
 MENU_ITEMS: List[Tuple[str, str, List[str]]] = [
-    ("1", "Setup", ["setup"]),
-    ("2", "Doctor", ["doctor"]),
-    ("3", "Guided Test", ["test", "--guided"]),
-    ("4", "Start AirMouse", []),
-    ("5", "Voice", ["--voice"]),
-    ("6", "Intelligence", ["intelligence"]),
-    ("7", "Agent", ["agents"]),
-    ("8", "Offline Test", ["offline-test"]),
-    ("9", "Safety", ["self-test"]),
+    ("1", "Start AirMouse", []),
+    ("2", "Test My Hardware", ["doctor"]),
+    ("3", "Setup", ["setup"]),
+    ("4", "Learn Gestures", ["academy", "gesture"]),
+    ("5", "Settings", ["--settings"]),
+    ("6", "Diagnostics (advanced)", ["doctor", "--advanced"]),
+    ("7", "Privacy", ["privacy"]),
     ("0", "Help", ["--help"]),
 ]
 
@@ -55,20 +50,64 @@ _MENU_ATTEMPTS = 3
 
 
 def render_menu(version: str) -> str:
-    """Render the full menu block (no trailing newline)."""
-    lines = [f"AIRMouse v{version}", "Human + AI Computer Interaction", ""]
+    """Render the full launcher block (no trailing newline)."""
+    lines = [f"AIRMouse v{version}",
+             "Human–Computer Intelligence", ""]
     for key, label, _argv in MENU_ITEMS:
         lines.append(f"[{key}] {label}")
     lines.append("")
-    lines.append("Choose an option:")
     return "\n".join(lines)
+
+
+def render_status() -> str:
+    """The honest status panel (dots probed, never guessed).
+
+    Uses the quick capability registry; ANY failure degrades to a
+    question mark rather than a wrong claim.  The panel is pure output —
+    it never blocks, never raises, never touches the network.
+    """
+    try:
+        from .capability_registry import build_registry
+        reg = build_registry(quick=True)
+        marks = {"READY": "●", "OPTIONAL": "○", "WARNING": "◐"}
+        order = (("gesture", "Camera"), ("voice", "Microphone"),
+                 ("voice", "Voice"), ("gaze", "Gaze"))
+        # row per user-facing item, deduplicated by display
+        rows: List[Tuple[str, str]] = []
+        seen = set()
+        for key, display in order:
+            cap = reg.get(key)
+            if cap is None or display in seen:
+                continue
+            seen.add(display)
+            state = cap.state
+            dot = marks.get(state, "·" if state not in
+                            ("FAILED", "INCOMPATIBLE") else "✗")
+            rows.append((dot, display))
+        for key, display in (("input", "Mouse control"),):
+            cap = reg.get(key)
+            if cap is not None:
+                state = cap.state
+                dot = marks.get(state, "·" if state not in
+                                ("FAILED", "INCOMPATIBLE") else "✗")
+                rows.append((dot, display))
+        _mode, readiness = reg.best_mode()
+        lines = ["Status:"]
+        for dot, display in rows:
+            lines.append(f"  {dot} {display}")
+        verdict = ("System Ready" if readiness.level.value == "FULL"
+                   else f"System: {readiness.mode.upper()}")
+        lines.append(verdict)
+        return "\n".join(lines)
+    except Exception:  # noqa: BLE001 — the menu must never block the app
+        return "Status:\n  ? (probe unavailable — run Test My Hardware)"
 
 
 def handle_choice(choice: str) -> Optional[List[str]]:
     """Map raw user input to an argv list.
 
     Returns a fresh copy of the item's argv; ``None`` for empty or unknown
-    input (caller re-prompts). Note ``"4"`` -> ``[]`` (valid, distinct from
+    input (caller re-prompts). Note ``"1"`` -> ``[]`` (valid, distinct from
     ``None``): it means "start the main app".
     """
     key = "" if choice is None else str(choice).strip()
@@ -88,9 +127,9 @@ _MARKER_NAME = ".setup_complete"
 def _resolve_airmouse_home() -> str:
     """``$AIRMOUSE_HOME`` if set, else the persistence home, else ~/.airmouse.
 
-    ``persistence`` is a sibling module from a parallel hardening agent; it
-    may not exist yet (perfectly normal) or may be mid-write, so every step
-    is guarded and the duplicated local default always wins as fallback.
+    ``persistence`` is a sibling module; it may not exist yet (perfectly
+    normal) or may be mid-write, so every step is guarded and the
+    duplicated local default always wins as fallback.
     """
     env = os.environ.get("AIRMOUSE_HOME")
     if env and env.strip():
@@ -174,7 +213,7 @@ def should_show_menu(argv: Optional[Sequence[str]] = None) -> bool:
 
 def run_menu(version: str, out: Optional[TextIO] = None,
              input_fn: Callable[..., str] = input) -> Optional[List[str]]:
-    """Print the menu and read a choice (up to 3 attempts).
+    """Print the launcher and read a choice (up to 3 attempts).
 
     Returns the chosen argv (``[]`` = Start AirMouse), or ``None`` when the
     user gives up / EOFs / aborts — the caller then just proceeds normally.
@@ -184,6 +223,12 @@ def run_menu(version: str, out: Optional[TextIO] = None,
     for _attempt in range(_MENU_ATTEMPTS):
         try:
             print(render_menu(version), file=dest)
+            try:
+                print(render_status(), file=dest)
+            except Exception:  # noqa: BLE001 — status is best-effort
+                pass
+            lines = ["Choose an option:"]
+            print("\n".join(lines), file=dest)
             try:
                 dest.flush()
             except Exception:  # noqa: BLE001 — streams without flush

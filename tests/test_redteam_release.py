@@ -373,7 +373,7 @@ class TestSetupAdversarial:
         monkeypatch.setenv("AIRMOUSE_HOME", str(blocker))
         monkeypatch.setenv("HOME", str(tmp_path))
         rep = setup_wizard.run_setup(interactive=False, out=io.StringIO())
-        assert len(rep.steps) == 11
+        assert len(rep.steps) == 14  # v19: +models +interaction +profile
         statuses = {s.id: s.status for s in rep.steps}
         assert statuses["storage"] == "FAILED"
         assert statuses["marker"] == "FAILED"
@@ -384,7 +384,7 @@ class TestSetupAdversarial:
         monkeypatch.setenv("AIRMOUSE_HOME", str(blocker / "deeper"))
         monkeypatch.setenv("HOME", str(tmp_path))
         rep = setup_wizard.run_setup(interactive=False, out=io.StringIO())
-        assert len(rep.steps) == 11
+        assert len(rep.steps) == 14  # v19: +models +interaction +profile
         assert any(s.status == "FAILED" for s in rep.steps)
 
     def test_readonly_home_completes_with_failed_steps(self, tmp_path,
@@ -405,7 +405,7 @@ class TestSetupAdversarial:
         statuses = {s.id: s.status for s in rep.steps}
         assert statuses["storage"] == "FAILED"
         assert statuses["marker"] == "FAILED"
-        assert len(rep.steps) == 11
+        assert len(rep.steps) == 14  # v19: +models +interaction +profile
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -728,7 +728,7 @@ class TestNoNetworkGuarantee:
 
         # setup wizard (non-interactive, nothing installed)
         srep = setup_wizard.run_setup(interactive=False, out=io.StringIO())
-        assert len(srep.steps) == 11
+        assert len(srep.steps) == 14  # v19: +models +interaction +profile
 
         # verify (runs the full offline self-test under the guard too)
         vrep = verify_mod.run_verify()

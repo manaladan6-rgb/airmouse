@@ -491,11 +491,17 @@ def main():
                     f"Intelligence Edition",
         epilog="getting started:\n"
                "  airmouse setup              guided setup wizard\n"
+               "  airmouse wizard             60-second interaction wizard\n"
                "  airmouse doctor             environment diagnostics\n"
                "  airmouse test --guided      interactive validation lab\n"
                "  airmouse verify             automated checks + remaining physical tests\n"
                "  airmouse privacy            local-first privacy report\n"
-               "  airmouse memory status      local memory stores\n",
+               "  airmouse memory status      local memory stores\n"
+               "lifecycle:\n"
+               "  airmouse repair             safe local fixes (config/models/marker)\n"
+               "  airmouse reset --all        remove state (asks first, explains what)\n"
+               "  airmouse uninstall          remove the AirMouse home (asks first)\n"
+               "  airmouse update --check     check for a newer release (explicit only)\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--skip", action="store_true", help="Skip tutorial")
@@ -636,7 +642,9 @@ def main():
                                  "privacy",
                                  "academy", "gesture-lab", "profile",
                                  "teach", "learn", "transcribe", "help-me",
-                                 "voice-setup", "voice-benchmark"],
+                                 "voice-setup", "voice-benchmark",
+                                 "wizard", "reset", "repair",
+                                 "uninstall", "update"],
                         help="info/diagnostic subcommand (prints and exits)")
     parser.add_argument("command_arg", nargs="?", default=None,
                         help="optional subcommand argument "
@@ -678,6 +686,63 @@ def main():
               "EXECUTE fail-closed until permissions granted)",
               file=sys.stderr, flush=True)
         return int(aip_stdio.serve(endpoint=endpoint))
+
+    # ═══ v19 lifecycle commands (Phase 13/16) ═══
+    if args.command == "wizard":
+        from .wizard import run_wizard
+        report = run_wizard(out=sys.stdout)
+        print()
+        print(report.format())
+        return 0 if report.verdict() == "READY" else (1 if
+                                                      report.verdict() ==
+                                                      "PARTIAL" else 2)
+
+    if args.command == "reset":
+        from .lifecycle import reset_home
+        scope = str(args.command_arg or "config").strip().lower()
+        if scope not in ("config", "models", "all", "--config",
+                         "--models", "--all"):
+            print("  usage: airmouse reset [--config|--models|--all]")
+            return 2
+        scope = scope.lstrip("-")
+        ok, actions = reset_home(scope, assume_yes=bool(args.yes),
+                                 out=sys.stdout)
+        for a in actions:
+            print(a.line())
+        return 0 if ok else 1
+
+    if args.command == "repair":
+        from .lifecycle import repair_home
+        ok, actions = repair_home(out=sys.stdout)
+        for a in actions:
+            print(a.line())
+        print()
+        print("  ✓ repair complete" if ok else
+              "  ✗ some repairs failed — see the lines above")
+        return 0 if ok else 1
+
+    if args.command == "uninstall":
+        from .lifecycle import uninstall_home
+        ok, actions = uninstall_home(assume_yes=bool(args.yes),
+                                     out=sys.stdout)
+        for a in actions:
+            print(a.line())
+        return 0 if ok else 1
+
+    if args.command == "update":
+        from .lifecycle import check_for_update
+        available, info = check_for_update(out=sys.stdout)
+        print(f"  installed: {info.get('installed', '?')}")
+        if info.get("latest"):
+            print(f"  latest on PyPI: {info['latest']}")
+            if available:
+                print("  a newer release is available")
+                print(f"  {info.get('detail', '')}")
+            else:
+                print("  " + info.get("detail", "up to date"))
+        elif info.get("detail"):
+            print(f"  {info['detail']}")
+        return 0
 
     # ═══ v15.1 release commands (setup / doctor / test / verify / privacy) ═══
     if args.command == "doctor":

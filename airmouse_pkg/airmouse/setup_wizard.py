@@ -42,7 +42,6 @@ from .persistence import (STORE_NAMES, airmouse_home, atomic_write_json,
 
 __all__ = ["SetupStep", "SetupReport", "run_setup",
            "setup_complete", "mark_setup_complete", "CORE_DEPENDENCIES"]
-
 #: (import name, PyPI name) for the REQUIRED core stack — duplicated
 #: locally on purpose so the wizard has no dependency on any other
 #: module that may be built in parallel.
@@ -66,7 +65,8 @@ OPTIONAL_EXTRAS: Tuple[Tuple[str, str], ...] = (
 _INSTALL_TIMEOUT = 600  # seconds — the one allowed subprocess
 
 STEP_IDS = ("env", "deps", "storage", "config", "cameras", "microphones",
-            "browsers", "asr", "permissions", "smoke", "marker")
+            "browsers", "asr", "permissions", "models", "interaction",
+            "profile", "smoke", "marker")
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +81,7 @@ class SetupStep:
     status: str            # DONE | SKIPPED | ACTION_REQUIRED | FAILED
     detail: str = ""
     remediation: str = ""
+    seconds: float = 0.0   # v19 Phase 1/19: MEASURED, never claimed
 
 
 @dataclass
@@ -107,6 +108,11 @@ class SetupReport:
                          .rstrip())
             if s.remediation:
                 lines.append(f"      fix: {s.remediation}")
+        total = sum(s.seconds for s in self.steps)
+        if total > 0:
+            lines.append("")
+            lines.append(f"measured setup time: {total:.1f} s "
+                         "(actual, not estimated)")
         lines.append("")
         lines.append("What remains to test (needs you + hardware):")
         lines.append("  * Camera: start AirMouse (run `airmouse`) and watch "
@@ -447,6 +453,75 @@ def _step_smoke() -> SetupStep:
                                      "share the output if you need help")
 
 
+def _step_models() -> SetupStep:
+    """v19 Phase 6 — the honest model record (never downloads here)."""
+    try:
+        from .model_integrity import vosk_model_status
+        rec = vosk_model_status()
+        state = rec.get("state", "MODEL_MISSING")
+        if rec.get("installed"):
+            return SetupStep("models", "Voice model", "DONE",
+                             f"{state} — {rec.get('detail', '')}")
+        if "CORRUPTED" in state:
+            return SetupStep(
+                "models", "Voice model", "FAILED",
+                f"{state} — {rec.get('detail', '')}",
+                remediation="run `airmouse repair` (removes the corrupted "
+                            "copy), then `airmouse voice-setup`")
+        return SetupStep(
+            "models", "Voice model", "SKIPPED",
+            f"{state} — voice stays optional; the model downloads once "
+            "with your consent",
+            remediation="optional: run `airmouse voice-setup`")
+    except Exception as exc:
+        return SetupStep("models", "Voice model", "FAILED",
+                         f"model status failed: {type(exc).__name__}: {exc}")
+
+
+def _step_interaction() -> SetupStep:
+    """v19 Phase 10 — pick the best available interaction mode and
+    remember it in the personal profile (auto-detected, never asked)."""
+    try:
+        from .capability_registry import build_registry
+        reg = build_registry(quick=True)
+        mode, readiness = reg.best_mode()
+        try:
+            from .profile_store import ProfileStore
+            store = ProfileStore("preferences")
+            doc = store.load()
+            doc["preferred_interaction_mode"] = mode
+            doc["interaction_readiness"] = readiness.level.value
+            store.save(doc)
+            where = " (saved to your profile)"
+        except Exception:            # profile is best-effort
+            where = ""
+        return SetupStep(
+            "interaction", "Interaction mode", "DONE",
+            f"best available: {mode.upper()} "
+            f"({readiness.level.value}){where}")
+    except Exception as exc:
+        return SetupStep("interaction", "Interaction mode", "FAILED",
+                         f"mode selection failed: {type(exc).__name__}: "
+                         f"{exc}")
+
+
+def _step_profile() -> SetupStep:
+    """v19 Phase 11 — the first user profile exists from the first run."""
+    try:
+        from .profile_store import ProfileStore
+        store = ProfileStore("interaction")
+        doc = store.load()
+        if doc:
+            store.save(doc)
+        from .paths import profile_dir
+        return SetupStep("profile", "Your profile", "DONE",
+                         f"ready at {profile_dir()}")
+    except Exception as exc:
+        return SetupStep("profile", "Your profile", "FAILED",
+                         f"profile creation failed: {type(exc).__name__}: "
+                         f"{exc}")
+
+
 def _step_marker() -> SetupStep:
     try:
         path = mark_setup_complete()
@@ -514,18 +589,32 @@ def run_setup(interactive: bool = True, assume_yes: bool = False,
 
     say("AirMouse setup — checking your system (nothing is installed "
         "without your consent)")
-    finish(_step_env(), "Checking Python and OS")
-    finish(_step_deps(interactive, assume_yes, install_ok, input_fn),
+
+    import time as _time
+    total0 = _time.perf_counter()
+
+    def timed(builder, *args) -> SetupStep:
+        t0 = _time.perf_counter()
+        step = builder(*args)
+        step.seconds = round(_time.perf_counter() - t0, 3)
+        return step
+
+    finish(timed(_step_env), "Checking Python and OS")
+    finish(timed(_step_deps, interactive, assume_yes, install_ok, input_fn),
            "Checking core packages")
-    finish(_step_storage(), "Preparing local storage")
-    finish(_step_config(), "Checking configuration")
-    finish(_step_cameras(), "Looking for a camera")
-    finish(_step_microphones(), "Looking for a microphone")
-    finish(_step_browsers(), "Looking for a browser")
-    finish(_step_asr(), "Checking optional voice extras")
-    finish(_step_permissions(), "Checking keyboard/mouse access")
-    finish(_step_smoke(), "Running the smoke test")
-    finish(_step_marker(), "Finishing")
-    say("Done. See the report below for anything that still needs you.")
+    finish(timed(_step_storage), "Preparing local storage")
+    finish(timed(_step_config), "Checking configuration")
+    finish(timed(_step_cameras), "Looking for a camera")
+    finish(timed(_step_microphones), "Looking for a microphone")
+    finish(timed(_step_browsers), "Looking for a browser")
+    finish(timed(_step_asr), "Checking optional voice extras")
+    finish(timed(_step_permissions), "Checking keyboard/mouse access")
+    finish(timed(_step_models), "Checking the voice model")
+    finish(timed(_step_interaction), "Choosing your interaction mode")
+    finish(timed(_step_profile), "Preparing your profile")
+    finish(timed(_step_smoke), "Running the smoke test")
+    finish(timed(_step_marker), "Finishing")
+    say(f"Done in {_time.perf_counter() - total0:.1f} s. "
+        "See the report below for anything that still needs you.")
     say("")
     return SetupReport(steps=steps)

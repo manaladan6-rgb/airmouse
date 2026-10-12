@@ -95,8 +95,9 @@ SCHEMA_VERSION = 1
 _HOME_ENV = "AIRMOUSE_HOME"
 
 #: subdirectories created under the home directory
+#: (v19 Phase 11: + cache/ + diagnostics/ for a complete, documented layout)
 SUBDIR_NAMES = ("config", "memory", "skills", "workflows",
-                "backups", "exports", "logs")
+                "backups", "exports", "logs", "cache", "diagnostics")
 
 #: the named stores exposed to the CLI
 STORE_NAMES = ("twin", "vocabulary", "skills", "workflows", "preferences")

@@ -41,6 +41,7 @@ __all__ = [
     "profile_preferences_file",
     "transcripts_dir", "asr_provider_file",
     "models_dir", "vosk_model_dir",  # v16.5.3 — local ASR model storage
+    "cache_dir", "diagnostics_dir",  # v19 Phase 11 — complete home layout
 ]
 
 #: the single environment variable that overrides the home directory
@@ -204,3 +205,17 @@ def asr_provider_file() -> str:
     disables anything.
     """
     return _join("asr_provider.json")
+
+
+# ---------------------------------------------------------------------------
+# v19 Phase 11 — the complete, documented home layout
+# ---------------------------------------------------------------------------
+
+def cache_dir() -> str:
+    """Temporary cache data (cache/) — safe to delete at any time."""
+    return _join("cache")
+
+
+def diagnostics_dir() -> str:
+    """Diagnostic reports (diagnostics/) — user-visible, user-deletable."""
+    return _join("diagnostics")
