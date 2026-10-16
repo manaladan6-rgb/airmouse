@@ -17,35 +17,63 @@ DIST_DIR = os.path.join(PKG_DIR, "bundle")
 
 
 def _install_pyinstaller():
-    """Ensure PyInstaller is available."""
+    """Ensure PyInstaller is available (CONSENT-GATED, v19.0.2).
+
+    The old code silently pip-installed PyInstaller — a build helper must
+    never mutate the user's environment without asking.
+    """
     try:
         import PyInstaller
         print("  PyInstaller found")
+        return True
     except ImportError:
-        print("  Installing PyInstaller...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "pyinstaller"],
-                       check=True)
+        pass
+    if os.environ.get("AIRMOUSE_NO_BUILD_INSTALL", "").strip() not in ("", "0"):
+        print("  !! PyInstaller missing and AIRMOUSE_NO_BUILD_INSTALL=1 "
+              "— install it manually: pip install pyinstaller")
+        return False
+    try:
+        if sys.stdin is not None and sys.stdin.isatty():
+            answer = input("  PyInstaller is required to bundle. Install "
+                           "it now? [y/N] ").strip().lower()
+        else:
+            answer = ""  # non-interactive: never install silently
+    except (EOFError, KeyboardInterrupt):
+        answer = ""
+    if answer not in ("y", "yes"):
+        print("  !! PyInstaller not installed — bundling aborted "
+              "(run: pip install pyinstaller)")
+        return False
+    print("  Installing PyInstaller...")
+    subprocess.run([sys.executable, "-m", "pip", "install", "pyinstaller"],
+                   check=True)
+    return True
 
 
 def _ensure_model():
-    """Download model if not present (needed for bundling)."""
-    model_dir = os.path.join(os.path.expanduser("~"), ".airmouse")
-    model_path = os.path.join(model_dir, "hand_landmarker.task")
-    if os.path.exists(model_path):
-        print(f"  Model already exists: {model_path}")
-        return model_path
-    print("  Downloading MediaPipe model for bundling...")
-    os.makedirs(model_dir, exist_ok=True)
-    url = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
-    import urllib.request
-    urllib.request.urlretrieve(url, model_path)
-    print(f"  Model saved: {model_path}")
-    return model_path
+    """Ensure the hand model for bundling (v19.0.2 — hardened path).
+
+    Delegates to the hardened tracker download (pinned URL, SHA-256
+    verification, atomic install, consent, kill-switch) instead of the
+    old bare urlretrieve of a mutable "latest" URL.
+    """
+    try:
+        from airmouse.tracker import _ensure_model as _hardened
+        return _hardened()
+    except Exception:
+        # fall back to the resolved path if the model is already present
+        from airmouse.tracker import _resolve_model_path
+        p = _resolve_model_path()
+        if os.path.exists(p):
+            print(f"  Model already exists: {p}")
+            return p
+        raise
 
 
 def build_current_platform():
     """Build for the current platform."""
-    _install_pyinstaller()
+    if not _install_pyinstaller():
+        raise SystemExit(2)
     _ensure_model()
 
     os.makedirs(DIST_DIR, exist_ok=True)

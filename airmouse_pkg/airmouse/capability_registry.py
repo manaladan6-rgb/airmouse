@@ -137,7 +137,7 @@ class CapabilityRegistry:
 
     def render(self) -> str:
         mode, r = self.best_mode()
-        lines: List[str] = ["AIRMouse Capabilities",
+        lines: List[str] = ["AirMouse Capabilities",
                             "===========================", ""]
         marks = {"READY": "✓", "OPTIONAL": "○"}
         for c in self.interaction_rows():

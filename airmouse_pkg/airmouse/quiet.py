@@ -48,6 +48,12 @@ _ENV_DIALS = {
     # ("can't open camera by index" while the probe honestly reports the
     # result in AirMouse's own output).  ERROR keeps real OpenCV errors.
     "OPENCV_LOG_LEVEL": "ERROR",
+    # v19.0.2 — the obsensor videoio backend emits native C++ "[ERROR]"
+    # lines on affected machines even when AirMouse merely PROBES for a
+    # camera and never opens the obsensor device.  Removing the backend
+    # from the priority list (0 = disabled) keeps doctor/setup output
+    # clean without hiding any real AirMouse error.
+    "OPENCV_VIDEOIO_PRIORITY_OBSENSOR": "0",
 }
 
 #: third-party Python loggers that may be dialed down (never airmouse's)

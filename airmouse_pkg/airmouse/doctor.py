@@ -4,7 +4,7 @@ airmouse.doctor — `airmouse doctor` (v15.1 hardening).
 Reorganizes :mod:`airmouse.capabilities` detection into the twelve
 doctor sections and renders the human report:
 
-    AIRMouse Doctor
+    AirMouse Doctor
     ===========================
     <sections...>
 
@@ -187,7 +187,7 @@ def format_doctor_report(report: DoctorReport, verbose: bool = False) -> str:
     component rows (with ``Fix:`` lines for every non-READY,
     non-OPTIONAL item) between the title and the counts.
     """
-    lines: List[str] = ["AIRMouse Doctor", "===========================", ""]
+    lines: List[str] = ["AirMouse Doctor", "===========================", ""]
 
     if verbose:
         for section in report.sections:

@@ -461,7 +461,7 @@ class TestFormatReport:
         text = report.format_report(version="15")
         lines = text.splitlines()
         assert lines[0] == "=" * 40
-        assert lines[1] == "        AIRMouse v15 TEST REPORT"
+        assert lines[1] == "        AirMouse v15 TEST REPORT"
         assert lines[2] == "=" * 40
         assert lines[3] == ""
         assert "Installation        PASS" in lines
@@ -603,7 +603,7 @@ class TestApiContract:
         assert report.test_ids == list(TEST_IDS)
         text = format_report(report)
         assert text == report.format_report(version="15")
-        assert "AIRMouse v15 TEST REPORT" in text
+        assert "AirMouse v15 TEST REPORT" in text
 
     def test_runner_defaults_are_interactive(self):
         import inspect

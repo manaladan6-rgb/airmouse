@@ -80,8 +80,128 @@ def _resolved_config_path() -> str:
     return CONFIG_PATH
 
 
+# v19.0.2 — sections the loader understands (for `airmouse config validate`).
+# Unknown top-level sections are a real error (they are silently ignored at
+# load time, which is exactly how typos go unnoticed); unknown keys inside a
+# known section are reported as warnings (a newer AirMouse may add keys).
+KNOWN_SECTIONS = frozenset({
+    "direct", "one_euro", "physics", "ironman", "jitter", "prediction",
+    "smoothing", "momentum", "edge_gravity", "gesture", "precision",
+    "camera", "audio", "ui", "voice", "kalman", "zoom", "calibration",
+    "v9", "v10", "intelligence", "learning", "memory", "transcription",
+    "dictation", "emoji", "accessibility", "workflow", "privacy",
+})
+_KNOWN_SECTION_KEYS = {
+    "direct": {"jitter_alpha", "mirror_x", "movement_threshold",
+               "pixel_deadzone", "smooth_alpha", "spring_alpha"},
+    "one_euro": {"beta", "dcutoff", "mincutoff", "prediction_factor"},
+    "physics": {"damping_ratio", "mass", "max_accel", "stiffness_max",
+                "stiffness_min", "stiffness_smoothing"},
+    "ironman": {"deadzone", "exp_power", "exp_scale", "home_drift_rate",
+                "home_drift_rate_moving"},
+    "jitter": {"macro_alpha", "micro_alpha"},
+    "prediction": {"enabled", "factor", "max_correction", "min_confidence"},
+    "smoothing": {"position_alpha"},
+    "momentum": {"throw_friction", "throw_max_momentum", "throw_min_speed"},
+    "edge_gravity": {"strength", "zone"},
+    "gesture": {"action_confirm_frames", "confirm_frames", "pinch_cooldown",
+                "pinch_threshold", "transition_cooldown"},
+    "precision": {"power", "scale"},
+    "camera": {"detection_confidence", "index", "tracking_confidence"},
+    "voice": {"enabled", "mic_index", "sensitivity", "speak"},
+    "kalman": {"enabled", "fusion", "measurement_noise", "process_noise",
+               "speed_ref"},
+    "zoom": {"enabled", "engage_hold", "gain", "max_ticks"},
+    "calibration": {"adaptive_enabled", "save_every"},
+    "v9": {"action_max_retries", "action_timeout", "confirmation_timeout",
+           "fusion_mode", "gaze_blink_click", "gaze_dwell_time",
+           "gaze_enabled", "gaze_long_blink_estop", "gaze_min_confidence",
+           "intent_min_confidence", "max_actions_per_sec",
+           "min_click_interval", "safety_level", "screen_ocr_enabled",
+           "screen_refresh_interval", "stream_loss_grace"},
+    "v10": {"browser_bridge_port", "browser_cdp_port", "browser_enabled",
+            "dictation_max_chars", "gesture_allow_destructive",
+            "gesture_min_confidence_caution", "gesture_min_confidence_safe",
+            "gesture_registry_enabled", "gesture_sequences",
+            "macro_max_steps", "offline", "rf_enabled", "rf_min_confidence",
+            "selftune_apply", "telemetry_enabled", "two_hand",
+            "voice_command_min_confidence", "voice_mode10",
+            "wake_word_required", "perf_report_enabled", "teach_auto",
+            "ready_panel"},
+    "intelligence": {"enabled", "model_capacity_mb"},
+    "learning": {"enabled", "self_tuning"},
+    "memory": {"enabled", "max_patterns"},
+    "transcription": {"enabled", "history", "language"},
+    "dictation": {"auto_punctuation", "enabled"},
+    "emoji": {"enabled", "max_suggestions"},
+    "accessibility": {"profile"},
+    "workflow": {"learning", "max_count"},
+    "privacy": {"kind", "mode", "telemetry"},
+}
+
+
 class Config:
     """AirMouse configuration with v3.2 Direct Tracking defaults."""
+
+    @classmethod
+    def config_path(cls) -> str:
+        """Active config.toml path (AIRMOUSE_HOME-aware). Never raises."""
+        try:
+            return _resolved_config_path()
+        except Exception:
+            return CONFIG_PATH
+
+    @classmethod
+    def validate_file(cls, path: Optional[str] = None):
+        """Validate a config.toml. Returns (errors, warnings); never raises.
+
+        errors   — file missing/unreadable, invalid TOML, unknown sections
+        warnings — unknown keys inside known sections (may be from a
+                   newer AirMouse; silently ignored by this version's
+                   loader, which is worth telling the user)
+        """
+        errors: List[str] = []
+        warnings: List[str] = []
+        p = str(path) if path else cls.config_path()
+        try:
+            with open(p, "rb") as f:
+                raw = f.read()
+        except FileNotFoundError:
+            return ([f"config file not found: {p}"], warnings)
+        except OSError as e:
+            return ([f"config file unreadable: {e}"], warnings)
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError as e:
+            errors.append(f"not valid UTF-8: {e}")
+            return (errors, warnings)
+        if tomllib is None:
+            warnings.append("tomllib unavailable on this Python; "
+                            "structure not checked")
+            return (errors, warnings)
+        try:
+            data = tomllib.loads(raw.decode("utf-8"))
+        except Exception as e:
+            errors.append(f"invalid TOML: {e}")
+            return (errors, warnings)
+        if not isinstance(data, dict):
+            errors.append("top level must be a TOML table")
+            return (errors, warnings)
+        known_top = KNOWN_SECTIONS | {"tracking_mode"}
+        for key, val in data.items():
+            if key not in known_top:
+                errors.append(
+                    f"unknown section [{key}] (silently ignored by the "
+                    "loader — typo? see `airmouse config show` docs)")
+                continue
+            section_keys = _KNOWN_SECTION_KEYS.get(key)
+            if section_keys and isinstance(val, dict):
+                for k in val:
+                    if k not in section_keys:
+                        warnings.append(
+                            f"[{key}] {k} is not recognized by this "
+                            "version (ignored by the loader)")
+        return (errors, warnings)
 
     # v16.5.1 §2: structured problem from the most recent load().
     # ``None`` = clean (or no file).  Never raise from the lenient path.

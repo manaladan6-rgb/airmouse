@@ -110,7 +110,7 @@ def test_cli_transcribe_provider_matches_registry(monkeypatch, tmp_path):
 
 def test_cli_help_me_panel(monkeypatch, tmp_path):
     rc, out = _run_cli(monkeypatch, tmp_path, ["help-me"], expect_rc=0)
-    assert "AIRMouse — what you can do" in out
+    assert "AirMouse — what you can do" in out
     assert "airmouse teach" in out
 
 

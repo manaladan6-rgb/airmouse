@@ -115,7 +115,7 @@ def run_benchmark(out: Any = None, wav: Optional[str] = None,
         except Exception:
             pass
 
-    emit("AIRMouse Voice Benchmark (local, deterministic)")
+    emit("AirMouse Voice Benchmark (local, deterministic)")
     emit("=" * 48)
     emit(f"platform: {platform.system()} {platform.machine()} — "
          f"CPython {sys.version_info.major}.{sys.version_info.minor}")

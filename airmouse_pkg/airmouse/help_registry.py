@@ -297,7 +297,7 @@ def _gesture_answer(question: str) -> str:
 
 def help_me_panel() -> str:
     """The full 'what can I do' panel (mission §20)."""
-    lines: List[str] = ["AIRMouse — what you can do", ""]
+    lines: List[str] = ["AirMouse — what you can do", ""]
     lines.append("HANDS (camera)")
     for g, how, effect, note in GESTURE_HELP[:12]:
         flag = "" if not note.startswith("DESTRUCTIVE") else \

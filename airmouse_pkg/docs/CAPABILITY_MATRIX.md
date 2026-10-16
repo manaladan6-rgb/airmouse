@@ -138,7 +138,7 @@ AIRMOUSE_HOME=/tmp/am-doc165 python3 -m airmouse profile list
 | 90 | Personal Interaction Profile — `<home>/profile/{interaction,voice,gestures,preferences}.json`: bounded, content-free (counters/parameters only), atomic writes, corruption fail-closed, reset with backup | **REAL** | `profile_store.py` + 63 tests; measured `airmouse privacy` lists them under the manifested `profile/` dir |
 | 91 | LearningLoop — 11 bounded stages, ring buffer, proposals that NEVER execute, single explicit approve path, `adapt()` converts approved proposals into profile observations (PREDICTION ≠ EXECUTION) | **REAL** | `profile_store.py` + tests incl. approval gate; the verify Teacher check asserts the approval gate end-to-end |
 | 92 | `airmouse help-me` — answers from REAL capability data (22-row gesture map aligned with `gestures.py` + spine risk classes, the 30-phrase grammar, honest destructive + two-hand notes, gate-level debug answer) | **REAL** | `help_registry.py` + tests; measured: overview panel, `"how do I scroll?"` → 3 real scroll paths, `"why didn't that work?"` → e-stop → confidence → policy → rate-limit chain |
-| 93 | Zero-learning-curve READY panel — post-startup `AIRMouse READY` (Hands/Voice/Gaze/Learning ✓/○ + `say "help" anytime` + teach reminder); display-only, `config.ready_panel` default true | **REAL** | `__main__.py` panel + config keys (both v16.5 keys measured in `config.py` defaults); on-screen HUD look = row 65 |
+| 93 | Zero-learning-curve READY panel — post-startup `AirMouse READY` (Hands/Voice/Gaze/Learning ✓/○ + `say "help" anytime` + teach reminder); display-only, `config.ready_panel` default true | **REAL** | `__main__.py` panel + config keys (both v16.5 keys measured in `config.py` defaults); on-screen HUD look = row 65 |
 | 94 | New config keys `teach_auto` / `ready_panel` (both default true, written to config.toml `[v10]`) | **REAL** | `config.py` defaults + `save_defaults` lines; round-trip tests |
 
 ---
@@ -146,7 +146,7 @@ AIRMOUSE_HOME=/tmp/am-doc165 python3 -m airmouse profile list
 ## 2. Measured output — `airmouse doctor` (plain, this tree)
 
 ```
-AIRMouse Doctor
+AirMouse Doctor
 ===========================
 
 READY:       32

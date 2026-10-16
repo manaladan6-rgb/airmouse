@@ -388,7 +388,7 @@ proceeds — the menu never blocks the app.
 | `gesture_sequences` | `true` | feed confirmed hand gestures to the custom-sequence registry |
 | `selftune_apply` | `false` | opt-in self-tuning application flag (reserved; see CAPABILITY_MATRIX — no shipped code path applies tuner proposals automatically) |
 | `teach_auto` | `true` | v16.5 — offer the first-run teaching tour when plain `airmouse` runs on a TTY (decline always proceeds; headless is never blocked) |
-| `ready_panel` | `true` | v16.5 — print the zero-learning-curve `AIRMouse READY` panel after startup (display-only: Hands/Voice/Gaze/Learning state + `say "help" anytime` + teach reminder) |
+| `ready_panel` | `true` | v16.5 — print the zero-learning-curve `AirMouse READY` panel after startup (display-only: Hands/Voice/Gaze/Learning state + `say "help" anytime` + teach reminder) |
 
 ---
 

@@ -372,7 +372,7 @@ def test_format_doctor_report_ends_with_contract_shape():
         "Overall:\n"
         f"{report.overall()}")
     assert text.endswith(expected_tail)
-    assert text.startswith("AIRMouse Doctor\n===========================\n")
+    assert text.startswith("AirMouse Doctor\n===========================\n")
     assert report.overall() in ("[READY FOR TESTING]",
                                 "[PARTIAL — fix FAILED items]",
                                 "[PARTIAL — review WARNING items]",
@@ -444,7 +444,7 @@ def test_verify_failures_carry_reasons():
 
 def test_verify_format_reproduces_spec_layout(verify_report):
     text = verify_report.format()
-    assert text.startswith("AIRMouse Verification")
+    assert text.startswith("AirMouse Verification")
     assert "Automated:" in text and "Physical:" in text
     assert text.endswith("Next step:\nRun:\n\nairmouse test --guided")
     for item in verify_report.physical:

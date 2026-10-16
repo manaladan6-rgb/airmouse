@@ -51,7 +51,7 @@ _MENU_ATTEMPTS = 3
 
 def render_menu(version: str) -> str:
     """Render the full launcher block (no trailing newline)."""
-    lines = [f"AIRMouse v{version}",
+    lines = [f"AirMouse v{version}",
              "Human–Computer Intelligence", ""]
     for key, label, _argv in MENU_ITEMS:
         lines.append(f"[{key}] {label}")

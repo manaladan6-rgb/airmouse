@@ -201,7 +201,7 @@ class GuidedTestReport:
         line = "=" * 40
         out: List[str] = [
             line,
-            "        AIRMouse v{} TEST REPORT".format(version),
+            "        AirMouse v{} TEST REPORT".format(version),
             line,
             "",
         ]
@@ -323,7 +323,7 @@ class GuidedTestRunner:
             wanted = [str(o).strip().lower() for o in only if str(o).strip()]
 
         self._print("")
-        self._print("AIRMouse Guided Test Laboratory — v" + __version__)
+        self._print("AirMouse Guided Test Laboratory — v" + __version__)
         self._print("Physical (hardware) tests can NEVER auto-pass: they need")
         self._print("a human at the desk.  Simulation results are labelled")
         self._print("[SIMULATION] — they prove the software, not the hardware.")

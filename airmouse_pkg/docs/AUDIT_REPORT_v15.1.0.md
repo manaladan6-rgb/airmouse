@@ -1,4 +1,4 @@
-# AIRMouse FULL-SPECTRUM AUDIT — v15.1.0
+# AirMouse FULL-SPECTRUM AUDIT — v15.1.0
 
 **Audit date:** 2026-09-04 · **Audited tree:** `ed29326` (= tag `v15.1.0`, main == origin/main, tree clean)
 **Method:** 5 independent read-only deep-audit passes over every subsystem + coordinator re-verification of all headline claims (tests re-run, P0 crashes re-proven by direct code read + runtime probe, checksums re-verified). Every claim below cites `file:line` or an actual command run in the audit sandbox (Linux x86_64, headless, Python 3.12.14).

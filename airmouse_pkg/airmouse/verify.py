@@ -53,7 +53,7 @@ class VerifyReport:
 
     def format(self) -> str:
         """Spec §21 layout; ends with the guided-test pointer."""
-        lines: List[str] = ["AIRMouse Verification", "=====================",
+        lines: List[str] = ["AirMouse Verification", "=====================",
                             ""]
         lines.append("Automated:")
         if not self.automated:

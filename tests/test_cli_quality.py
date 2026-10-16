@@ -293,10 +293,10 @@ def test_menu_items_exact_spec():
 
 def test_render_menu_exact_shape():
     lines = render_menu("15").splitlines()
-    assert lines[0] == "AIRMouse v15"
+    assert lines[0] == "AirMouse v15"
     assert lines[1] == "Human–Computer Intelligence"
     assert lines[3:11] == [f"[{k}] {lbl}" for k, lbl, _a in MENU_ITEMS]
-    assert render_menu("19.0.0").startswith("AIRMouse v19.0.0\n")
+    assert render_menu("19.0.0").startswith("AirMouse v19.0.0\n")
 
 
 def test_render_status_is_honest_and_never_raises():

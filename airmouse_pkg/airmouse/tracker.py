@@ -48,8 +48,26 @@ import os
 import sys
 import time
 import urllib.request
-import cv2
+
 import numpy as np
+
+
+class _LazyCv2:
+    """v19.0.2 — lazy cv2 proxy (same rationale as airmouse.__main__).
+
+    Every cv2.* use in this module lives inside HandTracker (camera open /
+    read / flip) — strictly after the user asked to run. Importing OpenCV
+    at module scope made every CLI command that merely imports the tracker
+    for the HandTracker class object pay ~0.4 s of OpenCV import.
+    """
+
+    def __getattr__(self, name):
+        import cv2 as _cv2
+        globals()["cv2"] = _cv2
+        return getattr(_cv2, name)
+
+
+cv2 = _LazyCv2()
 
 # NOTE: mediapipe is imported LAZILY (PEP 562 module __getattr__ below) —
 # it pulls matplotlib and ~1.0 s of import work, which would otherwise

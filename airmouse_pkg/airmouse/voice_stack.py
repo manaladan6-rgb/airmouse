@@ -242,13 +242,13 @@ def render_voice_status(verbose: bool = False) -> str:
         from .asr_registry import registry
         diag = registry.diagnose()
     except Exception as exc:
-        return f"AIRMouse Voice Status\n\nregistry unavailable: {exc}"
+        return f"AirMouse Voice Status\n\nregistry unavailable: {exc}"
 
     mic = diag.get("microphone", {})
     providers = diag.get("providers", {})
     active = diag.get("active")
 
-    lines: List[str] = ["AIRMouse Voice Status", ""]
+    lines: List[str] = ["AirMouse Voice Status", ""]
 
     # -- MICROPHONE ---------------------------------------------------------
     lines.append("MICROPHONE")

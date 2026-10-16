@@ -132,4 +132,4 @@ def test_run_help_me_rc_and_output():
     buf2 = io.StringIO()
     rc2 = hr.run_help_me("", out=buf2)
     assert rc2 == 0
-    assert "AIRMouse — what you can do" in buf2.getvalue()
+    assert "AirMouse — what you can do" in buf2.getvalue()

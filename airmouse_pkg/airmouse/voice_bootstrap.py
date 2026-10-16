@@ -914,7 +914,7 @@ def _mic_line(rep: BootstrapReport) -> str:
 
 def render_setup_report(rep: BootstrapReport, verbose: bool = False) -> str:
     """The §3 example panel — deterministic, honest, actionable."""
-    L: List[str] = ["AIRMouse Voice Setup", ""]
+    L: List[str] = ["AirMouse Voice Setup", ""]
     L.append(_mic_line(rep))
     L.append(f"Python:                             CPython "
              f"{rep.python_version} {rep.architecture}")
@@ -1029,7 +1029,7 @@ def run_voice_setup(out: Any = None,
             return False
 
     rep, plan = bootstrap_manager.recommend_installation()
-    emit("AIRMouse Voice Setup")
+    emit("AirMouse Voice Setup")
     emit("")
     emit(_mic_line(rep))
     emit(f"Checking local ASR................. "

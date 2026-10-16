@@ -49,12 +49,30 @@ Keyboard shortcuts (in camera window):
 """
 
 import os
+import random
 import sys
 import json
 import time
 import argparse
 
-import cv2
+class _LazyCv2:
+    """v19.0.2 — lazy cv2 proxy.
+
+    A module-scope ``import cv2`` made ``airmouse --version`` (and every
+    --help / command dispatch) pay the full OpenCV import (~0.4 s).  Every
+    ``cv2.*`` use in this module sits inside the tracking loop, HUD or the
+    calibration window — i.e. strictly AFTER the user asked to run — so
+    the real module loads on first attribute access and replaces this
+    proxy in the module globals.
+    """
+
+    def __getattr__(self, name):
+        import cv2 as _cv2
+        globals()["cv2"] = _cv2
+        return getattr(_cv2, name)
+
+
+cv2 = _LazyCv2()
 import numpy as np
 import airmouse as _pkg
 
@@ -474,6 +492,127 @@ def _run_gaze_calibration(config, simulated: bool = False) -> bool:
         return False
 
 
+def _run_live_diagnostics(args) -> int:
+    """Live cursor-physics telemetry (v19.0.2).
+
+    REAL mode (--live): opens the real camera and runs the real
+    HandTracker → DirectTracker pipeline, printing measured values.
+    SIM mode (--live-sim): a deterministic synthetic hand feeds the SAME
+    real DirectTracker — every number is produced by the real physics
+    engine and every line is labeled SIMULATED. Never claims to control
+    the OS cursor in this mode.
+
+    Bounded by --live-seconds (max 300), rate-limited rendering (≈10 Hz),
+    never blocks on printing more than one line per tick. Ctrl+C exits.
+    """
+    import math as _math
+
+    duration = max(0.5, min(300.0, float(args.live_seconds or 10.0)))
+    simulate = bool(args.live_sim)
+    label = "SIMULATED" if simulate else "REAL"
+    print(f"  ══ AirMouse cursor-physics diagnostics ({label}) ══")
+    print(f"  duration bound: {duration:.0f}s  |  Ctrl+C to stop")
+    if simulate:
+        print("  Data source: deterministic synthetic hand. The filter/")
+        print("  physics stack below IS the real DirectTracker engine,")
+        print("  but the input is SIMULATED — this says nothing about")
+        print("  your camera or OS cursor. REAL accuracy is")
+        print("  PHYSICAL_TEST_REQUIRED.")
+
+    from .physics import DirectTracker
+
+    tr = DirectTracker(screen_w=1920, screen_h=1080)
+    cam = None
+    tracker = None
+    try:
+        if not simulate:
+            try:
+                from .tracker import HandTracker
+                tracker = HandTracker()
+            except Exception as e:
+                print(f"  !! Real camera path unavailable: {e}")
+                print("     FIX: check the camera, or run "
+                      "`airmouse diagnostics --live-sim` for the honest")
+                print("     simulated loop (real physics, labeled input).")
+                return 1
+        rng = random.Random(11)
+        t0 = time.monotonic()
+        last_draw = -1.0
+        frames = 0
+        dt_sim = 1.0 / 30.0
+        print("  " + "-" * 78)
+        print(f"  {'t(s)':>5} {'raw(x,y)':>13} {'filtered(px)':>15} "
+              f"{'vel(px/s)':>11} {'state':>12} {'kW':>4}")
+        print("  " + "-" * 78)
+        try:
+            while time.monotonic() - t0 < duration:
+                now = time.monotonic()
+                if simulate:
+                    # Deterministic synthetic hand on ONE consistent time
+                    # base: synthesis, dt and the filter timestamp all use
+                    # frames*dt (30 fps), and the loop paces to real time.
+                    t = frames * dt_sim
+                    raw = (0.5 + 0.3 * _math.sin(2 * _math.pi * t / 8.0)
+                           + rng.gauss(0.0, 0.0015),
+                           0.5 + 0.2 * _math.sin(2 * _math.pi * t / 13.0 + 1.0)
+                           + rng.gauss(0.0, 0.0015))
+                    raw = np.array(raw)
+                    out = tr.update(raw, dt_sim, timestamp=t)
+                    # pace to real 30 fps so the loop is watchable and the
+                    # wall-clock bound is meaningful
+                    target_t = t0 + (frames + 1) * dt_sim
+                    sleep_s = target_t - time.monotonic()
+                    if sleep_s > 0:
+                        time.sleep(sleep_s)
+                else:
+                    data = tracker.read()
+                    if not data.get("hand_found"):
+                        if now - last_draw >= 0.25:
+                            print(f"  {now - t0:5.1f}  (no hand — "
+                                  "tracking lost, cursor holds)")
+                            last_draw = now
+                        continue
+                    raw = data["index_pos"]
+                    dt = 1.0 / 30.0
+                    out = tr.update(raw, dt,
+                                    timestamp=data.get("timestamp_s"))
+                frames += 1
+                if now - last_draw >= 0.1:  # ≈10 Hz bounded rendering
+                    kw = (f"{tr.hybrid.last_kalman_weight:.2f}"
+                          if tr.hybrid is not None else " n/a")
+                    print(f"  {now - t0:5.1f} "
+                          f"({raw[0]:5.3f},{raw[1]:5.3f}) "
+                          f"({out[0]:6.0f},{out[1]:6.0f}) "
+                          f"{float(np.linalg.norm(tr.velocity)):7.0f} "
+                          f"{tr.tracking_state:>12} {kw:>4}")
+                    last_draw = now
+        except KeyboardInterrupt:
+            print("\n  stopped.")
+        print("  " + "-" * 78)
+        print(f"  frames processed: {frames}  |  final tracking state: "
+              f"{tr.tracking_state}")
+        if simulate:
+            print("  [SIMULATED] input was synthetic; physics real. "
+                  "OS cursor was NOT moved.")
+        else:
+            print("  [REAL] values above came from the live camera "
+                  "pipeline. OS cursor was NOT moved in this mode.")
+        print("  Physical camera/cursor accuracy: PHYSICAL_TEST_REQUIRED "
+              "in sandboxed runs.")
+        return 0
+    finally:
+        if tracker is not None:
+            try:
+                tracker.release()
+            except Exception:
+                pass
+        if cam is not None:
+            try:
+                cam.release()
+            except Exception:
+                pass
+
+
 def _confirm(prompt: str) -> bool:
     """Explicit-y consent gate; fail-closed on any doubt (non-TTY = no)."""
     try:
@@ -501,6 +640,7 @@ _COMMAND_CHOICES = [
     "voice-setup", "voice-benchmark",
     "wizard", "reset", "repair",
     "uninstall", "update",
+    "logs", "config",
 ]
 
 
@@ -674,7 +814,20 @@ def main():
                         help="voice-benchmark: optional real-speech WAV to "
                              "measure real transcription latency",)
     parser.add_argument("--json", action="store_true",
-                        help="doctor/capabilities/privacy: machine-readable output")
+                        help="machine-readable output (doctor/capabilities/"
+                             "privacy/logs/diagnostics)")
+    parser.add_argument("--live", action="store_true",
+                        help="diagnostics: run the LIVE cursor-physics "
+                             "telemetry loop (real camera + real engine; "
+                             "bounded by --live-seconds)")
+    parser.add_argument("--live-sim", action="store_true",
+                        help="diagnostics: live telemetry against a "
+                             "deterministic synthetic hand (every value "
+                             "labeled SIMULATED; the physics is the real "
+                             "engine)")
+    parser.add_argument("--live-seconds", type=float, default=10.0,
+                        help="diagnostics --live: duration bound in seconds "
+                             "(default 10, max 300)")
     parser.add_argument("--advanced", action="store_true",
                         help="doctor: technical diagnostics (same as --verbose)")
     parser.add_argument("--aip", action="store_true",
@@ -857,6 +1010,15 @@ def main():
         report = run_setup(interactive=interactive, out=sys.stdout)
         print()
         print(report.format())
+        # v19.0.2 — honest exit codes: FAILED steps are a real failure
+        # (rc 1); ACTION_REQUIRED steps need the user but are not a
+        # malfunction (rc 2); SKIPPED optional components are fine.
+        statuses = [s.status for s in report.steps]
+        if "FAILED" in statuses:
+            return 1
+        if "ACTION_REQUIRED" in statuses:
+            print("  (some steps need your attention — see the report above)")
+            return 2
         return 0
 
     if args.command == "test":
@@ -1151,9 +1313,10 @@ def main():
         return
     if args.command == "self-test":
         from .selftest import run_self_test, format_self_test
-        print(format_self_test(run_self_test(
-            intelligence=not args.no_intelligence)))
-        return
+        results = run_self_test(intelligence=not args.no_intelligence)
+        print(format_self_test(results))
+        # v19.0.2 — honest exit: FAIL rows must not report success.
+        return 0 if all(r.ok for r in results) else 1
 
     # ═══ v15 subcommands (print + exit; all local, all fast) ═══
     if args.command == "status":
@@ -1340,6 +1503,13 @@ def main():
             print(f"    [{'PASS' if c['passed'] else 'FAIL'}] {c['name']} {c['detail'][:60]}")
         print(f"  {report.summary()}")
         sys.exit(0 if report.ok else 1)
+    # ═══ v19.0.2 — live cursor-physics diagnostics ═══
+    # REAL mode: real camera + real engine, bounded duration.
+    # SIM mode: deterministic synthetic hand; every value labeled
+    # SIMULATED but the physics IS the real DirectTracker stack.
+    if args.command == "diagnostics" and (args.live or args.live_sim):
+        return _run_live_diagnostics(args)
+
     if args.command == "diagnostics":
         from .offline import run_offline_selftest
         from .offline_voice import detect_providers
@@ -1360,6 +1530,82 @@ def main():
         except Exception:
             pass
         sys.exit(0 if rep.ok else 1)
+
+    # ═══ v19.0.2 — `airmouse logs` (command-outcome log; cursor telemetry
+    # is deliberately NOT here: bounded, rotation-capped, injection-safe) ═══
+    if args.command == "logs":
+        from . import cli_log
+        n = 50
+        if args.command_arg is not None:
+            try:
+                n = int(args.command_arg)
+            except ValueError:
+                print("  !! usage: airmouse logs [N] [--json]  "
+                      "(N = number of recent entries)")
+                return 2
+        records = cli_log.read_recent(n)
+        if args.json:
+            print(cli_log.read_recent_json(n))
+            return 0
+        if not records:
+            print("  No command-log entries yet. Commands that run through")
+            print("  the CLI append outcomes here (bounded, UTC, rotation-")
+            print(f"  capped). Log file: {cli_log.path()}")
+            return 0
+        print(f"  Recent command outcomes (last {len(records)}, UTC) — "
+              f"{cli_log.path()}")
+        print("  " + "-" * 66)
+        for r in records:
+            print(f"  {r.get('t', '?'):<27} {r.get('level', 'info'):<5} "
+                  f"rc={r.get('rc', '?'):<3} {r.get('cmd', '?')}"
+                  + (f" — {r.get('msg')}" if r.get("msg") else ""))
+        return 0
+
+    # ═══ v19.0.2 — `airmouse config` (path / show / validate) ═══
+    if args.command == "config":
+        # NOTE: imported as _Config — a plain local `Config` binding here
+        # would shadow the module-level Config for the ENTIRE main()
+        # function (UnboundLocalError at `config = Config()`).
+        from .config import Config as _Config
+        sub = (args.command_arg or "show").strip().lower()
+        if sub not in ("path", "show", "validate"):
+            print("  !! usage: airmouse config [path|show|validate]")
+            return 2
+        cfg_path = _Config.config_path()
+        if sub == "path":
+            print(str(cfg_path))
+            return 0
+        if sub == "show":
+            try:
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except FileNotFoundError:
+                print(f"  No config file at {cfg_path} (defaults are in "
+                      "effect). Create one with: airmouse setup")
+                return 0
+            except OSError as e:
+                print(f"  !! Cannot read {cfg_path}: {e}")
+                return 1
+            print(f"  # {cfg_path}")
+            print(content)
+            return 0
+        # validate
+        errors, warnings = _Config.validate_file(str(cfg_path))
+        if args.json:
+            print(json.dumps({"path": str(cfg_path),
+                              "errors": errors,
+                              "warnings": warnings}, indent=2))
+            return 1 if errors else 0
+        for e in errors:
+            print(f"  ✗ {e}")
+        for w in warnings:
+            print(f"  ⚠ {w}")
+        if errors:
+            return 1
+        if not args.json:
+            tail = (f" ({len(warnings)} warning(s))" if warnings else "")
+            print(f"  ✓ {cfg_path} parses cleanly (UTF-8 TOML){tail}")
+        return 0
 
     # Handle --settings
     if args.settings:
@@ -2295,7 +2541,7 @@ def main():
                 except Exception:
                     _gaze_state = "on"
             print("  " + "─" * 54)
-            print(f"  AIRMouse READY    Hands: {'✓' if tracker else '○'}"
+            print(f"  AirMouse READY    Hands: {'✓' if tracker else '○'}"
                   f"  Voice: {_voice_state}"
                   f"  Mic: {_mic_state}"
                   f"  ASR: {_asr_state}"

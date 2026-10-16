@@ -7,12 +7,25 @@ Shows what to do, waits for you to do it, celebrates, then moves on.
 Press SPACE to skip a gesture, ESC to skip tutorial entirely.
 """
 
-import cv2
 import numpy as np
 import time
 
 from .gestures import recognize_gesture, Gesture, GESTURE_INFO
 from .tracker import HandTracker
+
+
+class _LazyCv2:
+    """v19.0.2 — lazy cv2 proxy: tutorial drawing code runs only when the
+    user launches the tutorial; module import must stay cheap for the CLI."""
+
+    def __getattr__(self, name):
+        import cv2 as _cv2
+        globals()["cv2"] = _cv2
+        return getattr(_cv2, name)
+
+
+cv2 = _LazyCv2()
+
 
 
 # Gestures to teach (in order of importance)
