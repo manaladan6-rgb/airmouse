@@ -1,5 +1,49 @@
 # Changelog
 
+## v19.0.2 — Real Physics, E-STOP Contract, Honest Diagnostics (2026-10-16)
+
+Safety, physics and honesty release. Full user-facing notes in the root
+CHANGELOG.md; engineering summary:
+
+* **E-STOP contract enforced end-to-end** — `gate_continuous` now gates all
+  three cursor-move paths; `trip_estop` releases held mouse buttons from
+  every trip source via `estop_release_fn`; the v9 safety-system EMERGENCY
+  level syncs to the spine each frame; voice dispatch refuses while
+  estopped; SHAKE/hand-loss release un-gated (release is always
+  risk-reducing); stale pinch/peace/trackpad state cleared on hand loss;
+  macro replay finish hook; scroll clamped ±100; partial key combos roll back.
+* **Real timestamps** — tracker → DirectTracker → OneEuro⊕Kalman now use
+  real monotonic frame times (synthetic +33 ms removed); measured
+  frame-to-frame dt for physics/fps; >0.25 s gap → filter reset + one-frame
+  HOLD (no teleport/sweep); landmark validation boundary (non-finite input
+  holds, never crashes); honest per-axis px/s velocity; auto-precision
+  dead-zone direction fixed; precision/tune retune in place (no snap).
+* **Gaze end-to-end** — saved calibration loads by default (was never
+  loaded: gaze was confined to the central band); quality gate ("fair"+ +
+  screen-size match) before gaze clicks; gaze_config plumbed (dwell time /
+  min confidence were dead keys); dwell pauses during blinks; long-blink
+  E-STOP = 1.2 s (documented contract); fullscreen calibration window with
+  real screen size.
+* **v9 tick hoisted out of the debug window** — hiding the preview no
+  longer silently disables gaze/voice/fusion.
+* **New CLI** — `airmouse logs [N|--json]` (1 MiB rotate, UTC,
+  injection-safe), `airmouse config [path|show|validate]`,
+  `airmouse diagnostics --live-sim|--live` (bounded, rate-limited, honest
+  SIMULATED/REAL labels).
+* **Hardened hand-model download** — consent on TTY, pinned versioned URL
+  + SHA-256, atomic .part install, 30 s timeout,
+  `AIRMOUSE_NO_MODEL_DOWNLOAD` kill-switch, corrupt-cache re-download;
+  `paths.model_file()` adoption (AIRMOUSE_HOME split-brain fixed).
+* **Honest exits** — setup 1 on FAILED / 2 on ACTION_REQUIRED; self-test 1
+  on FAIL rows. Lazy cv2 (~0.4 s faster CLI). OBSENSOR noise dial.
+  PyInstaller install consent-gated. AIRMouse→AirMouse branding sweep.
+* **Browser bridge** — Host/Origin validation refuses DNS-rebinding and
+  non-local clients (403); extension unchanged.
+* Tests: 2180 passed / 7 skipped / 0 failed (baseline 2112/7/0).
+  +75 tests incl. E-STOP contract, CLI matrix, deterministic physics
+  benchmarks, cli_log, bridge hardening.
+
+## v19.0.1 — Public Release Audit hotfixes (2026-10-12)
 ## v19.0.1 — Public Release Audit hotfixes (2026-10-12)
 
 Fixes found by the first full cross-platform CI matrix (ubuntu py3.9-3.12

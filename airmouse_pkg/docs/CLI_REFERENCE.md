@@ -422,3 +422,44 @@ airmouse repair                                   # safe local fixes — install
 airmouse reset --models                           # remove re-downloadable models (asks first, v19)
 airmouse update --check                           # explicit-only PyPI check, never installs (v19)
 ```
+
+
+## `logs` (v19.0.2)
+
+```
+airmouse logs [N] [--json]
+```
+
+Shows the last N (default 50) command-outcome log entries — what you ran,
+when (UTC), the exit code and a short message. The log is bounded (1 MiB,
+one rotation generation), ANSI-stripped and injection-safe. High-frequency
+cursor telemetry is deliberately NOT in this log — use
+`airmouse diagnostics --live-sim` for that. Exit codes: 0 ok, 2 bad usage.
+
+## `config` (v19.0.2)
+
+```
+airmouse config path|show|validate [--json]
+```
+
+- `path` — prints the active `config.toml` path (honours `AIRMOUSE_HOME`).
+- `show` — prints the file (or explains that defaults are in effect).
+- `validate` — unknown top-level sections are ERRORS (exit 1); unknown
+  keys inside known sections are WARNINGS (exit 0) because a newer
+  AirMouse may add keys the loader silently ignores.
+
+## `diagnostics --live-sim` / `--live` (v19.0.2)
+
+```
+airmouse diagnostics --live-sim [--live-seconds 10]
+airmouse diagnostics --live [--live-seconds 10]
+```
+
+Live cursor-physics telemetry: raw measured position, filtered cursor
+position (px), velocity (px/s), tracking state
+(`acquiring/tracking/gap_hold/reacquiring/invalid_input`) and the adaptive
+Kalman weight. Rendering is bounded (~10 Hz) and the run is duration-capped
+(max 300 s). `--live-sim` feeds the REAL DirectTracker engine a
+deterministic synthetic hand and labels every value SIMULATED — it makes
+no claim about your camera or OS cursor. `--live` uses a real camera and
+fails with a clear fix when none is available.

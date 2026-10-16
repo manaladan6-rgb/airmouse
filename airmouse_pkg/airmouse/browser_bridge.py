@@ -75,6 +75,39 @@ class _BridgeHandler(http.server.BaseHTTPRequestHandler):
     def _owner(self) -> "BrowserBridgeServer":
         return self.server.owner  # type: ignore[attr-defined]
 
+    # -- v19.0.2 hardening: Host/Origin validation ---------------------------
+    # The bridge binds 127.0.0.1 and stores data only (no command path out),
+    # but any LOCAL process — or a DNS-rebinding web page, which can point
+    # an arbitrary hostname at 127.0.0.1 — could otherwise read browsing
+    # metadata or plant fake page state.  Real browsers always send an
+    # accurate Host header, and rebinding hostnames never resolve to a
+    # localhost literal, so requiring the loopback Host blocks rebinding
+    # without affecting the bundled extension.
+
+    def _host_ok(self) -> bool:
+        host = (self.headers.get("Host") or "").strip().lower()
+        if not host:
+            return False  # HTTP/1.1 requires Host; absence is suspicious
+        hostname = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+        if hostname.startswith("[") and hostname.endswith("]"):
+            hostname = hostname[1:-1]
+        return hostname in ("127.0.0.1", "localhost", "::1")
+
+    def _origin_ok(self) -> bool:
+        """POSTs from web pages carry Origin; local tools may omit it.
+
+        An Origin that is NOT a local extension/web page origin is refused:
+        a DNS-rebinding attacker's page would send the attacker's origin.
+        """
+        origin = (self.headers.get("Origin") or "").strip()
+        if not origin:
+            return True  # non-browser client (curl, extension background)
+        o = origin.lower()
+        return (o.startswith("chrome-extension://")
+                or o.startswith("moz-extension://")
+                or o.startswith("safari-web-extension://")
+                or "127.0.0.1" in o or "localhost" in o)
+
     def log_message(self, fmt: str, *args: Any) -> None:  # silence stderr
         return
 
@@ -82,6 +115,9 @@ class _BridgeHandler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         try:
+            if not self._host_ok() or not self._origin_ok():
+                self._send_json({"ok": False, "error": "forbidden host"}, 403)
+                return
             path = urllib.parse.urlsplit(self.path).path
             if path == "/health":
                 self._send_json({"ok": True})
@@ -100,6 +136,9 @@ class _BridgeHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         try:
+            if not self._host_ok() or not self._origin_ok():
+                self._send_json({"ok": False, "error": "forbidden host"}, 403)
+                return
             path = urllib.parse.urlsplit(self.path).path
             if path != "/state":
                 self._send_json({"ok": False, "error": "not found"}, 404)

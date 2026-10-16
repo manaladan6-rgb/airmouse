@@ -51,7 +51,7 @@ Nothing leaves your machine: no cloud AI, no telemetry, no hidden network calls.
 network access AirMouse ever performs is a model download **you explicitly request** with a
 verified checksum, and an update check **you explicitly request**.
 
-## Verified in this release (v19.0.1)
+## Verified in this release (v19.0.2)
 
 Status vocabulary: **REAL** = implemented and verified by automated tests ·
 **SIMULATED** = verified in a labelled simulation only · **OPTIONAL** = available when you
@@ -69,6 +69,13 @@ device to confirm · **NOT AVAILABLE** = not in this release.
 | Agent layer (AIP 1.0 stdio protocol, Python + JavaScript SDKs, multi-agent permissions) | REAL | agents go through the same permission spine as humans — no bypass |
 | Deterministic simulation + failure-injection test harness | REAL | runs on machines with no camera/mic at all |
 | Offline speech on a machine you can install Vosk on | OPTIONAL | `airmouse voice-setup` picks the smallest compatible engine for your Python/OS |
+
+| E-STOP contract (movement gate + button release from every trip source) | REAL | locked by `tests/test_estop_contract.py`; ESC / [x] / voice / long-blink / safety system all funnel through one spine |
+| Real-timestamp physics (gap → hold + re-acquire, no teleport/sweep) | REAL | deterministic benchmarks in `tests/test_physics_benchmark.py`; on-camera behavior PHYSICAL TEST REQUIRED |
+| Gaze calibration loads + quality-gates at runtime | REAL | a fit below "fair" quality or a screen-size mismatch cannot drive gaze clicks |
+| `airmouse logs` / `airmouse config validate` / `diagnostics --live-sim` | REAL | bounded, injection-safe, honest SIMULATED labels |
+| Hand-model download (consent, pinned SHA-256, atomic install, kill-switch) | REAL | `AIRMOUSE_NO_MODEL_DOWNLOAD=1` refuses all downloads |
+| Real-camera accuracy, dwell ergonomics, OS-cursor feel | PHYSICAL TEST REQUIRED | run `WINDOWS_REAL_WORLD_TEST.md`; sandboxed CI has no camera |
 
 The full 136-row evidence matrix lives at
 [airmouse_pkg/docs/CAPABILITY_MATRIX.md](airmouse_pkg/docs/CAPABILITY_MATRIX.md).
@@ -138,7 +145,8 @@ airmouse --skip   # start tracking immediately, skip the menu
 
 - **Move** the cursor: hold your hand up, point with your index finger.
 - **Left-click**: pinch (thumb + index together). **Right-click**: peace sign. **Scroll**: three fingers, move hand up/down. **Drag**: open palm. **Freeze**: fist.
-- **Stop instantly**: `Esc` in the AirMouse window, or `Ctrl+C` in the terminal. Voice: "stop" (when voice is set up). There is also an emergency-stop state that overrides everything.
+- **Stop instantly**: `Esc` in the AirMouse window, or `Ctrl+C` in the terminal. Voice: "stop" (when voice is set up). E-STOP outranks everything — movement, clicks, voice and prediction — and always releases a held mouse button. Press `[x]` in the window to reset the stop state.
+- **Watch the physics live**: `airmouse diagnostics --live-sim` shows the real filter engine fed a labelled synthetic hand (raw vs filtered position, velocity in px/s, tracking state, fusion weight). With a camera: `airmouse diagnostics --live`.
 
 ## Test your hardware
 
@@ -146,9 +154,16 @@ airmouse --skip   # start tracking immediately, skip the menu
 airmouse doctor        # human-readable health report (~2s): what works, what's missing, exact fixes
 airmouse doctor --advanced   # full technical detail
 airmouse doctor --json       # machine-readable
-airmouse self-test     # 15 deterministic self-checks
+airmouse self-test     # deterministic self-checks (exit code 1 on any FAIL row)
 airmouse verify        # automated checks + the list of physical tests still open
 airmouse wizard        # 60-second guided interaction lesson
+airmouse logs 50       # recent command outcomes (bounded, UTC, rotation-capped)
+airmouse logs 20 --json
+airmouse config path   # where your config.toml lives (AIRMOUSE_HOME-aware)
+airmouse config show   # print it
+airmouse config validate   # unknown sections = errors, unknown keys = warnings
+airmouse diagnostics --live-sim  # live physics telemetry (labelled synthetic input)
+airmouse diagnostics --live      # live telemetry from a real camera
 ```
 
 ## Offline voice setup
@@ -221,7 +236,11 @@ MIT — see [LICENSE](LICENSE).
 - macOS: experimental.
 - The browser bridge needs Chrome/Edge with a debug port; without it, a clearly-labelled
   simulated browser keeps browser commands working offline.
-- Gaze is experimental and needs per-user calibration.
+- Gaze is experimental and needs per-user calibration. Webcam gaze estimation is
+  an assistive pointing aid, not precise eye tracking; on-camera accuracy is
+  PHYSICAL TEST REQUIRED.
+- Air-gapped machines: set `AIRMOUSE_NO_MODEL_DOWNLOAD=1` and place
+  `hand_landmarker.task` in `~/.airmouse/` manually (SHA-256 is verified).
 
 ## Roadmap
 
