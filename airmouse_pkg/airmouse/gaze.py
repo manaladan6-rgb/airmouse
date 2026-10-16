@@ -59,6 +59,7 @@ Copyright (c) AirMouse.  MIT License.
 from __future__ import annotations
 
 import math
+import os
 from collections import deque
 from dataclasses import dataclass, replace
 from typing import Any, Iterable, Iterator, List, Optional, Tuple
@@ -488,7 +489,11 @@ class BlinkClassifier:
     Timing model (all tunable via config, ``blink_`` namespace):
         min_closed_s   (0.04) closure must last at least this to count
         blink_max_s    (0.40) upper bound of a "normal" blink
-        long_blink_s   (0.60) closures longer than this are intentional
+        long_blink_s   (1.20) closures longer than this are intentional
+                              (v19.0.2: was 0.60 — only 0.2 s above the
+                              normal-blink bound, so ordinary slow blinks
+                              could trip the E-STOP; documentation always
+                              said 1.2 s, now the code matches)
         double_window_s(0.50) a normal blink within this window of the
                               previous one becomes DOUBLE_BLINK
         wink_min_s     (0.35) one-eye closure ≥ this with the other eye open
@@ -511,7 +516,7 @@ class BlinkClassifier:
         cfg = config or {}
         self.min_closed_s = float(cfg.get("blink_min_closed_s", 0.04))
         self.blink_max_s = float(cfg.get("blink_max_s", 0.40))
-        self.long_blink_s = float(cfg.get("blink_long_s", 0.60))
+        self.long_blink_s = float(cfg.get("blink_long_s", 1.20))
         self.double_window_s = float(cfg.get("blink_double_window_s", 0.50))
         self.wink_min_s = float(cfg.get("blink_wink_min_s", 0.35))
         self.min_confidence = float(cfg.get("blink_min_confidence", 0.50))
@@ -692,8 +697,15 @@ class DwellDetector:
         return self._dwell_fired
 
     def update(self, x: float, y: float, confidence: float,
-               timestamp: Optional[float] = None) -> List[GazeEventKind]:
-        """Feed one filtered gaze point; returns events produced this tick."""
+               timestamp: Optional[float] = None,
+               eyes_open: Optional[bool] = None) -> List[GazeEventKind]:
+        """Feed one filtered gaze point; returns events produced this tick.
+
+        v19.0.2 — ``eyes_open``: explicit eye-openness from the estimator.
+        While False (a blink), dwell progress is PAUSED (the dwell timer
+        does not accumulate) so a blink can never complete a dwell click
+        on degraded closed-eye iris estimates.
+        """
         if timestamp is not None:
             t = float(timestamp)
         else:
@@ -742,6 +754,10 @@ class DwellDetector:
                 events.append(GazeEventKind.FIXATION_END)
 
         if self._fixation:
+            # v19.0.2 — blink pause: while the eyes are closed the dwell
+            # timer does NOT accumulate (shift the start forward by dt).
+            if eyes_open is False and self._dwell_start is not None:
+                self._dwell_start += dt
             if self._anchor is None:
                 self._anchor = (fx, fy)
                 self._dwell_start = t
@@ -811,9 +827,24 @@ class GazeEngine:
             GazeFilterPipeline(cfg) if bool(cfg.get("gaze_filter_enabled", True)) else None
         )
         cal_path = cfg.get("gaze_calibration_path")
+        # v19.0.2 (audit CRITICAL #1) — a saved calibration was NEVER
+        # loaded at runtime unless the caller passed an explicit path
+        # (nothing did): every live session silently ran the uncalibrated
+        # fallback, mathematically confining gaze targets to the central
+        # ~20-35% of the screen. Default to the standard on-disk location.
+        if not cal_path:
+            try:
+                from . import paths
+                _default_cal = paths.gaze_calibration_file()
+                if os.path.exists(_default_cal):
+                    cal_path = _default_cal
+            except Exception:
+                cal_path = None
         self._calibration = GazeCalibration(config=cfg, path=cal_path)
+        self._calibration_usable = False
         if cal_path:
             self._calibration.load()
+            self._calibration_usable = self._evaluate_calibration()
         self.min_action_confidence = float(cfg.get("gaze_min_action_confidence", 0.55))
         self._face_present = False
         self._frame_idx = 0
@@ -832,6 +863,32 @@ class GazeEngine:
         """Attach a (possibly externally fitted) calibration."""
         if calibration is not None:
             self._calibration = calibration
+            self._calibration_usable = self._evaluate_calibration()
+
+    def _evaluate_calibration(self) -> bool:
+        """v19.0.2 quality gate (audit MEDIUM #7) — a fitted calibration
+        may drive gaze-sourced clicks ONLY when the fit is at least
+        "fair" AND the saved screen size matches the configured runtime
+        screen. A poor or stale-resolution fit is loaded for inspection
+        but never trusted for actions. Never raises."""
+        try:
+            cal = self._calibration
+            if not cal.is_calibrated:
+                return False
+            if not cal.is_reliable("fair"):
+                print("  !! Gaze calibration quality below 'fair' — gaze "
+                      "clicks disabled (run: airmouse teach gaze)")
+                return False
+            saved = cal.saved_screen_size
+            if saved is not None and tuple(saved) != (cal.screen_w, cal.screen_h):
+                print(f"  !! Gaze calibration was fitted for "
+                      f"{saved[0]}x{saved[1]}, runtime screen is "
+                      f"{cal.screen_w}x{cal.screen_h} — recalibrate "
+                      "(airmouse teach gaze)")
+                return False
+            return True
+        except Exception:
+            return False
 
     # -- helpers -------------------------------------------------------------
 
@@ -888,15 +945,24 @@ class GazeEngine:
 
         events.extend(self.blink.update(raw.eye_open_l, raw.eye_open_r,
                                         raw.confidence, ts))
+        # v19.0.2 (audit MEDIUM #6) — dwell progress PAUSES while the eyes
+        # are closed: a blink must never be able to complete a dwell click
+        # on degraded closed-eye iris estimates.
         events.extend(self.dwell.update(filtered.x, filtered.y,
-                                        raw.confidence, ts))
+                                        raw.confidence, ts,
+                                        eyes_open=(raw.eye_open_l
+                                                   and raw.eye_open_r)))
 
         if raw.confidence < self.min_action_confidence:
             events = [e for e in events if e not in _SUPPRESSED_LOW_CONF]
 
         sx = sy = 0.0
         screen_valid = False
-        mapped = self._calibration.map(filtered.x, filtered.y)
+        # v19.0.2 — the quality gate decides whether the calibration may
+        # drive screen mapping (a poor/stale fit keeps screen_valid False,
+        # exactly like no calibration at all).
+        mapped = (self._calibration.map(filtered.x, filtered.y)
+                  if self._calibration_usable else None)
         if mapped is not None:
             sx, sy = mapped
             screen_valid = True

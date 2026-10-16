@@ -139,6 +139,30 @@ class OneEuroFilter2D:
         self._t0 = -1.0
         self._frame_count = 0
 
+    def set_params(self, mincutoff: float = None, beta: float = None,
+                   dcutoff: float = None) -> None:
+        """v19.0.2 — retune cutoffs IN PLACE, preserving filter state.
+
+        Rebuilding the filter (the previous approach) silently discarded
+        the low-pass state and caused a one-frame cursor snap whenever
+        precision mode or adaptive calibration retuned the filters.
+        """
+        for f in (self._fx, self._fy):
+            if mincutoff is not None:
+                f.mincutoff = float(mincutoff)
+            if beta is not None:
+                f.beta = float(beta)
+            if dcutoff is not None:
+                f.dcutoff = float(dcutoff)
+
+    @property
+    def mincutoff(self) -> float:
+        return self._fx.mincutoff
+
+    @property
+    def beta(self) -> float:
+        return self._fx.beta
+
     def filter(self, x: float, y: float, timestamp: float = None) -> tuple:
         """Filter 2D sample. If timestamp is None, uses internal frame counter."""
         if timestamp is None:
@@ -291,6 +315,14 @@ class KalmanFilter1D:
         self._initialized = False
         self._frame_count = 0
 
+    def set_noise(self, process_noise: float = None,
+                  measurement_noise: float = None) -> None:
+        """v19.0.2 — retune q/r IN PLACE, preserving filter state."""
+        if process_noise is not None:
+            self._q = float(process_noise)
+        if measurement_noise is not None:
+            self._r = float(measurement_noise)
+
     @property
     def position(self) -> float:
         """Current posterior position estimate (read-only)."""
@@ -333,6 +365,12 @@ class KalmanFilter2D:
         """Reset both axes."""
         self._kx.reset()
         self._ky.reset()
+
+    def set_noise(self, process_noise: float = None,
+                  measurement_noise: float = None) -> None:
+        """v19.0.2 — retune q/r IN PLACE, preserving filter state."""
+        self._kx.set_noise(process_noise, measurement_noise)
+        self._ky.set_noise(process_noise, measurement_noise)
 
     @property
     def position(self) -> np.ndarray:
@@ -462,6 +500,34 @@ class HybridOneEuroKalman:
         """Filter a 2-vector; returns np.array([x, y])."""
         fx, fy = self.filter(float(xy[0]), float(xy[1]), timestamp)
         return np.array([fx, fy])
+
+    def set_params(self, mincutoff: float = None, beta: float = None,
+                   dcutoff: float = None,
+                   kalman_process_noise: float = None,
+                   kalman_measurement_noise: float = None,
+                   fusion: str = None, speed_ref: float = None,
+                   max_kalman_weight: float = None) -> None:
+        """v19.0.2 — retune the hybrid IN PLACE, preserving filter state.
+
+        set_precision_mode() previously REBUILT the whole hybrid filter on
+        every toggle, discarding One Euro + Kalman state and producing a
+        visible mid-session cursor snap. In-place retuning keeps the
+        estimate continuous.
+        """
+        self.one_euro.set_params(mincutoff=mincutoff, beta=beta,
+                                 dcutoff=dcutoff)
+        self.kalman.set_noise(kalman_process_noise, kalman_measurement_noise)
+        if fusion is not None:
+            if fusion not in self._FUSION_MODES:
+                raise ValueError(
+                    f"fusion must be one of {self._FUSION_MODES}, "
+                    f"got {fusion!r}")
+            self.fusion = fusion
+        if speed_ref is not None:
+            self.speed_ref = float(speed_ref)
+        if max_kalman_weight is not None:
+            self.max_kalman_weight = min(max(float(max_kalman_weight), 0.0),
+                                         1.0)
 
     def reset(self):
         """Reset both inner filters and the speed EMA."""

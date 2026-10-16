@@ -99,7 +99,13 @@ class GestureActionRouter:
                  min_confidence: Optional[Dict[str, float]] = None,
                  allow_destructive: bool = False,
                  min_action_interval_s: float = 0.12,
-                 scroll_backstop_interval_s: float = 0.05) -> None:
+                 scroll_backstop_interval_s: float = 0.05,
+                 estop_release_fn: Optional[Callable[[], None]] = None) -> None:
+        # v19.0.2 — E-STOP must also release any held mouse button.
+        # estop_release_fn is invoked (best-effort, exceptions swallowed)
+        # on EVERY trip_estop() call, from every trip site, so an E-STOP
+        # can never leave the pointer's primary button latched.
+        self.estop_release_fn = estop_release_fn
         self.mouse = mouse
         self.kb_getter = kb_getter
         self.zoom_fn = zoom_fn
@@ -122,6 +128,14 @@ class GestureActionRouter:
     def trip_estop(self, reason: str = "emergency stop") -> None:
         with self._lock:
             self._estop_reason = str(reason or "emergency stop")
+        # Release held buttons OUTSIDE the lock: the release callback may
+        # call back into mouse control. Releasing a pressed button is
+        # always a risk-REDUCING action — it must never be gated.
+        try:
+            if self.estop_release_fn is not None:
+                self.estop_release_fn()
+        except Exception:
+            pass
 
     def reset_estop(self) -> bool:
         with self._lock:

@@ -43,7 +43,10 @@ Handedness convention (important, read before using labels):
   without touching the tracker.
 """
 
+import hashlib
 import os
+import sys
+import time
 import urllib.request
 import cv2
 import numpy as np
@@ -55,7 +58,28 @@ import numpy as np
 # tests can still use ``airmouse.tracker.mp`` exactly as before: the
 # first access imports mediapipe and caches it as a real module global.
 
-MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
+# v19.0.2 — PINNED, versioned model URL + pinned SHA-256.  The old URL
+# used the mutable "latest" alias with no integrity check, no consent,
+# and no atomic install (audit CRITICAL #1).  The versioned artifact is
+# byte-identical to what "latest" served at the time of pinning.
+MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/"
+             "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task")
+MODEL_SHA256 = "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
+MODEL_SIZE_BYTES = 7819105
+# Env kill-switch: set AIRMOUSE_NO_MODEL_DOWNLOAD=1 to refuse all model
+# downloads (air-gapped / privacy-critical machines must provide the
+# model file manually at MODEL_PATH).
+NO_MODEL_DOWNLOAD_ENV = "AIRMOUSE_NO_MODEL_DOWNLOAD"
+# Path split-brain fix (audit HIGH #2): always resolve through paths.py so
+# AIRMOUSE_HOME is honored; keep the legacy ~/.airmouse path as fallback.
+def _resolve_model_path() -> str:
+    try:
+        from . import paths
+        return str(paths.model_file())
+    except Exception:
+        return os.path.join(os.path.expanduser("~"), ".airmouse",
+                            "hand_landmarker.task")
+
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".airmouse")
 MODEL_PATH = os.path.join(CACHE_DIR, "hand_landmarker.task")
 
@@ -85,20 +109,120 @@ class _LM:
         self.z = z
 
 
-def _ensure_model():
-    if os.path.exists(MODEL_PATH):
-        return MODEL_PATH
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    print(f"  Downloading hand tracking model (first run only)...")
-    try:
-        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
-        print(f"  Model saved to {MODEL_PATH}")
-    except Exception as e:
+def _sha256_of(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _ensure_model(model_path: str = None, consent_fn=None) -> str:
+    """Locate / download / verify the hand-landmarker model (v19.0.2 hard).
+
+    Hardening contract (audit CRITICAL #1):
+      1. An existing file is verified against the pinned SHA-256;
+         a corrupt cache is re-downloaded (or refused offline).
+      2. Downloads are CONSENTED: when stdin is a TTY the user is asked
+         first; ``consent_fn`` overrides for embedded/wizard callers.
+         A non-interactive run without a cached model fails with clear
+         manual instructions instead of silently fetching.
+      3. AIRMOUSE_NO_MODEL_DOWNLOAD=1 is an absolute kill-switch.
+      4. Download goes to ``<path>.part`` first, is hash-verified, then
+         atomically renamed — a killed download can never leave a broken
+         model in place.
+      5. The request has a timeout so a hanging network fails loudly.
+
+    Returns the verified model path; raises RuntimeError with actionable
+    text on any refusal/failure.
+    """
+    path = model_path or _resolve_model_path()
+    model_dir = os.path.dirname(path) or "."
+    os.makedirs(model_dir, exist_ok=True)
+
+    if os.path.exists(path):
+        try:
+            if _sha256_of(path) == MODEL_SHA256:
+                return path
+            print("  !! Cached hand model failed the SHA-256 integrity "
+                  "check — re-downloading.")
+        except OSError as e:
+            print(f"  !! Cached hand model unreadable ({e}) — "
+                  "re-downloading.")
+
+    if os.environ.get(NO_MODEL_DOWNLOAD_ENV, "").strip() not in ("", "0"):
         raise RuntimeError(
-            f"Failed to download model: {e}\n"
-            f"Download manually:\n  {MODEL_URL}\nSave to:\n  {MODEL_PATH}"
-        )
-    return MODEL_PATH
+            "Hand tracking model is missing and downloads are disabled by\n"
+            f"      {NO_MODEL_DOWNLOAD_ENV}=1.\n"
+            "      WHAT: AirMouse cannot start hand tracking without the\n"
+            "            MediaPipe hand-landmarker model (~7.5 MB).\n"
+            "      FIX : download it manually (once) from\n"
+            f"            {MODEL_URL}\n"
+            f"            and save it to: {path}\n"
+            f"            Expected SHA-256: {MODEL_SHA256}")
+
+    # ── consent (v19.0.2) ────────────────────────────────────────────
+    if consent_fn is not None:
+        granted = bool(consent_fn())
+    elif sys.stdin is not None and sys.stdin.isatty():
+        print("  AirMouse needs the MediaPipe hand-landmarker model "
+              "(~7.5 MB, one time).")
+        print(f"      Source : {MODEL_URL}")
+        print(f"      Saved to: {path}")
+        print("      It is integrity-checked against a pinned SHA-256 and "
+              "runs 100% locally.")
+        try:
+            granted = input("      Download now? [Y/n] ").strip().lower() \
+                not in ("n", "no")
+        except (EOFError, KeyboardInterrupt):
+            granted = False
+    else:
+        granted = False  # non-interactive: never fetch without consent
+
+    if not granted:
+        raise RuntimeError(
+            "Hand tracking model is not installed.\n"
+            "      WHAT: hand tracking requires the MediaPipe model "
+            "(~7.5 MB).\n"
+            "      FIX : run `airmouse setup` (guided download), or set\n"
+            f"            {NO_MODEL_DOWNLOAD_ENV}=1 and place the file "
+            "manually:\n"
+            f"            {MODEL_URL}\n"
+            f"            -> {path}")
+
+    # ── atomic, verified download ────────────────────────────────────
+    part_path = path + ".part"
+    try:
+        print("  Downloading hand tracking model (~7.5 MB, one time)...")
+        t0 = time.monotonic()
+        with urllib.request.urlopen(MODEL_URL, timeout=30) as resp, \
+                open(part_path, "wb") as out:
+            while True:
+                chunk = resp.read(1 << 20)
+                if not chunk:
+                    break
+                out.write(chunk)
+        got = _sha256_of(part_path)
+        if got != MODEL_SHA256:
+            raise RuntimeError(
+                f"integrity check FAILED (sha256 {got[:16]}… != expected "
+                f"{MODEL_SHA256[:16]}…) — refusing to install")
+        os.replace(part_path, path)  # atomic install
+        dt = time.monotonic() - t0
+        print(f"  Model verified + installed ({MODEL_SIZE_BYTES} bytes, "
+              f"{dt:.1f}s): {path}")
+    except Exception as e:
+        try:
+            if os.path.exists(part_path):
+                os.remove(part_path)  # never leave .part junk behind
+        except OSError:
+            pass
+        raise RuntimeError(
+            f"Model download failed: {e}\n"
+            f"      Download manually from:\n          {MODEL_URL}\n"
+            f"      Save to: {path}\n"
+            f"      Expected SHA-256: {MODEL_SHA256}")
+    return path
 
 
 class HandTracker:
@@ -127,6 +251,7 @@ class HandTracker:
         self.max_hands = int(max_hands)
 
         model_path = _ensure_model()
+        self.model_path = model_path
 
         BaseOptions = mp.tasks.BaseOptions
         HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
@@ -149,7 +274,13 @@ class HandTracker:
         self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self.last_frame = None
+        # v19.0.2 — REAL monotonic frame timestamps (audit HIGH #2).
+        # The old code incremented a synthetic +33 ms counter, which made
+        # every MediaPipe call believe a perfect 30 fps world and made
+        # dropped frames invisible to the timing chain.
+        self._t0_monotonic = None
         self.frame_timestamp_ms = 0
+        self.frame_timestamp_s = 0.0
 
     def _hand_entry(self, landmarks, categories):
         """Build one ``"hands"`` entry from a single MediaPipe detection.
@@ -188,6 +319,24 @@ class HandTracker:
             "is_left_user": is_left_user,
         }
 
+    # v19.0.2 — input validation boundary (audit MEDIUM #5).  A landmark
+    # coordinate that is non-finite or wildly out of the normalized range
+    # is a broken sensor read, not a hand position: it is REJECTED (the
+    # frame is reported as no-hand) so NaN can never reach the filters,
+    # the calibration learner, or the OS cursor.
+    _LM_LO = -0.5
+    _LM_HI = 1.5
+
+    @classmethod
+    def _valid_xy(cls, xy) -> bool:
+        try:
+            arr = np.asarray(xy, dtype=float)
+        except (TypeError, ValueError):
+            return False
+        if arr.shape != (2,) or not np.all(np.isfinite(arr)):
+            return False
+        return bool(np.all(arr >= cls._LM_LO) and np.all(arr <= cls._LM_HI))
+
     def read(self):
         ret, frame = self.cap.read()
         if not ret:
@@ -198,8 +347,14 @@ class HandTracker:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
-        self.frame_timestamp_ms += 33
-        result = self.detector.detect_for_video(mp_image, self.frame_timestamp_ms)
+        # v19.0.2 — real monotonic timestamp for MediaPipe VIDEO mode.
+        now_mono = time.monotonic()
+        if getattr(self, "_t0_monotonic", None) is None:
+            self._t0_monotonic = now_mono
+        self.frame_timestamp_s = now_mono - self._t0_monotonic
+        self.frame_timestamp_ms = int(self.frame_timestamp_s * 1000.0)
+        result = self.detector.detect_for_video(mp_image,
+                                                self.frame_timestamp_ms)
 
         if not result.hand_landmarks:
             return self._empty_result(frame=frame)
@@ -213,6 +368,11 @@ class HandTracker:
             cats = handedness_lists[i] if i < len(handedness_lists) else None
             hands.append(self._hand_entry(lm, cats))
 
+        # v19.0.2 — reject frames whose primary landmark set is not sane.
+        hands = [h for h in hands if self._valid_xy(h["index_pos"])]
+        if not hands:
+            return self._empty_result(frame=frame)
+
         # Primary hand = first MediaPipe detection — IDENTICAL to the
         # v15.1 single-hand behavior ([0], no handedness re-ordering).
         primary = hands[0]
@@ -224,6 +384,7 @@ class HandTracker:
             "pinch_distance": primary["pinch_distance"],
             "frame": frame,
             "hands": hands,
+            "timestamp_s": self.frame_timestamp_s,
         }
 
     def _empty_result(self, frame=None):

@@ -353,6 +353,18 @@ class GazeCalibration:
         return self._matrix is not None
 
     @property
+    def saved_screen_size(self) -> Optional[Tuple[int, int]]:
+        """v19.0.2 — the screen (w, h) the loaded calibration was fitted
+        for (None when nothing is loaded/fitted). Runtime code must refuse
+        to act on a calibration fitted for a different screen."""
+        if self._matrix is None:
+            return None
+        try:
+            return (int(self._sw), int(self._sh))
+        except Exception:
+            return None
+
+    @property
     def samples_collected(self) -> int:
         """Total raw samples stored via :meth:`add_sample` since begin()."""
         return len(self._records)

@@ -436,6 +436,11 @@ class SwipeDetector:
         self.x_velocities = deque(maxlen=min_frames)
         self.y_velocities = deque(maxlen=min_frames)
         self.last_swipe_time = 0.0
+        # v19.0.2 — measured confidence for the last fired swipe:
+        # magnitude overshoot over the detection threshold (0.5 exactly
+        # at threshold, 1.0 at ≥2×). Replaces the hardcoded
+        # confidence=1.0 that bypassed the spine's CAUTION floor.
+        self.last_confidence = 0.0
 
     def update(self, current_pos, prev_pos, now):
         """Check for swipe (returns at most one gesture per call)."""
@@ -455,6 +460,11 @@ class SwipeDetector:
         if len(self.x_velocities) >= self.min_frames:
             avg_vx = np.mean(self.x_velocities)
             avg_vy = np.mean(self.y_velocities)
+            # v19.0.2 — measured confidence: magnitude overshoot over the
+            # detection threshold (0.5 at threshold → 1.0 at 2× threshold)
+            speed_mag = float(np.hypot(avg_vx, avg_vy))
+            self.last_confidence = float(min(1.0, max(0.5,
+                speed_mag / max(2.0 * self.speed_threshold, 1e-9))))
             # Dominant axis decides — horizontal and vertical can never
             # fire together in the same frame.
             if abs(avg_vx) >= abs(avg_vy):

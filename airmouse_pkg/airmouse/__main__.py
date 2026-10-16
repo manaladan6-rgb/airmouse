@@ -383,7 +383,18 @@ def _run_gaze_calibration(config, simulated: bool = False) -> bool:
     Returns True on success.  Never raises.
     """
     print("  >> GAZE CALIBRATION — follow the on-screen targets with your eyes")
-    cal = GazeCalibration(n_points=9)
+    # v19.0.2 (audit HIGH #5) — the fit must know the REAL screen: the
+    # saved calibration is keyed to the screen it was fitted on, and the
+    # runtime quality gate refuses a screen-size mismatch.
+    _cal_sw, _cal_sh = 1920, 1080
+    try:
+        _disp = get_primary_display()
+        _cal_sw, _cal_sh = int(_disp.width), int(_disp.height)
+    except Exception:
+        pass
+    cal = GazeCalibration(n_points=9,
+                          config={"gc_screen_w": _cal_sw,
+                                  "gc_screen_h": _cal_sh})
     engine = GazeEngine({
         "gaze_dwell_time": config.gaze_dwell_time,
         "gaze_min_confidence": config.gaze_min_confidence,
@@ -431,6 +442,16 @@ def _run_gaze_calibration(config, simulated: bool = False) -> bool:
                     _cv2.circle(view, (tx, ty), 14, (0, 255, 255), -1)
                     _cv2.putText(view, f"Target {pi + 1}/9  ({collected}/30)",
                                  (20, 40), _cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                    # v19.0.2 (audit HIGH #5) — the calibration window is
+                    # TRUE FULLSCREEN: normalized target coords inside the
+                    # canvas then map linearly onto the real screen. The
+                    # old 960×540 windowed canvas baked a systematic
+                    # offset/scale error into every fit.
+                    _cv2.namedWindow("AirMouse Gaze Calibration",
+                                     _cv2.WINDOW_NORMAL)
+                    _cv2.setWindowProperty(
+                        "AirMouse Gaze Calibration",
+                        _cv2.WND_PROP_FULLSCREEN, _cv2.WINDOW_FULLSCREEN)
                     _cv2.imshow("AirMouse Gaze Calibration", view)
                     if (_cv2.waitKey(1) & 0xFF) == 27:
                         aborted = True
@@ -442,7 +463,7 @@ def _run_gaze_calibration(config, simulated: bool = False) -> bool:
             if aborted:
                 print("  >> Calibration aborted.")
                 return False
-            quality = cal.finish()
+            quality = cal.finish(screen_w=_cal_sw, screen_h=_cal_sh)
         ok = quality.get("status") in ("good", "fair") and cal.save()
         print(f"  >> Calibration quality: {quality.get('status')} "
               f"(mean residual {quality.get('mean_residual_px')} px) "
@@ -1491,7 +1512,20 @@ def main():
             "CAUTION": config.gesture_min_confidence_caution,
         },
         allow_destructive=bool(config.gesture_allow_destructive),
+        # v19.0.2 safety contract — tripping the E-STOP (from ANY source:
+        # ESC key, [x] panel, voice intent, long-blink, safety system)
+        # must also release a held mouse button. Releasing is always
+        # risk-reducing, so it is performed directly on the controller,
+        # never through the gate.
+        estop_release_fn=lambda: (mouse.stop_drag(), _flags_clear_drag())[-1],
     )
+
+    def _flags_clear_drag():
+        # v19.0.2 — clear main-loop drag state when the E-STOP trips so
+        # loop variables can never say "dragging" while the button is up.
+        nonlocal dragging, trackpad_dragging
+        dragging = False
+        trackpad_dragging = False
 
     # ═══ v16 two-hand interaction (config.two_hand) ═══
     two_hand_engine = None
@@ -1869,6 +1903,14 @@ def main():
                 "screen_w": screen_w,
                 "screen_h": screen_h,
                 "screen_refresh": config.screen_refresh_interval,
+                # v19.0.2 (audit HIGH #4) — the agent never received
+                # gaze_config, so config.gaze_dwell_time and
+                # config.gaze_min_confidence were dead keys: dwell was
+                # hardcoded at 0.8 s regardless of the user's setting.
+                "gaze_config": {
+                    "dwell_time_s": config.gaze_dwell_time,
+                    "gaze_min_action_confidence": config.gaze_min_confidence,
+                },
                 "dwell_confirm": True,
                 "blink_confirm": config.gaze_blink_click,
                 "long_blink_estop": config.gaze_long_blink_estop,
@@ -1934,7 +1976,11 @@ def main():
         print("     Stop with [m] or voice 'stop recording'.")
     if args.play:
         try:
-            player = MacroPlayer(lambda ev, pr: _macro_executor(ev, pr, mouse))
+            # v19.0.2 — finish_fn releases a held button if the replay is
+            # interrupted (drag_start without a matching drag_stop).
+            player = MacroPlayer(
+                lambda ev, pr: _macro_executor(ev, pr, mouse),
+                finish_fn=lambda: mouse.stop_drag())
             player.load(args.play)
             print(f"  >> Playing macro '{args.play}'...")
             player.play(speed=1.0)
@@ -1965,6 +2011,7 @@ def main():
     prev_pos = None
     fps = 0.0
     frame_times = []
+    prev_loop_now = None   # v19.0.2 — real frame-to-frame period
     debug_mode = True
     running = True
     gesture_confidence = 0.0
@@ -2018,6 +2065,13 @@ def main():
         """Execute a voice command. Returns True if the app should quit."""
         nonlocal cursor_frozen, precision_mode, zoom_enabled, dragging
         nonlocal recording_macro, macro_name
+        # v19.0.2 safety contract — E-STOP outranks voice. While the
+        # spine's E-STOP is latched, NO voice command may act on the
+        # machine (this includes clicks, drags and keyboard shortcuts).
+        if spine.estopped:
+            print("  >> E-STOP active — voice command refused "
+                  "([x] to reset)")
+            return False
         try:
             if cmd == VoiceCommand.CLICK:
                 mouse.left_click(); audio.click(); _mrec("click")
@@ -2085,7 +2139,11 @@ def main():
             elif cmd == VoiceCommand.PLAY_MACRO:
                 names = list_macros()
                 if names:
-                    player = MacroPlayer(lambda ev, pr: _macro_executor(ev, pr, mouse))
+                    # v19.0.2 — finish_fn releases a held button if the
+                    # replay is interrupted (drag_start without drag_stop).
+                    player = MacroPlayer(
+                        lambda ev, pr: _macro_executor(ev, pr, mouse),
+                        finish_fn=lambda: mouse.stop_drag())
                     player.load(names[-1])
                     player.play_async(speed=1.0)
                     audio.click()
@@ -2259,8 +2317,28 @@ def main():
     try:
         while running:
             t0 = time.perf_counter()
-            dt = 1.0 / max(fps, 1.0)
+            # v19.0.2 — REAL frame-to-frame period (audit MEDIUM #6).
+            # The old dt = 1/fps used a WORK-TIME average taken before the
+            # throttle sleep, overestimating fps (5 ms work → "200 fps" →
+            # dt 5 ms vs the real 33 ms) and feeding physics the wrong
+            # time base. dt is now the measured period between iterations,
+            # clamped for numerical safety.
             now = time.perf_counter()
+            if prev_loop_now is None:
+                dt = 1.0 / 30.0  # first iteration: nominal 30 fps
+            else:
+                dt = min(max(now - prev_loop_now, 1e-4), 0.5)
+            prev_loop_now = now
+
+            # ═══ v19.0.2 — SAFETY ⇄ SPINE E-STOP SYNC ═══
+            # The v9/v10 paths (long-blink, voice EMERGENCY_STOP, agent
+            # safety) trip agent.safety, not the spine. A safety-system
+            # EMERGENCY must dominate the spine too — otherwise cursor
+            # movement would keep flowing after a tripped E-STOP.
+            if (agent is not None
+                    and str(getattr(agent.safety, "level", "")).endswith("EMERGENCY")
+                    and not spine.estopped):
+                spine.trip_estop("safety_system")
 
             # ═══ v5.0 — VOICE POLL ═══
             # Voice works even when no hand is visible — poll every frame.
@@ -2390,8 +2468,16 @@ def main():
                 if is_direct:
                     # ═══ DIRECT TRACKING (v3.2) ═══
                     # 1:1 finger-to-screen — no home, no delta, no drift
-                    cursor_pos = direct_tracker.update(raw_pos, dt)
-                    if not cursor_frozen:
+                    # v19.0.2 — the REAL loop timestamp is passed through
+                    # so the filter chain sees genuine frame spacing and
+                    # dropped-frame gaps become visible (gap → hold +
+                    # filter reset, never a teleport).
+                    cursor_pos = direct_tracker.update(raw_pos, dt,
+                                                       timestamp=now)
+                    # v19.0.2 safety contract: cursor MOVEMENT is continuous
+                    # control and MUST pass the spine's E-STOP gate. An
+                    # E-STOP freezes movement — never a decorative claim.
+                    if not cursor_frozen and spine.gate_continuous(now):
                         mouse.move_to(cursor_pos[0], cursor_pos[1])
                     speed = np.linalg.norm(direct_tracker.velocity)
                     # Use filtered normalized position for scroll/volume/brightness
@@ -2433,10 +2519,10 @@ def main():
                 # v16: swipes route through the execution spine (CAUTION
                 # class: reversible navigation, estop + rate-limit gated).
                 if swipe_gesture == Gesture.SWIPE_LEFT:
-                    if spine.dispatch("browser_back", confidence=1.0, now=now)["executed"]:
+                    if spine.dispatch("browser_back", confidence=swipe.last_confidence, now=now)["executed"]:
                         audio.click()
                 elif swipe_gesture == Gesture.SWIPE_RIGHT:
-                    if spine.dispatch("browser_forward", confidence=1.0, now=now)["executed"]:
+                    if spine.dispatch("browser_forward", confidence=swipe.last_confidence, now=now)["executed"]:
                         audio.click()
                 elif swipe_gesture == Gesture.SWIPE_UP:
                     # v16 motion gestures: vertical swipe = discrete scroll
@@ -2715,9 +2801,13 @@ def main():
                         if spine.dispatch("zoom", amount=-3, confidence=gesture_confidence, now=now)["executed"]:
                             audio.click()
                     if gesture == Gesture.SHAKE and gesture_changed:
-                        # SAFE cancellation: drop drag, unfreeze, exit modes
-                        if dragging:
-                            spine.dispatch("stop_drag", confidence=1.0, now=now)
+                        # SAFE cancellation: drop drag, unfreeze, exit modes.
+                        # v19.0.2 — releasing a held button is always risk-
+                        # reducing: stop_drag is called DIRECTLY (un-gated,
+                        # like the hand-lost path) so a refusal can never
+                        # orphan a pressed button.
+                        if dragging or trackpad_dragging:
+                            mouse.stop_drag()
                             dragging = False
                             trackpad_dragging = False
                         cursor_frozen = False
@@ -2817,8 +2907,10 @@ def main():
 
                 elif gesture in (Gesture.POINTING, Gesture.PEACE,
                                Gesture.THUMBS_UP, Gesture.PINKY,
-                               Gesture.GUN, Gesture.ROCK) and not cursor_frozen:
-                    # Spring-damper physics
+                               Gesture.GUN, Gesture.ROCK) and not cursor_frozen \
+                        and spine.gate_continuous(now):
+                    # Spring-damper physics (v19.0.2: movement gated by the
+                    # E-STOP — a tripped stop freezes spring/momentum output)
                     cursor_pos = spring.update(screen_target, dt)
                     # Edge gravity
                     cursor_pos += edge_grav.apply(cursor_pos, screen_w, screen_h)
@@ -2851,8 +2943,9 @@ def main():
                     pass  # No momentum, cursor holds position
                 else:
                     # Ironman mode — momentum throw keeps cursor gliding
+                    # (v19.0.2: gated by the E-STOP like every output path)
                     throw = momentum.update(spring.velocity, False, dt)
-                    if momentum.is_active:
+                    if momentum.is_active and spine.gate_continuous(now):
                         cp = spring.position + throw
                         cp[0] = np.clip(cp[0], 0, screen_w)
                         cp[1] = np.clip(cp[1], 0, screen_h)
@@ -2878,6 +2971,16 @@ def main():
                     prev_gesture = Gesture.NONE
                     prev_index_y = None
                     prev_pos = None
+                    # v19.0.2 — clear ALL stale interaction state so a hand
+                    # re-entering mid-pinch cannot instantly drag/click from
+                    # an old timestamp (stale pinch/peace lifecycle).
+                    pinch_was_active = False
+                    peace_was_active = False
+                    trackpad_dragging = False
+                    pinch_start_time = 0.0
+                    peace_start_time = 0.0
+                    classic_pinch_start = 0.0
+                    classic_pinch_held = False
                     if dragging:
                         mouse.stop_drag()
                         dragging = False
@@ -2890,107 +2993,112 @@ def main():
                     if brightness_mode:
                         brightness_mode = False
 
-            # Display
-            if config.show_camera and debug_mode and hand_data["frame"] is not None:
-                # ═══ v9.0 — MULTIMODAL TICK (gaze + hand + voice + screen) ═══
-                # Runs once per frame AFTER gesture recognition so the fusion
-                # engine receives the confirmed hand gesture as confirmation.
-                if agent is not None:
-                    v9_t0 = time.perf_counter()
-                    v9_frame = hand_data.get("frame") if isinstance(hand_data, dict) else None
-                    v9_utterance = ""
-                    if utterance_queue:
-                        v9_utterance, _v9ts = utterance_queue.pop(0)
-                    v9_hand = None
-                    if hand_data.get("hand_found") and gesture is not None:
-                        try:
-                            v9_hand = {
-                                "gesture": getattr(gesture, "name", str(gesture)).lower(),
-                                "point": (float(cursor_pos[0]), float(cursor_pos[1]))
-                                if cursor_pos is not None else None,
-                                "confidence": float(gesture_confidence or 0.0),
-                            }
-                        except Exception:
-                            v9_hand = None
+            # ═══ v9.0 — MULTIMODAL TICK — v19.0.2: HOISTED out of the
+            # display block (audit CRITICAL). It used to live inside
+            # `show_camera and debug_mode`, so hiding the preview
+            # (--no-cam, show_camera=false, or pressing [d]) silently
+            # disabled gaze, voice and fusion ACTIONS mid-run. The
+            # engine must never depend on a GUI window being visible;
+            # agent.process_frame is fully headless-safe (frame=None is
+            # a valid idle tick).
+            if agent is not None:
+                v9_t0 = time.perf_counter()
+                v9_frame = hand_data.get("frame") if isinstance(hand_data, dict) else None
+                v9_utterance = ""
+                if utterance_queue:
+                    v9_utterance, _v9ts = utterance_queue.pop(0)
+                v9_hand = None
+                if hand_data.get("hand_found") and gesture is not None:
                     try:
-                        v9_out = agent.process_frame(
-                            frame=v9_frame if config.gaze_enabled else None,
-                            hand_data=v9_hand,
-                            utterance=v9_utterance,
-                            now=v9_t0,
-                        )
-                        v9_reports = v9_out.get("reports", [])
-                        if v9_reports:
-                            _lr = v9_reports[-1]
-                            v9_summary["action"] = (
-                                (f"{_lr.plan.action.value}" if _lr.plan else "?")
-                                + (":ok" if _lr.ok else f":{_lr.status.value}"))
-                            # v10 HUD: verification state of the last report
-                            v10_state["verify"] = (
-                                getattr(getattr(_lr, "verification", None),
-                                        "value", "") or "")
+                        v9_hand = {
+                            "gesture": getattr(gesture, "name", str(gesture)).lower(),
+                            "point": (float(cursor_pos[0]), float(cursor_pos[1]))
+                            if cursor_pos is not None else None,
+                            "confidence": float(gesture_confidence or 0.0),
+                        }
+                    except Exception:
+                        v9_hand = None
+                try:
+                    v9_out = agent.process_frame(
+                        frame=v9_frame if config.gaze_enabled else None,
+                        hand_data=v9_hand,
+                        utterance=v9_utterance,
+                        now=v9_t0,
+                    )
+                    v9_reports = v9_out.get("reports", [])
+                    if v9_reports:
+                        _lr = v9_reports[-1]
+                        v9_summary["action"] = (
+                            (f"{_lr.plan.action.value}" if _lr.plan else "?")
+                            + (":ok" if _lr.ok else f":{_lr.status.value}"))
+                        # v10 HUD: verification state of the last report
+                        v10_state["verify"] = (
+                            getattr(getattr(_lr, "verification", None),
+                                    "value", "") or "")
+                    else:
+                        v9_summary["action"] = ""
+                    _dec = v9_out.get("decision")
+                    if _dec is not None:
+                        if _dec.target is not None:
+                            try:
+                                v9_summary["target"] = agent.screen.describe_target(_dec.target)
+                            except Exception:
+                                v9_summary["target"] = _dec.target.id
+                        elif _dec.point is not None:
+                            v9_summary["target"] = f"({int(_dec.point[0])},{int(_dec.point[1])})"
                         else:
-                            v9_summary["action"] = ""
-                        _dec = v9_out.get("decision")
-                        if _dec is not None:
-                            if _dec.target is not None:
-                                try:
-                                    v9_summary["target"] = agent.screen.describe_target(_dec.target)
-                                except Exception:
-                                    v9_summary["target"] = _dec.target.id
-                            elif _dec.point is not None:
-                                v9_summary["target"] = f"({int(_dec.point[0])},{int(_dec.point[1])})"
-                            else:
-                                v9_summary["target"] = ""
-                        _nin = v9_out.get("intents", [])
-                        v9_summary["intent"] = _nin[-1].type.value if _nin else ""
-                        v9_summary["mode"] = str(getattr(agent, "mode", "") or "")
-                        # v10 per-frame HUD state
-                        v10_state["voice_mode"] = \
-                            voice_engine10.mode.value if voice_engine10 else ""
-                        v10_state["command"] = \
-                            voice_engine10.last_command if voice_engine10 else ""
-                        v10_state["conf"] = (
-                            f"{int(voice_engine10.last_confidence * 100)}%"
-                            if voice_engine10 and
-                            voice_engine10.last_confidence > 0 else "")
-                        v10_state["rf"] = bool(
-                            rf_bridge is not None and rf_bridge.available())
-                        v10_state["br"] = bool(
-                            browser_ctrl is not None and browser_ctrl.running)
-                        _gs = v9_out.get("gaze_state")
-                        v9_summary["gaze_conf"] = (
-                            float(getattr(_gs, "confidence", 0.0) or 0.0)
-                            if _gs is not None else None)
-                        v9_summary["estop"] = bool(
-                            getattr(agent.safety, "level", None) is not None
-                            and str(getattr(agent.safety, "level", "")) .endswith("EMERGENCY"))
-                        # v11.5 per-frame HUD state (guarded)
-                        try:
-                            if intelligence_plugin is not None \
-                                    and intelligence_plugin.available:
-                                v115_state["intel"] = "ON"
-                                _sug = intelligence_plugin.suggestions(
-                                    getattr(agent, "_learned_actions", []))
-                                v115_state["sug"] = \
-                                    _sug[0].text if _sug else ""
-                            else:
-                                v115_state["intel"] = \
-                                    (intelligence_plugin.state.value[:4].upper()
-                                     if intelligence_plugin is not None else "OFF")
-                            if voice_typing_engine is not None:
-                                v115_state["transcript"] = \
-                                    voice_typing_engine.text[-30:]
-                            elif transcription_engine is not None:
-                                v115_state["transcript"] = \
-                                    transcription_engine._partial[-30:]
-                        except Exception:
-                            pass
-                        if v9_out.get("estop"):
-                            v9_summary["intent"] = "EMERGENCY_STOP"
-                    except Exception as _v9e:
-                        v9_summary["action"] = f"err:{_v9e}"
+                            v9_summary["target"] = ""
+                    _nin = v9_out.get("intents", [])
+                    v9_summary["intent"] = _nin[-1].type.value if _nin else ""
+                    v9_summary["mode"] = str(getattr(agent, "mode", "") or "")
+                    # v10 per-frame HUD state
+                    v10_state["voice_mode"] = \
+                        voice_engine10.mode.value if voice_engine10 else ""
+                    v10_state["command"] = \
+                        voice_engine10.last_command if voice_engine10 else ""
+                    v10_state["conf"] = (
+                        f"{int(voice_engine10.last_confidence * 100)}%"
+                        if voice_engine10 and
+                        voice_engine10.last_confidence > 0 else "")
+                    v10_state["rf"] = bool(
+                        rf_bridge is not None and rf_bridge.available())
+                    v10_state["br"] = bool(
+                        browser_ctrl is not None and browser_ctrl.running)
+                    _gs = v9_out.get("gaze_state")
+                    v9_summary["gaze_conf"] = (
+                        float(getattr(_gs, "confidence", 0.0) or 0.0)
+                        if _gs is not None else None)
+                    v9_summary["estop"] = bool(
+                        getattr(agent.safety, "level", None) is not None
+                        and str(getattr(agent.safety, "level", "")) .endswith("EMERGENCY"))
+                    # v11.5 per-frame HUD state (guarded)
+                    try:
+                        if intelligence_plugin is not None \
+                                and intelligence_plugin.available:
+                            v115_state["intel"] = "ON"
+                            _sug = intelligence_plugin.suggestions(
+                                getattr(agent, "_learned_actions", []))
+                            v115_state["sug"] = \
+                                _sug[0].text if _sug else ""
+                        else:
+                            v115_state["intel"] = \
+                                (intelligence_plugin.state.value[:4].upper()
+                                 if intelligence_plugin is not None else "OFF")
+                        if voice_typing_engine is not None:
+                            v115_state["transcript"] = \
+                                voice_typing_engine.text[-30:]
+                        elif transcription_engine is not None:
+                            v115_state["transcript"] = \
+                                transcription_engine._partial[-30:]
+                    except Exception:
+                        pass
+                    if v9_out.get("estop"):
+                        v9_summary["intent"] = "EMERGENCY_STOP"
+                except Exception as _v9e:
+                    v9_summary["action"] = f"err:{_v9e}"
 
+            # Display — HUD + preview window + window hotkeys
+            if config.show_camera and debug_mode and hand_data["frame"] is not None:
                 _draw_hud(hand_data["frame"], gesture_result, spring, fps,
                           config, cursor_frozen, dragging, scrolling,
                           volume_mode, brightness_mode, precision_mode,
@@ -3127,7 +3235,9 @@ def main():
 
             # FPS throttling
             elapsed = time.perf_counter() - t0
-            frame_times.append(elapsed)
+            # v19.0.2 — fps reported from the REAL frame period, not the
+            # work-time-only average (which ignored the throttle sleep).
+            frame_times.append(dt)
             if len(frame_times) > 30:
                 frame_times.pop(0)
             avg = sum(frame_times) / len(frame_times)

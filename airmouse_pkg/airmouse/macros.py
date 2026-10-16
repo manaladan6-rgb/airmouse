@@ -198,14 +198,20 @@ class MacroRecorder:
 class MacroPlayer:
     """Replays saved macros by calling an executor for each event."""
 
-    def __init__(self, executor: Callable[[str, Dict[str, Any]], None]) -> None:
+    def __init__(self, executor: Callable[[str, Dict[str, Any]], None],
+                 finish_fn: Optional[Callable[[], None]] = None) -> None:
         """
         Args:
             executor: callable invoked as ``executor(event, params)`` for
                 every replayed event, where ``params`` holds all event
                 payload keys except ``t`` and ``event``.
+            finish_fn: optional zero-arg callable invoked exactly once when
+                a replay ends (completion, abort, or exception). v19.0.2
+                safety: use it to release a held mouse button so an
+                interrupted drag replay can never orphan a press.
         """
         self._executor = executor
+        self._finish_fn = finish_fn
         self._macro: Optional[Dict[str, Any]] = None
 
     def load(self, name: str) -> Dict[str, Any]:
@@ -310,6 +316,13 @@ class MacroPlayer:
         finally:
             if _current_play_thread is threading.current_thread():
                 _current_play_thread = None
+            # v19.0.2 — always run the finish hook: an interrupted drag
+            # replay must never leave the primary button pressed.
+            try:
+                if self._finish_fn is not None:
+                    self._finish_fn()
+            except Exception:
+                pass  # never let cleanup break cleanup
 
     @staticmethod
     def _sleep(delay: float, stop_check: Optional[Callable[[], bool]]) -> bool:

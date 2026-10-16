@@ -201,13 +201,19 @@ class KeyboardActions:
         if self._keyboard is None:
             return
         def _do():
+            # v19.0.2 — if a press fails mid-combo, release every key that
+            # DID go down so a modifier can never stick.
+            pressed = []
             try:
                 for k in keys:
                     self._keyboard.press(k)
-                for k in reversed(keys):
-                    self._keyboard.release(k)
-            except Exception:
-                pass
+                    pressed.append(k)
+            finally:
+                for k in reversed(pressed):
+                    try:
+                        self._keyboard.release(k)
+                    except Exception:
+                        pass
         threading.Thread(target=_do, daemon=True).start()
 
     def _press_key(self, key):
@@ -239,14 +245,20 @@ class KeyboardActions:
     def switch_window(self):
         if self._key_module is None: return
         def _do():
+            # v19.0.2 — partial-press failure must not stick a modifier.
+            pressed = []
             try:
                 self._keyboard.press(self._key_module.alt)
+                pressed.append(self._key_module.alt)
                 self._keyboard.press(self._key_module.tab)
-                self._keyboard.release(self._key_module.tab)
+                pressed.append(self._key_module.tab)
                 import time; time.sleep(0.15)
-                self._keyboard.release(self._key_module.alt)
-            except Exception:
-                pass
+            finally:
+                for k in reversed(pressed):
+                    try:
+                        self._keyboard.release(k)
+                    except Exception:
+                        pass
         threading.Thread(target=_do, daemon=True).start()
 
     def show_desktop(self):

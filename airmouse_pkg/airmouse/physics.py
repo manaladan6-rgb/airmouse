@@ -34,6 +34,8 @@ Physics stack (IRONMAN mode):
     11. Screen clamp       — never go off-screen
 """
 
+import time
+
 import numpy as np
 from collections import deque
 
@@ -554,6 +556,13 @@ class DirectTracker:
         # Velocity tracking (for audio whoosh + auto-precision)
         self._prev_pos = None
         self.velocity = np.zeros(2)
+        self._prev_output_pos = None
+
+        # v19.0.2 — explicit, observable tracking state for the live
+        # diagnostics: "acquiring" | "tracking" | "gap_hold" |
+        # "reacquiring" | "invalid_input". Never decorative: every
+        # value transitions in the real pipeline.
+        self.tracking_state = "acquiring"
 
         # Normalized filtered position (for scroll/volume/brightness)
         self._filtered_normalized = None
@@ -561,33 +570,90 @@ class DirectTracker:
         # Current screen position
         self._screen_pos = None
 
-        # Frame counter (for One Euro timing)
-        self._frame_count = 0
+        # Frame timing (v19.0.2 — REAL monotonic timestamps)
+        self._last_timestamp = None
+        # Gap policy: if no valid sample arrives within this window, the
+        # filter chain is considered STALE — it is reset (velocity zeroed)
+        # and the cursor HOLDS for one frame before controlled re-acquire.
+        # 0.25 s ≈ 3× a 30 fps frame period; covers dropped-frame bursts
+        # without punishing normal jitter in capture time.
+        self.gap_threshold_s = 0.25
+        self._reacquiring = False
+        self._pending_reacquire = False
+
+        # Canonical filter parameters (v19.0.2 — kept on the instance so
+        # precision toggles can retune IN PLACE without losing config).
+        self._oe_mincutoff = one_euro_mincutoff
+        self._oe_beta = one_euro_beta
+        self._oe_dcutoff = one_euro_dcutoff
+        self._hybrid_q = hybrid_process_noise
+        self._hybrid_r = hybrid_measurement_noise
+        self._hybrid_fusion = hybrid_fusion
+        self._hybrid_speed_ref = hybrid_speed_ref
+        self._hybrid_max_kw = 0.85
 
         # Auto-precision: when hand slows down, tighten the dead zone
         self._auto_precision = False
         self._speed_ema = 0.0
 
-    def update(self, finger_pos, dt):
+    def update(self, finger_pos, dt, timestamp=None):
         """Map finger position to screen cursor position.
 
-        Pipeline: raw → One Euro → dead zone → DIRECT map → pixel gate
+        Pipeline (v19.0.2 — measured, physics-driven, honest):
+          raw → validate → [gap policy] → One Euro ⊕ Kalman →
+          dead zone → DIRECT map → pixel gate
 
         Args:
             finger_pos: np.array([x, y]) in normalized coords [0..1]
-            dt: frame time in seconds
+            dt: frame time in seconds (real frame-to-frame period)
+            timestamp: REAL monotonic timestamp (seconds) of the frame
+                capture. When None, time.monotonic() is used. Synthetic
+                counters (frame_count/30) are no longer trusted — a
+                dropped-frame gap must be visible to the filter chain.
 
         Returns:
             cursor_pos: np.array([x, y]) in screen pixels
         """
-        self._frame_count += 1
-        timestamp = self._frame_count / 30.0
+        # ── Stage 0: input validation (audit MEDIUM #5) ──────────────
+        # Non-finite or wildly out-of-range input is a broken sensor
+        # read, never a hand position: HOLD the cursor instead of
+        # poisoning the filters (a NaN would crash int(nan) in the
+        # OS move and take the control loop down).
+        try:
+            pos = np.asarray(finger_pos, dtype=float).reshape(2)
+        except (TypeError, ValueError):
+            self.tracking_state = "invalid_input"
+            if self._last_output_pos is not None:
+                return self._last_output_pos.copy()
+            raise ValueError(
+                f"finger_pos must be 2 finite numbers, got {finger_pos!r}")
+        if not np.all(np.isfinite(pos)) or np.any(np.abs(pos) > 4.0):
+            self.tracking_state = "invalid_input"
+            if self._last_output_pos is not None:
+                return self._last_output_pos.copy()  # hold, do not crash
+            raise ValueError(
+                f"finger_pos must be finite, got {finger_pos!r}")
 
-        # Stage 1: Adaptive filter — hybrid (One Euro ⊕ Kalman) or pure One Euro
+        ts = float(timestamp) if timestamp is not None else time.monotonic()
+
+        # ── Stage 0b: gap / staleness policy (audit HIGH #3) ─────────
+        # With synthetic timestamps a 500 ms input gap was filtered as
+        # one normal 33 ms frame: the Kalman absorbed the jump into its
+        # velocity channel and the cursor TELEPORTED. Now a real gap
+        # resets the filter chain and holds the cursor for one frame.
+        if self._last_timestamp is not None:
+            dt_real = ts - self._last_timestamp
+            if dt_real > self.gap_threshold_s:
+                self._reset_filters_only()
+                self._reacquiring = True
+                self.tracking_state = "gap_hold"
+        self._last_timestamp = ts
+
+        # ── Stage 1: Adaptive filter — hybrid (One Euro ⊕ Kalman) or pure One Euro
         if self.use_hybrid and self.hybrid is not None:
-            filtered = self.hybrid.filter_np(finger_pos, timestamp)
+            filtered = self.hybrid.filter_np(pos, ts)
         else:
-            filtered = self.one_euro.filter_np(finger_pos, timestamp)
+            filtered = self.one_euro.filter_np(pos, ts)
 
         # Track speed for auto-precision
         if self._prev_pos is not None:
@@ -599,8 +665,10 @@ class DirectTracker:
         # This is the key to accuracy — no drift when aiming
         effective_threshold = self.movement_threshold
         if self._auto_precision and self._speed_ema < 0.005:
-            # Hand is slow — tighten the dead zone for pixel-perfect targeting
-            effective_threshold = self.movement_threshold * 2.0
+            # Hand is slow — HALVE the dead zone for pixel-perfect
+            # targeting (v19.0.2 fix: the old code DOUBLED it, which made
+            # the cursor LESS precise exactly when precision mattered).
+            effective_threshold = self.movement_threshold * 0.5
 
         if self._last_accepted_pos is not None:
             delta = np.linalg.norm(filtered - self._last_accepted_pos)
@@ -626,6 +694,25 @@ class DirectTracker:
         screen_y = np.clip(screen_y, 0, self.screen_h)
         cursor_pos = np.array([screen_x, screen_y])
 
+        # ── Stage 3b: GAP HOLD (v19.0.2) ─────────────────────────────
+        # The frame that FOLLOWS a staleness gap must not teleport: the
+        # filter chain re-baselines to the new position (so the next
+        # frames converge toward the hand from here), but THIS frame
+        # returns the previous applied output — one predictable hold,
+        # never a velocity-driven sweep or an instant jump.
+        if self._reacquiring:
+            self._reacquiring = False
+            self._pending_reacquire = True
+            self._last_accepted_pos = filtered.copy()
+            self._filtered_normalized = filtered.copy()
+            self._prev_pos = filtered.copy()
+            self._speed_ema = 0.0
+            self.velocity = np.zeros(2)
+            self.tracking_state = "gap_hold"
+            if self._last_output_pos is not None:
+                return self._last_output_pos.copy()
+            return cursor_pos  # nothing to hold on the very first sample
+
         # Stage 4: Pixel dead zone — prevent sub-pixel jitter
         if self._last_output_pos is not None:
             output_delta = np.linalg.norm(cursor_pos - self._last_output_pos)
@@ -635,14 +722,38 @@ class DirectTracker:
         self._last_output_pos = cursor_pos.copy()
         self._screen_pos = cursor_pos.copy()
 
-        # Track velocity (for audio feedback)
-        if self._prev_pos is not None and dt > 0:
-            self.velocity = (cursor_pos - self._last_output_pos) / dt if False else np.zeros(2)
-        # Use filtered velocity instead (cleaner)
-        self.velocity = np.array([self._speed_ema * self.screen_w / dt if dt > 0 else 0,
-                                   self._speed_ema * self.screen_h / dt if dt > 0 else 0])
+        # v19.0.2 — honest velocity: per-axis applied-output delta over the
+        # REAL frame period (px/s). The old formula built a diagonally
+        # pointing vector from a scalar EMA — dimensionally wrong.
+        if dt and dt > 0 and self._prev_output_pos is not None:
+            self.velocity = (cursor_pos - self._prev_output_pos) / float(dt)
+        else:
+            self.velocity = np.zeros(2)
+        self._prev_output_pos = cursor_pos.copy()
+
+        # Re-acquire lifecycle: the frame after a gap-hold reports
+        # "reacquiring" while it converges to the re-baselined estimate,
+        # then settles into "tracking".
+        if self._pending_reacquire:
+            self._pending_reacquire = False
+            self.tracking_state = "reacquiring"
+        elif self.tracking_state in ("reacquiring", "invalid_input",
+                                     "acquiring"):
+            self.tracking_state = "tracking"
 
         return cursor_pos
+
+    def _reset_filters_only(self):
+        """v19.0.2 — forget filter state (velocity, low-pass history)
+        while KEEPING the dead-zone/output baseline: used when a real
+        timestamp gap proves the filter chain stale. The cursor holds
+        its position; the next valid sample re-baselines the estimate."""
+        self.one_euro.reset()
+        if self.hybrid is not None:
+            self.hybrid.reset()
+        self._prev_pos = None
+        self._speed_ema = 0.0
+        self.velocity = np.zeros(2)
 
     def reset(self, center=None):
         """Reset tracker state."""
@@ -651,12 +762,16 @@ class DirectTracker:
             self.hybrid.reset()
         self._last_accepted_pos = None
         self._last_output_pos = None
+        self._prev_output_pos = None
         self._prev_pos = None
         self._speed_ema = 0.0
         self.velocity = np.zeros(2)
         self._filtered_normalized = None
         self._screen_pos = None
-        self._frame_count = 0
+        self._last_timestamp = None
+        self._reacquiring = False
+        self._pending_reacquire = False
+        self.tracking_state = "acquiring"
         if center is not None:
             self.smoother.reset(center)
         else:
@@ -678,33 +793,43 @@ class DirectTracker:
         return self._speed_ema
 
     def set_precision_mode(self, enabled: bool):
-        """Switch between normal and precision filtering on the fly."""
-        from .filters import OneEuroFilter2D, HybridOneEuroKalman
+        """Switch between normal and precision filtering on the fly.
+
+        v19.0.2 — retunes IN PLACE (One Euro cutoffs + Kalman q/r via
+        ``set_params``), preserving filter state: the old implementation
+        REBUILT both filters on every toggle, discarding the running
+        estimate and producing a visible mid-session cursor snap. The
+        previously-unused ``_hybrid_*`` attributes are now the real
+        canonical parameters, so a config-customized hybrid survives
+        precision toggles."""
         if enabled:
             # Precision: very smooth at rest, still responsive at speed
-            self.one_euro = OneEuroFilter2D(mincutoff=0.5, beta=0.5, dcutoff=1.0)
+            self.one_euro.set_params(mincutoff=0.5, beta=0.5, dcutoff=1.0)
             if self.hybrid is not None:
-                self.hybrid = HybridOneEuroKalman(
+                self.hybrid.set_params(
                     mincutoff=0.5, beta=0.5, dcutoff=1.0,
-                    kalman_process_noise=getattr(self, '_hybrid_q', 1.0),
-                    kalman_measurement_noise=getattr(self, '_hybrid_r', 0.05),
-                    fusion=getattr(self, '_hybrid_fusion', 'adaptive'),
-                    speed_ref=getattr(self, '_hybrid_speed_ref', 0.15),
-                )
+                    kalman_process_noise=self._hybrid_q,
+                    kalman_measurement_noise=self._hybrid_r,
+                    fusion=self._hybrid_fusion,
+                    speed_ref=self._hybrid_speed_ref,
+                    max_kalman_weight=self._hybrid_max_kw)
             self.movement_threshold = 0.006
             self.pixel_deadzone = 2.0
             self._auto_precision = False  # manual precision mode
         else:
             # Normal: balanced accuracy + responsiveness
-            self.one_euro = OneEuroFilter2D(mincutoff=1.2, beta=1.5, dcutoff=1.0)
+            self.one_euro.set_params(mincutoff=self._oe_mincutoff,
+                                     beta=self._oe_beta,
+                                     dcutoff=self._oe_dcutoff)
             if self.hybrid is not None:
-                self.hybrid = HybridOneEuroKalman(
-                    mincutoff=1.2, beta=1.5, dcutoff=1.0,
-                    kalman_process_noise=getattr(self, '_hybrid_q', 1.0),
-                    kalman_measurement_noise=getattr(self, '_hybrid_r', 0.05),
-                    fusion=getattr(self, '_hybrid_fusion', 'adaptive'),
-                    speed_ref=getattr(self, '_hybrid_speed_ref', 0.15),
-                )
+                self.hybrid.set_params(
+                    mincutoff=self._oe_mincutoff, beta=self._oe_beta,
+                    dcutoff=self._oe_dcutoff,
+                    kalman_process_noise=self._hybrid_q,
+                    kalman_measurement_noise=self._hybrid_r,
+                    fusion=self._hybrid_fusion,
+                    speed_ref=self._hybrid_speed_ref,
+                    max_kalman_weight=self._hybrid_max_kw)
             self.movement_threshold = 0.003
             self.pixel_deadzone = 1.0
             self._auto_precision = True  # re-enable auto-precision
@@ -716,10 +841,14 @@ class DirectTracker:
 
     def tune_filters(self, mincutoff: float = None, beta: float = None):
         """v5.0: live-tune the One Euro params from adaptive calibration.
-        Applies to BOTH arms (pure One Euro and the hybrid's One Euro side)."""
-        from .filters import OneEuroFilter2D
-        mc = mincutoff if mincutoff is not None else self.one_euro._fx.mincutoff
-        bt = beta if beta is not None else self.one_euro._fx.beta
-        self.one_euro = OneEuroFilter2D(mincutoff=mc, beta=bt, dcutoff=1.0)
+        Applies to BOTH arms (pure One Euro and the hybrid's One Euro side).
+        v19.0.2 — retunes IN PLACE, preserving filter state (the old code
+        replaced the filter objects, discarding the running estimate and
+        snapping the cursor once per tune)."""
+        mc = mincutoff if mincutoff is not None else self.one_euro.mincutoff
+        bt = beta if beta is not None else self.one_euro.beta
+        self._oe_mincutoff = float(mc)
+        self._oe_beta = float(bt)
+        self.one_euro.set_params(mincutoff=mc, beta=bt, dcutoff=1.0)
         if self.hybrid is not None:
-            self.hybrid.one_euro = OneEuroFilter2D(mincutoff=mc, beta=bt, dcutoff=1.0)
+            self.hybrid.one_euro.set_params(mincutoff=mc, beta=bt, dcutoff=1.0)

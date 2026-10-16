@@ -152,9 +152,19 @@ class TestBlinkClassifier:
 
     def test_long_blink(self):
         blk = self._blk()
+        # v19.0.2: long-blink threshold is 1.2 s (the documented contract).
+        # 0.8 s of closure is a deliberate slow blink — it must NOT trip
+        # LONG_BLINK (0.6 s sat only 0.2 s above the 0.4 s normal-blink
+        # bound, so ordinary slow blinks could trip the e-stop).
         script = [(0.01 * i, True, True, 0.9) for i in range(10)]
         script += [(1.00 + 0.01 * i, False, False, 0.9) for i in range(80)]  # 0.8 s closed
         script += [(1.80, True, True, 0.9)]
+        events = run_blink_script(blk, script)
+        assert events == [GazeEventKind.BLINK]  # slow blink ≠ long blink
+
+        script = [(0.01 * i, True, True, 0.9) for i in range(10)]
+        script += [(1.00 + 0.01 * i, False, False, 0.9) for i in range(140)]  # 1.4 s closed
+        script += [(2.40, True, True, 0.9)]
         events = run_blink_script(blk, script)
         assert events == [GazeEventKind.LONG_BLINK]  # emitted once, no plain BLINK
 

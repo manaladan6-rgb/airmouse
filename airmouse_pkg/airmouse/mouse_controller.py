@@ -5,6 +5,9 @@ Lazy-imports pynput to allow headless/testing environments.
 """
 
 MAX_COORD = 2**15 - 1
+# v19.0.2 — matches actions.SCROLL_AMOUNT_LIMIT: every OS scroll emitted by
+# AirMouse is clamped to the same bounded range, whoever calls it.
+MAX_SCROLL_TICKS = 100
 
 
 class MouseController:
@@ -14,15 +17,21 @@ class MouseController:
         self._dragging = False
         self.screen_w = screen_w
         self.screen_h = screen_h
+        self.init_error = ""
         self._init()
+
+    @property
+    def available(self) -> bool:
+        """True when the OS input backend loaded (pynput present + display)."""
+        return self.mouse is not None
 
     def _init(self):
         try:
             from pynput.mouse import Controller, Button
             self.mouse = Controller()
             self._button = Button
-        except Exception:
-            pass
+        except Exception as e:
+            self.init_error = str(e)
 
     def _clamp(self, x, y):
         x = max(0, min(int(x), min(self.screen_w, MAX_COORD)))
@@ -64,7 +73,10 @@ class MouseController:
     def scroll(self, amount):
         """Positive = scroll down, Negative = scroll up."""
         if self.mouse is None: return
-        self.mouse.scroll(0, int(amount))
+        # v19.0.2 — bounded output: clamp to ±MAX_SCROLL_TICKS so no code
+        # path (voice, zoom, two-hand, macros) can emit an extreme scroll.
+        amount = max(-MAX_SCROLL_TICKS, min(MAX_SCROLL_TICKS, int(amount)))
+        self.mouse.scroll(0, amount)
 
     @property
     def position(self):
