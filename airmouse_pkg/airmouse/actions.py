@@ -9,19 +9,29 @@ retry-on-exception and per-status statistics.
 
 Pipeline for :meth:`ActionEngine.execute`
 -----------------------------------------
-1. SAFETY GATE first — ``safety.approve_intent(intent)`` (a shim Intent is
+1. CENTRAL SAFETY GATE (v19.0.3 OPERATION FINAL FORM) —
+   ``safety_gate.get_gate().authorize(<action_class>)`` with the
+   plan's action class (:data:`_CENTRAL_GATE_CLASS`: pointer
+   families → ``"gesture"``, scroll/zoom → ``"scroll_action"``,
+   keyboard families → ``"keyboard_action"``, browser families →
+   ``"browser_action"``).  An estopped/shutting-down gate, an
+   unavailable backend or an UNCLASSIFIED action type refuses the
+   dispatch BEFORE the executor is touched — surfaced as an honest
+   ``BLOCKED`` report carrying the gate's reason (never a raw
+   exception into the dispatch loop).
+2. SAFETY GATE — ``safety.approve_intent(intent)`` (a shim Intent is
    built when the plan carries none).  Not allowed → ``BLOCKED`` report
    with the safety reason; the executor is never touched.
-2. PRECONDITIONS — action != NONE, point present + within bounds for
+3. PRECONDITIONS — action != NONE, point present + within bounds for
    pointer actions, scroll amount an int in [-100, 100], TYPE text a str
    of 1..500 chars, HOTKEY 1..4 non-empty key names, ZOOM needs
    ``direction in {in, out}`` or an int ``ticks``.  Violations → ``FAILED``
    without calling the executor.
-3. EXECUTION — dispatched to the executor with timing; on an executor
+4. EXECUTION — dispatched to the executor with timing; on an executor
    EXCEPTION the attempt is retried up to ``plan.max_retries`` (never on
    BLOCKED).  A synchronous call that exceeds ``plan.timeout`` is reported
    as ``TIMEOUT``.
-4. REPORT — ``ActionReport(status=SUCCESS/FAILED, latency, attempts,
+5. REPORT — ``ActionReport(status=SUCCESS/FAILED, latency, attempts,
    observation=...)``; ``observation["pointer"]`` is filled for pointer
    actions (or from a dict returned by the executor).
 
@@ -80,11 +90,66 @@ except ImportError:  # pragma: no cover
                                          DESTRUCTIVE_SYSTEM_OPS, FILE_OPS,
                                          SYSTEM_OPS, validate_url)
 
+try:  # v19.0.3 OPERATION FINAL FORM — central safety gate
+    from .safety_gate import get_gate
+except ImportError:  # pragma: no cover - direct file execution fallback
+    from airmouse.safety_gate import get_gate
+
 #: allowlist for generic browser operations (§12/§26)
 BROWSER_OP_ALLOW = frozenset({
     "click", "focus", "type", "navigate", "new_tab", "close_tab",
     "switch_tab", "back", "forward", "refresh", "scroll", "search",
 })
+
+#: Central-gate action class per ActionType (v19.0.3 OPERATION FINAL
+#: FORM).  Every consequential dispatch path presents its class to
+#: ``safety_gate.get_gate().authorize(...)`` BEFORE the executor is
+#: touched: pointer moves/clicks/drags → ``"gesture"``; scroll/zoom →
+#: ``"scroll_action"``; synthetic keys/hotkeys → ``"keyboard_action"``;
+#: browser routes → ``"browser_action"``.  (Macro replay steps present
+#: ``"macro_action"`` from macros.py — the engine never dispatches them.)
+#:
+#: SYSTEM_OPERATION / FILE_OPERATION are deliberately NOT mapped: the
+#: gate's class list has no system/file class and borrowing one would
+#: misreport the refusal domain.  Those ops keep their dedicated gates
+#: (SYSTEM_OPS/FILE_OPS allowlists, the safety layer and the
+#: destructive-confirmation flags).
+#:
+#: Any ActionType NOT listed here (and not a no-op) is UNCLASSIFIED →
+#: DEFAULT-DENY: refused before dispatch, never dispatched.
+_CENTRAL_GATE_CLASS: Dict[ActionType, str] = {
+    # pointer families → gesture
+    ActionType.CLICK: "gesture",
+    ActionType.DOUBLE_CLICK: "gesture",
+    ActionType.RIGHT_CLICK: "gesture",
+    ActionType.MIDDLE_CLICK: "gesture",
+    ActionType.MOVE: "gesture",
+    ActionType.DRAG: "gesture",
+    ActionType.DROP: "gesture",
+    ActionType.SELECT: "gesture",
+    # wheel / zoom → scroll_action
+    ActionType.SCROLL: "scroll_action",
+    ActionType.ZOOM: "scroll_action",
+    # synthetic keys → keyboard_action
+    ActionType.TYPE: "keyboard_action",
+    ActionType.HOTKEY: "keyboard_action",
+    ActionType.KEY_PRESS: "keyboard_action",
+    ActionType.COPY: "keyboard_action",
+    ActionType.PASTE: "keyboard_action",
+    ActionType.UNDO: "keyboard_action",
+    ActionType.REDO: "keyboard_action",
+    ActionType.OPEN_APP: "keyboard_action",
+    ActionType.CLOSE_APP: "keyboard_action",
+    ActionType.FOCUS_WINDOW: "keyboard_action",
+    ActionType.SWITCH_WINDOW: "keyboard_action",
+    ActionType.NEW_TAB: "keyboard_action",
+    ActionType.CLOSE_TAB: "keyboard_action",
+    ActionType.SWITCH_TAB: "keyboard_action",
+    # browser routes → browser_action
+    ActionType.OPEN_URL: "browser_action",
+    ActionType.NAVIGATE: "browser_action",
+    ActionType.BROWSER_OPERATION: "browser_action",
+}
 
 __all__ = [
     "DEFAULT_ACTION_CONFIG",
@@ -483,7 +548,18 @@ class ActionEngine:
             return report
         report.plan = plan
 
-        # 1. safety gate first — never execute without permission.
+        # 1. central safety gate first (v19.0.3 OPERATION FINAL FORM) —
+        # the process-wide estop/shutdown latch owns every consequential
+        # dispatch.  Refusals NEVER raise into the dispatch loop: they
+        # come back as an honest BLOCKED report carrying the reason.
+        refusal = self._central_gate_refusal(plan)
+        if refusal:
+            report.status = ActionStatus.BLOCKED
+            report.message = refusal
+            self.stats[ActionStatus.BLOCKED] += 1
+            return report
+
+        # 2. safety gate first — never execute without permission.
         if self.safety is not None:
             intent = plan.intent
             if intent is None:
@@ -551,6 +627,30 @@ class ActionEngine:
         return self.execute(self.plan(intent, now=now), now=now)
 
     # -- internals --------------------------------------------------------------
+
+    @staticmethod
+    def _central_gate_refusal(plan: ActionPlan) -> str:
+        """Central-gate verdict for a plan: "" = allowed, else the reason.
+
+        Fail-closed: an UNCLASSIFIED consequential ActionType is refused
+        BEFORE dispatch (never dispatched); a broken gate blocks, never
+        enables.  ``authorize`` never raises, but the lookup is guarded
+        anyway so a refusal can never become a raw exception in the
+        caller's dispatch loop.
+        """
+        action = plan.action
+        if action is ActionType.NONE:
+            return ""  # no-op plan: the "no_action" precondition reports it
+        if action in (ActionType.SYSTEM_OPERATION, ActionType.FILE_OPERATION):
+            return ""  # dedicated allowlist/confirmation route (see table)
+        cls = _CENTRAL_GATE_CLASS.get(action)
+        if cls is None:
+            return f"unclassified_action: {getattr(action, 'value', action)}"
+        try:
+            ok, reason = get_gate().authorize(cls)
+            return "" if ok else str(reason)
+        except Exception as exc:  # a broken gate blocks, never enables
+            return f"gate_error: {exc}"
 
     @staticmethod
     def _shim_intent(plan: ActionPlan) -> Intent:

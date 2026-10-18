@@ -24,13 +24,33 @@ continuous control, not a discrete action — it stays on the live loop
 but still passes through `gate_continuous()` for the E-STOP check.
 Human override and E-STOP remain dominant: when tripped, nothing
 dispatches, movement freezes, and only an explicit reset clears it.
+
+v19.0.3 OPERATION FINAL FORM — central gate consultation:
+* every ``dispatch()`` presents its gate action class to the process-wide
+  ``CentralSafetyGate`` (``safety_gate.get_gate()``): scroll/zoom →
+  ``"scroll_action"``, keyboard intents → ``"keyboard_action"``, macro
+  replay → ``"macro_action"``, everything else (clicks/drags/moves) →
+  ``"gesture"``;
+* the PEACE/continuous scroll path has a dedicated per-frame emission
+  point, :meth:`GestureActionRouter.scroll_continuous`, which authorizes
+  ``"scroll_action"`` BEFORE the first tick and re-checks on EVERY
+  frame-loop iteration — when the gate trips mid-scroll, the wheel stops
+  emitting within the same frame loop and the refusal reason is
+  surfaced;
+* ``gate_continuous()`` folds the central gate (class ``"gesture"``)
+  into the per-frame cursor check.
 """
 
 from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
+
+try:  # package-relative (normal import path)
+    from .safety_gate import get_gate
+except ImportError:  # pragma: no cover - direct file execution fallback
+    from airmouse.safety_gate import get_gate
 
 __all__ = ["GestureActionRouter", "RISK_CLASSES"]
 
@@ -87,6 +107,25 @@ _KB_INTENTS = {
 }
 
 _ACTION_HISTORY_MAX = 32
+
+# Central-gate action class per gesture intent (v19.0.3 OPERATION FINAL
+# FORM).  Everything not listed here presents as "gesture" (clicks,
+# drags, cursor moves).
+_GATE_CLASS_BY_INTENT: Dict[str, str] = {
+    "scroll": "scroll_action",
+    "zoom": "scroll_action",
+    "macro_play": "macro_action",   # gesture-triggered macro replay
+}
+
+
+def _central_authorize(action_class: str,
+                       backend: str = "default") -> Tuple[bool, str]:
+    """Ask the process-wide CentralSafetyGate (never raises; fail-closed)."""
+    try:
+        ok, reason = get_gate().authorize(action_class, backend=backend)
+        return bool(ok), str(reason)
+    except Exception as exc:  # a broken gate blocks, never enables
+        return False, f"gate_error: {exc}"
 
 
 class GestureActionRouter:
@@ -156,9 +195,59 @@ class GestureActionRouter:
     def classify(self, intent: str) -> str:
         return RISK_CLASSES.get(str(intent), "CAUTION")
 
+    @staticmethod
+    def _gate_class_for_intent(intent: str) -> str:
+        """Central-gate action class for a gesture intent."""
+        intent = str(intent)
+        if intent in _GATE_CLASS_BY_INTENT:
+            return _GATE_CLASS_BY_INTENT[intent]
+        if intent in _KB_INTENTS:
+            return "keyboard_action"
+        return "gesture"
+
     def gate_continuous(self, now: Optional[float] = None) -> bool:
-        """Continuous-control gate (cursor/scroll axes): E-STOP only."""
-        return not self.estopped
+        """Continuous-control gate (cursor axes): E-STOP + central gate.
+
+        v19.0.3: folds the process-wide ``CentralSafetyGate`` (class
+        ``"gesture"``) into the per-frame check — while the gate is
+        estopped or shutting down, cursor control freezes exactly as it
+        does for a local E-STOP.  Scroll axes must use
+        :meth:`scroll_continuous`, which presents ``"scroll_action"``.
+        """
+        if self.estopped:
+            return False
+        ok, _reason = _central_authorize("gesture")
+        return bool(ok)
+
+    def scroll_continuous(self, amount: int,
+                          now: Optional[float] = None) -> Dict[str, Any]:
+        """Emit ONE continuous-scroll tick (the PEACE scroll path), gated.
+
+        This is the scroll emission point for frame-loop driven scrolling:
+        it authorizes ``"scroll_action"`` on the central gate BEFORE the
+        first tick and re-checks on EVERY call (per-iteration), so a gate
+        that trips mid-scroll stops the wheel within the same frame loop.
+        The local E-STOP stays dominant as well.  NEVER raises.
+
+        Returns ``{"executed": bool, "reason": str}`` — the gate's
+        refusal reason (e.g. ``"estop: ..."``) is surfaced verbatim when
+        nothing is emitted.
+        """
+        if self.estopped:
+            reason = f"estop: {self.estop_reason()}"
+            self.last_refusal = reason
+            return {"executed": False, "reason": reason}
+        ok, reason = _central_authorize("scroll_action")
+        if not ok:
+            self.last_refusal = reason
+            return {"executed": False, "reason": reason}
+        if self.mouse is None:
+            return {"executed": False, "reason": "no_mouse_backend"}
+        try:
+            self.mouse.scroll(int(amount))
+        except Exception as exc:  # never crash the frame loop
+            return {"executed": False, "reason": f"scroll_error: {exc}"}
+        return {"executed": True, "reason": "ok"}
 
     def can_execute(self, intent: str, confidence: float = 1.0,
                     now: Optional[float] = None) -> (bool, str):
@@ -169,6 +258,13 @@ class GestureActionRouter:
         with self._lock:
             if self._estop_reason is not None:
                 return False, f"estop: {self._estop_reason}"
+        # v19.0.3 — central safety gate (fail-closed; the reason is
+        # surfaced verbatim through dispatch/can_execute callers).
+        gate_ok, gate_reason = _central_authorize(
+            self._gate_class_for_intent(intent))
+        if not gate_ok:
+            self.last_refusal = gate_reason
+            return False, gate_reason
         conf = float(confidence)
         if conf < self.min_confidence.get(risk, 1.0):
             self.last_refusal = (

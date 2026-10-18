@@ -31,3 +31,26 @@ def _isolated_asr_registry(monkeypatch):
     yield
     asr.registry.reset()
     asr.registry._diagnoses = {}
+
+
+@pytest.fixture(autouse=True)
+def _isolated_safety_gate(monkeypatch):
+    """v19.0.3: isolate the central safety gate + estop flag file.
+
+    The gate is a process-wide singleton by design; without isolation a
+    test that trips the E-STOP (or runs main() in-process, or writes the
+    cross-process flag file) would poison every later test with a
+    latched gate.  Fail-closed stays fail-closed INSIDE each test.
+    """
+    import airmouse.safety_gate as sg
+    sg.reset_gate_for_tests()
+    try:  # clear any flag file left by an earlier test (current env)
+        sg.clear_estop_flag()
+    except Exception:
+        pass
+    yield
+    sg.reset_gate_for_tests()
+    try:
+        sg.clear_estop_flag()
+    except Exception:
+        pass

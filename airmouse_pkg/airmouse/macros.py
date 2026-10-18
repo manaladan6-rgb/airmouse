@@ -19,6 +19,19 @@ Each recorded event is a dict ``{"t": <seconds since record start>,
 Every filesystem interaction is guarded — a missing directory or an
 unwritable disk degrades gracefully instead of raising mid-gesture.
 
+v19.0.3 OPERATION FINAL FORM: every replay is gated by the central
+safety gate (``safety_gate.get_gate().authorize("macro_action")``)
+BEFORE the first action, re-checked before EACH step/event and inside
+every wait/sleep chunk (checkpoint-based — a wait can never sleep
+through an E-STOP).  A gate that is estopped or shutting down refuses
+the replay BEFORE anything is dispatched.  Replay is cooperatively
+cancellable: a per-play ``stop_check``, the player's own
+:meth:`MacroPlayer.cancel` latch and the module-wide
+:func:`cancel_current_replay` latch are all observed at every
+checkpoint; a cancelled replay stops cleanly and reports an honest
+stopped/partial result (:meth:`MacroPlayer.play_detailed` /
+``MacroPlayer.last_result``).
+
 Classes:
     MacroRecorder — captures events while recording
     MacroPlayer  — loads and replays macros through an executor
@@ -27,6 +40,8 @@ Functions:
     list_macros  — names of all saved macros
     delete_macro — remove a saved macro by name
     is_playing   — True while a replay thread is running
+    cancel_current_replay — latch a cancel + bounded join of the live replay
+    join_current_replay   — bounded join of the live replay (no cancel latch)
 """
 
 from __future__ import annotations
@@ -38,6 +53,11 @@ import threading
 import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
+
+try:  # package-relative (normal import path)
+    from .safety_gate import get_gate
+except ImportError:  # pragma: no cover - direct file execution fallback
+    from airmouse.safety_gate import get_gate
 
 #: Legacy module-level macro directory.  Kept for backwards
 #: compatibility (tests and embedders may read or override it), but the
@@ -68,6 +88,57 @@ def _macro_dir() -> str:
 
 # Module-level guard so overlapping replays are refused.
 _current_play_thread: "Optional[threading.Thread]" = None
+
+# ══ v19.0.3 OPERATION FINAL FORM — central gate + cooperative cancel ══════
+
+#: Gate action class presented by every macro replay route.
+MACRO_ACTION_CLASS = "macro_action"
+
+#: Module-wide cancel latch (set by :func:`cancel_current_replay`); it is
+#: observed at every replay checkpoint and consumed by the run that honours it.
+_MODULE_CANCEL = threading.Event()
+
+#: Default BOUND for cancel/join thread joins (seconds).  A join is always
+#: bounded — an unterminated worker is reported honestly, never awaited
+#: forever.
+_CANCEL_JOIN_TIMEOUT_S = 0.5
+
+
+def _gate_macro_refusal() -> str:
+    """Central-gate verdict for macro replay: "" = allowed, else reason.
+
+    Fail-closed: a broken gate blocks (never enables).  Never raises.
+    """
+    try:
+        ok, reason = get_gate().authorize(MACRO_ACTION_CLASS)
+        return "" if ok else str(reason)
+    except Exception as exc:  # a broken gate blocks, never enables
+        return f"gate_error: {exc}"
+
+
+def _runner_start_refusal() -> str:
+    """Fail-closed START verdict for ProgramRunner runs (never raises).
+
+    Order: module-wide cancel latch, then the central safety gate.
+    "" = the run may start.
+    """
+    if _MODULE_CANCEL.is_set():
+        return "cancel_requested"
+    return _gate_macro_refusal()
+
+
+def _runner_stop_reason(stop_check: Optional[Callable[[], bool]]) -> str:
+    """Per-step checkpoint verdict for ProgramRunner runs (never raises).
+
+    Order: the per-run ``stop_check`` (legacy reason strings preserved),
+    then the module-wide cancel latch, then the central safety gate.
+    "" = continue.
+    """
+    if _stop_requested(stop_check):
+        return "stop_requested"
+    if _MODULE_CANCEL.is_set():
+        return "cancel_requested"
+    return _gate_macro_refusal()
 
 
 def _sanitize_name(name: str) -> str:
@@ -114,6 +185,39 @@ def is_playing() -> bool:
     """True while a macro replay (sync or async) is currently running."""
     t = _current_play_thread
     return t is not None and t.is_alive()
+
+
+def cancel_current_replay(
+    timeout_s: float = _CANCEL_JOIN_TIMEOUT_S,
+    reason: str = "cancel_requested",
+) -> Dict[str, Any]:
+    """Cooperatively cancel the CURRENT module-wide replay (never raises).
+
+    Sets the module-wide cancel latch (observed by every
+    :class:`MacroPlayer`/`ProgramRunner` checkpoint — before each step and
+    inside every wait/sleep chunk) and joins the live replay thread with a
+    BOUND timeout.  NEVER joins the current thread (a worker asked to cancel
+    itself just keeps hitting its checkpoints).  Returns an honest report
+    dict; ``terminated`` is False (with ``thread_alive`` True) when a worker
+    did not terminate within the bound.
+    """
+    _MODULE_CANCEL.set()
+    return MacroPlayer._join_worker(_current_play_thread, timeout_s, reason)
+
+
+def join_current_replay(
+    timeout_s: float = _CANCEL_JOIN_TIMEOUT_S,
+) -> Dict[str, Any]:
+    """Bounded join of the live replay thread WITHOUT latching a cancel.
+
+    Stale-safe: a finished/absent replay thread reports immediately.
+    Returns the same honest report shape as :func:`cancel_current_replay`
+    with ``requested`` False.
+    """
+    report = MacroPlayer._join_worker(
+        _current_play_thread, timeout_s, "join_requested")
+    report["requested"] = False
+    return report
 
 
 class MacroRecorder:
@@ -196,7 +300,20 @@ class MacroRecorder:
 
 
 class MacroPlayer:
-    """Replays saved macros by calling an executor for each event."""
+    """Replays saved macros by calling an executor for each event.
+
+    v19.0.3 OPERATION FINAL FORM: every replay consults the central
+    safety gate (``safety_gate.get_gate().authorize("macro_action")``)
+    BEFORE the first action, re-checks before EACH event and inside every
+    wait/sleep chunk, and refuses to start — fail-closed, NOTHING
+    dispatched — while the gate is estopped or shutting down (the refusal
+    reason is surfaced on the result).  Replay is cooperatively
+    cancellable: a per-play ``stop_check``, the player's own
+    :meth:`cancel` latch and the module-wide :func:`cancel_current_replay`
+    latch are all observed at every checkpoint.  A stopped replay returns
+    an honest stopped/partial result (see :meth:`play_detailed` and
+    :attr:`last_result`) — never a silent lie.
+    """
 
     def __init__(self, executor: Callable[[str, Dict[str, Any]], None],
                  finish_fn: Optional[Callable[[], None]] = None) -> None:
@@ -213,6 +330,10 @@ class MacroPlayer:
         self._executor = executor
         self._finish_fn = finish_fn
         self._macro: Optional[Dict[str, Any]] = None
+        # v19.0.3 — cooperative cancellation + honest result surface.
+        self._cancel_event = threading.Event()
+        self._play_thread: "Optional[threading.Thread]" = None
+        self.last_result: Dict[str, Any] = {}
 
     def load(self, name: str) -> Dict[str, Any]:
         """Load ``<macros dir>/<name>.json`` and remember it for :meth:`play`.
@@ -227,67 +348,221 @@ class MacroPlayer:
         self._macro = data
         return data
 
-    def play(self, speed: float = 1.0,
-             stop_check: Optional[Callable[[], bool]] = None) -> bool:
-        """Synchronously replay the loaded macro.  Returns True on completion.
+    # ── cancellation ─────────────────────────────────────────────────
+    def cancel(self, timeout_s: float = _CANCEL_JOIN_TIMEOUT_S,
+               reason: str = "cancel_requested") -> Dict[str, Any]:
+        """Request cooperative cancellation of this player's replay.
 
-        Sleeps the inter-event deltas (divided by ``speed``) with
-        ``time.sleep`` in small chunks so ``stop_check`` stays responsive;
-        if ``stop_check()`` returns True the replay aborts and False is
-        returned.  If no macro was loaded, the most recently saved macro
-        is used as a convenience.  Refuses to run while another replay is
-        active (returns False).
+        Sets this player's stop latch (observed at every replay checkpoint —
+        before each event and inside every wait/sleep chunk) and joins this
+        player's live replay thread with a BOUND timeout.  NEVER joins the
+        current thread (a self-cancel from inside an executor hook just
+        arms the latch; the report says so honestly).  Returns an honest
+        report dict — ``terminated`` False + ``thread_alive`` True when a
+        worker did not terminate within the bound.  Never raises.
+        """
+        self._cancel_event.set()
+        return self._join_worker(self._play_thread, timeout_s, reason)
+
+    @staticmethod
+    def _join_worker(th: "Optional[threading.Thread]",
+                     timeout_s: float,
+                     reason: str) -> Dict[str, Any]:
+        """Bounded, self-join-safe worker join with an honest report."""
+        try:
+            bound = max(0.0, float(timeout_s))
+        except Exception:
+            bound = _CANCEL_JOIN_TIMEOUT_S
+        report: Dict[str, Any] = {
+            "requested": True,
+            "reason": str(reason or "cancel_requested"),
+            "was_running": False,
+            "join_attempted": False,
+            "self_join_skipped": False,
+            "terminated": True,
+            "thread_alive": False,
+            "timeout_s": bound,
+        }
+        if th is None or not th.is_alive():
+            return report  # nothing live: report is already the truth
+        report["was_running"] = True
+        report["terminated"] = False
+        report["thread_alive"] = True
+        if th is threading.current_thread():
+            # NEVER join the current thread — it would deadlock forever.
+            report["self_join_skipped"] = True
+            return report
+        report["join_attempted"] = True
+        th.join(bound)
+        alive = th.is_alive()
+        report["terminated"] = not alive
+        report["thread_alive"] = alive
+        return report
+
+    # ── replay entry points ──────────────────────────────────────────
+    def play_detailed(self, speed: float = 1.0,
+                      stop_check: Optional[Callable[[], bool]] = None
+                      ) -> Dict[str, Any]:
+        """Synchronously replay the loaded macro with an honest result.
+
+        Returns ``{"completed", "stopped", "started", "reason",
+        "events_dispatched", "events_total"}``: ``completed`` True only
+        when EVERY event was dispatched; ``stopped`` True when the replay
+        ended early (cancel/stop_check/gate); ``started`` False when the
+        replay was refused BEFORE dispatching anything (overlap, cancel
+        latch, stop_check, or an estopped/shutting-down gate — the
+        ``reason`` then carries the refusal reason verbatim).  Sleeps the
+        inter-event deltas (divided by ``speed``) in small chunks so every
+        checkpoint stays responsive.  If no macro was loaded, the most
+        recently saved macro is used as a convenience.  Refuses to run
+        while another replay is active.
         """
         macro = self._macro
         if macro is None:
             macro = self._load_latest()
             if macro is None:
-                return False
+                return self._store_result({
+                    "completed": False, "stopped": False, "started": False,
+                    "reason": "no_macro", "events_dispatched": 0,
+                    "events_total": 0})
             self._macro = macro
         cur = _current_play_thread
         if cur is not None and cur.is_alive():
-            return False  # a replay is already running
+            return self._store_result({
+                "completed": False, "stopped": False, "started": False,
+                "reason": "already_playing", "events_dispatched": 0,
+                "events_total": self._macro_event_count(macro)})
         events = macro.get("events")
         if not isinstance(events, list):
-            return False
-        return self._run([e for e in events if isinstance(e, dict)], speed, stop_check)
+            return self._store_result({
+                "completed": False, "stopped": False, "started": False,
+                "reason": "no_events", "events_dispatched": 0,
+                "events_total": 0})
+        return self._run([e for e in events if isinstance(e, dict)],
+                         speed, stop_check)
 
-    def play_async(self, speed: float = 1.0) -> Optional[threading.Thread]:
+    def play(self, speed: float = 1.0,
+             stop_check: Optional[Callable[[], bool]] = None) -> bool:
+        """Synchronously replay the loaded macro.  True on full completion.
+
+        Thin boolean view over :meth:`play_detailed` — False means the
+        replay was refused or stopped early; the detailed reason is on
+        ``self.last_result`` (and the gate's own refusal reason is always
+        available via ``safety_gate.get_gate().last_refusal()``).
+        """
+        return bool(self.play_detailed(speed=speed,
+                                       stop_check=stop_check)["completed"])
+
+    def play_async(self, speed: float = 1.0,
+                   stop_check: Optional[Callable[[], bool]] = None
+                   ) -> Optional[threading.Thread]:
         """Replay on a daemon thread and return it (None if refused).
 
         Overlapping plays are refused via the module-level
         ``_current_play_thread`` guard: while a replay thread is alive,
-        further :meth:`play_async` calls return None.
+        further :meth:`play_async` calls return None.  v19.0.3: the
+        per-play ``stop_check`` is carried into the worker (the old
+        hardcoded-None path that lost cancellation is gone — the worker
+        also observes this player's :meth:`cancel` latch and the central
+        gate at every checkpoint), and a fail-closed pre-flight refuses
+        BEFORE starting a worker when the gate is estopped/shutting down
+        or a cancel latch is already set (reason on ``self.last_result``).
         """
         global _current_play_thread
         cur = _current_play_thread
         if cur is not None and cur.is_alive():
+            self._store_result({
+                "completed": False, "stopped": False, "started": False,
+                "reason": "already_playing", "events_dispatched": 0,
+                "events_total": 0})
             return None
         macro = self._macro
         if macro is None:
             macro = self._load_latest()
             if macro is None:
+                self._store_result({
+                    "completed": False, "stopped": False, "started": False,
+                    "reason": "no_macro", "events_dispatched": 0,
+                    "events_total": 0})
                 return None
             self._macro = macro
         events = macro.get("events")
         if not isinstance(events, list):
+            self._store_result({
+                "completed": False, "stopped": False, "started": False,
+                "reason": "no_events", "events_dispatched": 0,
+                "events_total": 0})
+            return None
+        refusal = self._start_refusal(stop_check)
+        if refusal:
+            self._store_result({
+                "completed": False, "stopped": True, "started": False,
+                "reason": refusal, "events_dispatched": 0,
+                "events_total": len([e for e in events if isinstance(e, dict)])})
             return None
         th = threading.Thread(
             target=self._run,
-            args=([e for e in events if isinstance(e, dict)], speed, None),
+            args=([e for e in events if isinstance(e, dict)], speed,
+                  stop_check),
             daemon=True,
+            name="airmouse-macro-replay",
         )
         _current_play_thread = th  # claim the slot before starting (race-safe)
         th.start()
         return th
 
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
+    # ── internals ──────────────────────────────────────────────────────────
+    @staticmethod
+    def _macro_event_count(macro: Dict[str, Any]) -> int:
+        events = macro.get("events")
+        if not isinstance(events, list):
+            return 0
+        return len([e for e in events if isinstance(e, dict)])
+
+    def _store_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """Remember + return the honest result of the last replay attempt."""
+        self.last_result = dict(result)
+        return self.last_result
+
+    def _start_refusal(
+            self, stop_check: Optional[Callable[[], bool]]) -> str:
+        """Fail-closed start check: "" = may start, else the refusal reason.
+
+        Order: cancel latches (this player + module-wide), then the
+        per-play ``stop_check``, then the central safety gate.  The gate
+        verdict is fetched fresh — an estopped/shutting-down gate refuses
+        BEFORE the first action could ever be dispatched.
+        """
+        if self._cancel_event.is_set() or _MODULE_CANCEL.is_set():
+            return "cancel_requested"
+        if _stop_requested(stop_check):
+            return "stop_requested"
+        return _gate_macro_refusal()
+
+    def _checkpoint(
+            self, stop_check: Optional[Callable[[], bool]]) -> str:
+        """Cooperative checkpoint: "" = continue, else the honest stop reason.
+
+        Evaluated before EVERY event and inside every wait/sleep chunk:
+        cancel latches first, then the per-play ``stop_check``, then the
+        central safety gate (a mid-play E-STOP stops the replay before
+        the next step).
+        """
+        if self._cancel_event.is_set() or _MODULE_CANCEL.is_set():
+            return "cancel_requested"
+        if _stop_requested(stop_check):
+            return "stop_requested"
+        return _gate_macro_refusal()
+
     def _run(self, events: List[Dict[str, Any]], speed: float,
-             stop_check: Optional[Callable[[], bool]]) -> bool:
+             stop_check: Optional[Callable[[], bool]]) -> Dict[str, Any]:
         global _current_play_thread
         _current_play_thread = threading.current_thread()
+        self._play_thread = threading.current_thread()
+        result: Dict[str, Any] = {
+            "completed": False, "stopped": False, "started": True,
+            "reason": "", "events_dispatched": 0, "events_total": len(events),
+        }
         try:
             try:
                 spd = float(speed)
@@ -295,8 +570,18 @@ class MacroPlayer:
                 spd = 1.0
             if not math.isfinite(spd) or spd <= 0.0:
                 spd = 1.0
+            # Fail-closed start: the gate/cancel/stop verdict happens
+            # BEFORE the first action could be dispatched.
+            refusal = self._start_refusal(stop_check)
+            if refusal:
+                result.update(started=False, stopped=True, reason=refusal)
+                return result
             prev = 0.0
             for ev in events:
+                stop_reason = self._checkpoint(stop_check)
+                if stop_reason:
+                    result.update(stopped=True, reason=stop_reason)
+                    return result
                 try:
                     t = float(ev.get("t", prev) or 0.0)
                 except Exception:
@@ -304,18 +589,28 @@ class MacroPlayer:
                 if t < prev:
                     t = prev
                 delay = (t - prev) / spd
-                if delay > 0.0 and not self._sleep(delay, stop_check):
-                    return False  # aborted by stop_check
+                if delay > 0.0:
+                    stop_reason = self._sleep(delay, stop_check)
+                    if stop_reason:
+                        result.update(stopped=True, reason=stop_reason)
+                        return result
                 prev = t
                 params = {k: v for k, v in ev.items() if k not in ("t", "event")}
                 try:
                     self._executor(str(ev.get("event", "")), params)
                 except Exception:
                     pass  # one bad action must not kill the whole replay
-            return True
+                result["events_dispatched"] += 1
+            result["completed"] = True
+            return result
         finally:
             if _current_play_thread is threading.current_thread():
                 _current_play_thread = None
+            self._store_result(result)
+            # The cancel latch is consumed by the run that honoured it (or
+            # that refused to start because of it) — a fresh replay may run.
+            self._cancel_event.clear()
+            _MODULE_CANCEL.clear()
             # v19.0.2 — always run the finish hook: an interrupted drag
             # replay must never leave the primary button pressed.
             try:
@@ -324,16 +619,22 @@ class MacroPlayer:
             except Exception:
                 pass  # never let cleanup break cleanup
 
-    @staticmethod
-    def _sleep(delay: float, stop_check: Optional[Callable[[], bool]]) -> bool:
-        """Sleep ``delay`` seconds in <=50 ms chunks.  False = abort requested."""
-        end = time.perf_counter() + delay
+    def _sleep(self, delay: float,
+               stop_check: Optional[Callable[[], bool]]) -> str:
+        """Sleep ``delay`` seconds in <=50 ms chunks (checkpoint-based).
+
+        Returns "" when the delay elapsed, else the stop reason.  EVERY
+        chunk re-checks the cancel latches, ``stop_check`` and the central
+        gate — a wait can never sleep through an E-STOP.
+        """
+        end = time.perf_counter() + max(0.0, delay)
         while True:
-            if _stop_requested(stop_check):
-                return False
+            stop_reason = self._checkpoint(stop_check)
+            if stop_reason:
+                return stop_reason
             remaining = end - time.perf_counter()
             if remaining <= 0.0:
-                return True
+                return ""
             time.sleep(min(0.05, remaining))
 
     @staticmethod
@@ -545,6 +846,13 @@ class ProgramRunner:
             -> VerificationResult`` used by VERIFY steps.
         config: see :data:`PROGRAM_RUNNER_DEFAULTS`.
 
+    v19.0.3 OPERATION FINAL FORM: runs consult the central safety gate
+    (``safety_gate.get_gate().authorize("macro_action")``) before the
+    first step, re-check before EACH step and inside every sleep/poll
+    loop, and observe the module-wide cancel latch — an estop, shutdown
+    or :func:`cancel_current_replay` aborts the run with an honest
+    ``aborted`` + ``reason`` report before anything further dispatches.
+
     :meth:`run` returns ``{"steps_total", "steps_executed", "verified",
     "failed", "aborted", "reason", "duration"}``.  Executor exceptions are
     contained per step (counted as failed) — a run never raises.
@@ -586,6 +894,12 @@ class ProgramRunner:
             return self.run_legacy(program, stop_check=stop_check)
         t0 = time.perf_counter()
         state = self._fresh_state()
+        # Fail-closed start: an estopped/shutting-down gate (or a latched
+        # module cancel) refuses the run BEFORE the first step dispatches.
+        start_refusal = _runner_start_refusal()
+        if start_refusal:
+            self._abort(state, start_refusal)
+            return self._report(state, t0)
         self._run_steps(list(getattr(program, "steps", None) or []), 0, state,
                         stop_check)
         return self._report(state, t0)
@@ -623,12 +937,18 @@ class ProgramRunner:
         drag_origin: Optional[Tuple[float, float]] = None
         state = self._fresh_state()
         state["steps_total"] = len(events)
+        # Fail-closed start (same verdict as the v2 path).
+        start_refusal = _runner_start_refusal()
+        if start_refusal:
+            self._abort(state, start_refusal)
+            return self._report(state, t0)
         prev_t = 0.0
         for ev in events:
             if state["aborted"]:
                 break
-            if _stop_requested(stop_check):
-                self._abort(state, "stop_requested")
+            stop_reason = _runner_stop_reason(stop_check)
+            if stop_reason:
+                self._abort(state, stop_reason)
                 break
             if state["executed"] >= self.max_steps:
                 self._abort(state, "max_steps")
@@ -726,11 +1046,17 @@ class ProgramRunner:
         stop_check: Optional[Callable[[], bool]],
         state: Dict[str, Any],
     ) -> bool:
-        """Sleep in poll_interval chunks; False = stop requested (aborts)."""
+        """Sleep in poll_interval chunks; False = stop requested (aborts).
+
+        v19.0.3: every chunk re-checks the cooperative stop conditions
+        (``stop_check``, the module-wide cancel latch and the central
+        safety gate) — a wait can never sleep through an E-STOP.
+        """
         end = time.perf_counter() + max(0.0, delay)
         while True:
-            if _stop_requested(stop_check):
-                self._abort(state, "stop_requested")
+            stop_reason = _runner_stop_reason(stop_check)
+            if stop_reason:
+                self._abort(state, stop_reason)
                 return False
             remaining = end - time.perf_counter()
             if remaining <= 0.0:
@@ -786,8 +1112,9 @@ class ProgramRunner:
         for step in steps:
             if state["aborted"]:
                 return
-            if _stop_requested(stop_check):
-                self._abort(state, "stop_requested")
+            stop_reason = _runner_stop_reason(stop_check)
+            if stop_reason:
+                self._abort(state, stop_reason)
                 return
             if state["executed"] >= self.max_steps:
                 self._abort(state, "max_steps")
@@ -859,8 +1186,9 @@ class ProgramRunner:
         ttype = params.get("type")
         deadline = time.perf_counter() + self.look_for_timeout
         while True:
-            if _stop_requested(stop_check):
-                self._abort(state, "stop_requested")
+            stop_reason = _runner_stop_reason(stop_check)
+            if stop_reason:
+                self._abort(state, stop_reason)
                 return False
             target: Optional[ScreenTarget] = None
             try:
@@ -1016,8 +1344,11 @@ class ProgramRunner:
             state["last_fail_reason"] = "retry_no_previous_step"
             return False
         for _ in range(times):
-            if state["aborted"] or _stop_requested(stop_check):
-                self._abort(state, "stop_requested")
+            if state["aborted"]:
+                return False
+            stop_reason = _runner_stop_reason(stop_check)
+            if stop_reason:
+                self._abort(state, stop_reason)
                 return False
             if state["executed"] >= self.max_steps:
                 self._abort(state, "max_steps")

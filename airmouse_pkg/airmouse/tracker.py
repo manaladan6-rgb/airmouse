@@ -1,6 +1,17 @@
 """
 Hand Tracker — MediaPipe Tasks API with finger-relative tracking.
 
+v19.0.3 (TF-001) — real lazy ``mp`` global + constructor hardening:
+  - ``mp`` is bound at import time to a real module global holding a
+    delegating proxy (``_LazyMp``), so bare global lookups inside this
+    module resolve; the first touch still pays the mediapipe import and
+    rebinds the global to the real module object.
+  - ``HandTracker()`` probes the camera BEFORE building the detector and
+    fails with actionable RuntimeErrors (camera / model guidance) — a
+    camera failure can never masquerade as "hands active".
+  - ``read()`` tolerates dead cameras; ``release()`` never raises;
+    ``camera_ok()`` reports camera health as a plain bool.
+
 On first run, downloads the hand_landmarker.task model (~8MB).
 
 v15.2 — two-hand foundation (BACKWARD-COMPATIBLE extension):
@@ -47,6 +58,7 @@ import hashlib
 import os
 import sys
 import time
+import types
 import urllib.request
 
 import numpy as np
@@ -69,12 +81,86 @@ class _LazyCv2:
 
 cv2 = _LazyCv2()
 
-# NOTE: mediapipe is imported LAZILY (PEP 562 module __getattr__ below) —
-# it pulls matplotlib and ~1.0 s of import work, which would otherwise
-# tax every CLI command (`airmouse --version`, doctor, setup, ...) that
-# merely imports this module for the HandTracker class object.  Code and
-# tests can still use ``airmouse.tracker.mp`` exactly as before: the
-# first access imports mediapipe and caches it as a real module global.
+# ── v19.0.3 (TF-001) — mediapipe lazy loading via a REAL module global ──
+# mediapipe pulls matplotlib and ~1.0 s of import work, which must not tax
+# every CLI command (`airmouse --version`, doctor, setup, ...) that merely
+# imports this module for the HandTracker class object.
+#
+# TF-001 root cause: the previous PEP 562-only binding satisfied *outside*
+# attribute fetches (``airmouse.tracker.mp``) but can never satisfy a bare
+# LOAD_GLOBAL inside this module's own functions — ``HandTracker.__init__``
+# died with ``NameError: name 'mp' is not defined``.  ``mp`` is therefore
+# bound at import time to a real module global holding a tiny delegating
+# proxy: the first attribute access imports mediapipe, REBINDS the global
+# to the real module object and forwards the access, so after first touch
+# ``airmouse.tracker.mp is sys.modules["mediapipe"]``.  Plain
+# ``monkeypatch.setattr(tracker, "mp", fake)`` keeps working because the
+# global is an ordinary module attribute.
+
+
+class _LazyMp:
+    """Delegating lazy proxy for the mediapipe module (TF-001).
+
+    Bound as the module global ``mp`` at import time; forwards every
+    attribute access to the real mediapipe module, imported on first
+    touch.
+    """
+
+    def __getattr__(self, name):
+        return getattr(_materialize_mp(), name)
+
+
+def _materialize_mp():
+    """Import mediapipe on first touch; install it as the ``mp`` global.
+
+    Raises ImportError with actionable text when mediapipe is missing or
+    its native dependencies are broken.
+    """
+    try:
+        import mediapipe as _mp
+    except Exception as e:  # ImportError or broken native dependencies
+        raise ImportError(
+            "mediapipe is required for hand tracking but could not be "
+            f"imported: {e}\n"
+            "      FIX : pip install mediapipe\n"
+            "            (inside the Python environment AirMouse runs in)"
+        ) from e
+    globals()["mp"] = _mp  # real module global from here on
+    return _mp
+
+
+mp = _LazyMp()
+
+
+def __getattr__(name):
+    """PEP 562 fallback for names absent from the module dict.
+
+    ``mp`` is pre-bound above (TF-001), so this only fires for genuinely
+    unknown attributes — plus a safety net if the global was deleted.
+    """
+    if name == "mp":
+        return _materialize_mp()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+class _TrackerModule(types.ModuleType):
+    """Module class making a *bare* ``airmouse.tracker.mp`` fetch count
+    as first touch.
+
+    A dict hit on a module attribute is inert — PEP 562 cannot fire while
+    ``mp`` sits in the module dict — yet the lazy contract (and existing
+    tests) require ``t.mp`` itself to import mediapipe and to BE
+    ``sys.modules["mediapipe"]`` afterwards.  Intercepting the fetch at
+    the module-class level keeps that contract intact next to the
+    LOAD_GLOBAL-safe pre-bound proxy.
+    """
+
+    def __getattribute__(self, name):
+        if name == "mp":
+            current = globals().get("mp")
+            if current is None or type(current) is _LazyMp:
+                return _materialize_mp()
+        return super().__getattribute__(name)
 
 # v19.0.2 — PINNED, versioned model URL + pinned SHA-256.  The old URL
 # used the mutable "latest" alias with no integrity check, no consent,
@@ -100,16 +186,6 @@ def _resolve_model_path() -> str:
 
 CACHE_DIR = os.path.join(os.path.expanduser("~"), ".airmouse")
 MODEL_PATH = os.path.join(CACHE_DIR, "hand_landmarker.task")
-
-
-def __getattr__(name):
-    """PEP 562 lazy module attributes — mediapipe only, on first touch."""
-    if name == "mp":
-        global mp
-        import mediapipe as _mp
-        mp = _mp  # cache as a real module global; later lookups skip this
-        return _mp
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class _LM:
@@ -268,9 +344,54 @@ class HandTracker:
                 f"max_hands must be 1 or 2, got {max_hands!r}")
         self.max_hands = int(max_hands)
 
+        # v19.0.3 (TF-001) — CAMERA PROBE FIRST.  A machine without a
+        # usable camera must fail here with an explicit camera error —
+        # never as a downstream NameError/ImportError from detector
+        # construction, and never in a state that could look like
+        # "hands active".
+        self.cap = cv2.VideoCapture(camera_index)
+        if not self._camera_opens(self.cap):
+            try:
+                self.cap.release()
+            except Exception:
+                pass
+            self.cap = None
+            raise RuntimeError(
+                f"Camera index {camera_index} could not be opened — hand "
+                "tracking cannot start.\n"
+                "      WHAT: the camera device did not open, so no video\n"
+                "            frames can be read for hand detection.\n"
+                "      FIX : check that a camera is connected, powered and\n"
+                "            not held by another app, or try another camera\n"
+                "            index.  On a headless machine there is no\n"
+                "            camera: gesture control is unavailable and\n"
+                "            AirMouse degrades honestly instead of\n"
+                "            pretending hands are active.")
+        self._camera_ok = True
+
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
+        self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.last_frame = None
+        # v19.0.2 — REAL monotonic frame timestamps (audit HIGH #2).
+        # The old code incremented a synthetic +33 ms counter, which made
+        # every MediaPipe call believe a perfect 30 fps world and made
+        # dropped frames invisible to the timing chain.
+        self._t0_monotonic = None
+        self.frame_timestamp_ms = 0
+        self.frame_timestamp_s = 0.0
+
+        # v19.0.3 (TF-001) — MODEL second: resolve/verify the pinned
+        # hand-landmarker model.  The constructor never downloads: a
+        # missing model raises actionable guidance instead.
         model_path = _ensure_model()
         self.model_path = model_path
 
+        # v19.0.3 (TF-001) — DETECTOR last: the FIRST mediapipe touch
+        # (lazy ``mp`` global) happens here, only after camera and model
+        # are known good.
         BaseOptions = mp.tasks.BaseOptions
         HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
         VisionRunningMode = mp.tasks.vision.RunningMode
@@ -285,20 +406,21 @@ class HandTracker:
         )
         self.detector = mp.tasks.vision.HandLandmarker.create_from_options(options)
 
-        self.cap = cv2.VideoCapture(camera_index)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.cap.set(cv2.CAP_PROP_FPS, 30)
-        self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.last_frame = None
-        # v19.0.2 — REAL monotonic frame timestamps (audit HIGH #2).
-        # The old code incremented a synthetic +33 ms counter, which made
-        # every MediaPipe call believe a perfect 30 fps world and made
-        # dropped frames invisible to the timing chain.
-        self._t0_monotonic = None
-        self.frame_timestamp_ms = 0
-        self.frame_timestamp_s = 0.0
+    @staticmethod
+    def _camera_opens(cap) -> bool:
+        """v19.0.3 (TF-001) — open-probe for the capture handle.
+
+        Real OpenCV handles expose ``isOpened()``; lightweight test fakes
+        may not, and are assumed to open (their dead-camera behavior is
+        exercised through ``read()``).  Never raises.
+        """
+        try:
+            is_open = getattr(cap, "isOpened", None)
+            if callable(is_open):
+                return bool(is_open())
+        except Exception:
+            return False
+        return True
 
     def _hand_entry(self, landmarks, categories):
         """Build one ``"hands"`` entry from a single MediaPipe detection.
@@ -356,8 +478,20 @@ class HandTracker:
         return bool(np.all(arr >= cls._LM_LO) and np.all(arr <= cls._LM_HI))
 
     def read(self):
-        ret, frame = self.cap.read()
-        if not ret:
+        # v19.0.3 (TF-001) — dead-camera tolerance: a backend yielding
+        # (False, None) or None, or raising, reports "no hands" honestly
+        # and never fabricates landmarks.
+        try:
+            got = self.cap.read()
+        except Exception:
+            return self._empty_result()
+        if got is None:
+            return self._empty_result()
+        try:
+            ret, frame = got
+        except (TypeError, ValueError):
+            return self._empty_result()
+        if not ret or frame is None:
             return self._empty_result()
 
         frame = cv2.flip(frame, 1)
@@ -417,6 +551,39 @@ class HandTracker:
             "hands": [],
         }
 
+    # v19.0.3 (TF-001) — tolerant teardown: shutdown must never raise,
+    # even when a backend is already dead or half-constructed.
     def release(self):
-        self.cap.release()
-        self.detector.close()
+        for attr, closer in (("cap", "release"), ("detector", "close")):
+            try:
+                obj = getattr(self, attr, None)
+                if obj is not None:
+                    method = getattr(obj, closer, None)
+                    if callable(method):
+                        method()
+            except Exception:
+                pass  # a failing backend must not break shutdown
+
+    def camera_ok(self) -> bool:
+        """v19.0.3 (TF-001) — camera health as a plain bool, never raises.
+
+        True while the capture handle reports itself open; falls back to
+        the constructor probe verdict for handles without ``isOpened``;
+        False whenever anything is uncertain.
+        """
+        try:
+            cap = getattr(self, "cap", None)
+            if cap is None:
+                return False
+            is_open = getattr(cap, "isOpened", None)
+            if callable(is_open):
+                return bool(is_open())
+            return bool(getattr(self, "_camera_ok", False))
+        except Exception:
+            return False
+
+
+# v19.0.3 (TF-001) — activate the module-class hook (see _TrackerModule):
+# a bare ``airmouse.tracker.mp`` fetch must count as first touch, which
+# PEP 562 alone cannot deliver while the name sits in the module dict.
+sys.modules[__name__].__class__ = _TrackerModule

@@ -13,14 +13,38 @@ to, plus the extension source itself.
 
 Design rules
 ------------
-1.  **Localhost only.**  The server is hard-bound to ``127.0.0.1`` — it is
-    NEVER exposed on 0.0.0.0.  Only the most recent state is stored.
-2.  **Data only.**  The payload is parsed with ``json.loads`` and stored
+1.  **Localhost only — containment, NOT authorization.**  The server is
+    hard-bound to ``127.0.0.1`` — it is NEVER exposed on 0.0.0.0.  That
+    binding is network CONTAINMENT only: a loopback socket does not
+    authorize anything.  Every request is additionally validated
+    (Host/Origin, see below); binding to 127.0.0.1 alone must never be
+    read as “local therefore trusted”.
+2.  **EXACT origin allowlist (TT-04 / SAF-2).**  A request carrying a
+    web ``Origin`` (``http``/``https``) is accepted only when the
+    normalized origin — scheme + host + port, compared EXACTLY — is in
+    the configured allowlist (``BrowserBridgeServer(config={
+    "allowed_origins": [...]})``).  The historical substring match
+    (“does the origin CONTAIN 127.0.0.1 / the configured host”) was a
+    bypass: ``https://trusted.example.attacker.io`` matched
+    ``https://trusted.example`` and any page could smuggle the marker
+    into a query string.  Normalization strips default ports (443 for
+    https, 80 for http) so the implicit and explicit forms of the same
+    origin compare equal; a different port or scheme is a DIFFERENT
+    origin and is refused.  Browser-extension origins
+    (``chrome-extension://``, ``moz-extension://``,
+    ``safari-web-extension://``) remain scheme-accepted: the browser
+    itself always sends the true extension origin, and web pages cannot
+    forge one.  A loopback web origin (``http://127.0.0.1:9999``) is
+    NOT trusted by default — loopback ≠ authorization.
+3.  **Data only.**  The payload is parsed with ``json.loads`` and stored
     as a plain dict; nothing from it is ever executed.  Oversized
     (> 256 KB) or invalid payloads are rejected with 413 / 400.
-3.  **Never raises.**  ``start`` returns False when the port cannot be
+4.  **Known commands only.**  The command surface is exactly
+    ``GET /health``, ``GET /state``, ``POST /state``; every other path
+    is refused with 404 (unknown commands never reach storage).
+5.  **Never raises.**  ``start`` returns False when the port cannot be
     bound; handler errors are answered with 500 and swallowed.
-4.  **Deterministic tests.**  ``verify_bridge_server()`` performs a full
+6.  **Deterministic tests.**  ``verify_bridge_server()`` performs a full
     POST→GET round-trip on an ephemeral port (port 0) and returns True /
     False — no fixtures, no external browser needed.
 
@@ -40,15 +64,67 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, Optional
+from typing import Any, Dict, FrozenSet, Iterable, Optional
 
 __all__ = [
     "BrowserBridgeServer",
     "verify_bridge_server",
+    "normalize_origin",
     "DEFAULT_BRIDGE_PORT",
 ]
 
 DEFAULT_BRIDGE_PORT = 17843
+
+#: Browser-internal extension schemes.  These are accepted at the SCHEME
+#: level (any extension id) because a web page can never hold such an
+#: origin — the browser itself forbids it — while pinning install-
+#: specific extension ids in a config file would break every reinstall.
+_EXTENSION_SCHEMES = frozenset({
+    "chrome-extension", "moz-extension", "safari-web-extension",
+})
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def normalize_origin(origin: Any) -> str:
+    """Canonical form of one Origin header value (scheme://host[:port]).
+
+    - scheme and host are lower-cased; an IPv6 host keeps its brackets;
+    - the default port for the scheme is stripped (``https://x:443``
+      and ``https://x`` normalize to the SAME origin);
+    - any other explicit port is kept (a different port is a different
+      origin — no wildcards, no substring matching);
+    - web origins carrying a path/query/fragment are MALFORMED (real
+      browsers never send one) and normalize to ``""`` → refused;
+    - unparseable input normalizes to ``""`` → refused.
+    Never raises.
+    """
+    try:
+        raw = str(origin or "").strip()
+        if not raw:
+            return ""
+        parts = urllib.parse.urlsplit(raw)
+        scheme = (parts.scheme or "").lower()
+        if not scheme or not parts.netloc:
+            return ""
+        if parts.query or parts.fragment:
+            return ""
+        if parts.path not in ("", "/") and scheme not in _EXTENSION_SCHEMES:
+            return ""
+        host = parts.hostname  # lower-case, IPv6 brackets stripped
+        if not host:
+            return ""
+        try:
+            port = parts.port          # may raise ValueError: invalid port
+        except ValueError:
+            return ""
+        host_part = f"[{host}]" if ":" in host else host
+        if port is None or (scheme in _DEFAULT_PORTS and
+                            port == _DEFAULT_PORTS[scheme]):
+            return f"{scheme}://{host_part}"
+        return f"{scheme}://{host_part}:{port}"
+    except Exception:
+        return ""
 
 
 class _BridgeHandler(http.server.BaseHTTPRequestHandler):
@@ -94,19 +170,33 @@ class _BridgeHandler(http.server.BaseHTTPRequestHandler):
         return hostname in ("127.0.0.1", "localhost", "::1")
 
     def _origin_ok(self) -> bool:
-        """POSTs from web pages carry Origin; local tools may omit it.
+        """EXACT origin allowlist (TT-04 / SAF-2 — v19.0.3 R3b2).
 
-        An Origin that is NOT a local extension/web page origin is refused:
-        a DNS-rebinding attacker's page would send the attacker's origin.
+        POSTs from web pages carry Origin; local tools may omit it.
+        Rules, in order (fail-closed):
+
+        1. no Origin header at all → local non-browser client (curl,
+           the extension background worker) → allowed;
+        2. a browser-extension scheme (``chrome-extension://``,
+           ``moz-extension://``, ``safari-web-extension://``) → allowed
+           (web pages cannot hold these origins);
+        3. any ``http``/``https`` web origin → allowed ONLY when its
+           normalized form (scheme + host + port, EXACT string) is in
+           the configured allowlist.  The loopback BIND address of this
+           socket is irrelevant here: ``http://127.0.0.1:9999`` is just
+           another web origin and is refused unless explicitly listed
+           (loopback ≠ authorization — binding is containment).
         """
         origin = (self.headers.get("Origin") or "").strip()
         if not origin:
             return True  # non-browser client (curl, extension background)
-        o = origin.lower()
-        return (o.startswith("chrome-extension://")
-                or o.startswith("moz-extension://")
-                or o.startswith("safari-web-extension://")
-                or "127.0.0.1" in o or "localhost" in o)
+        normalized = normalize_origin(origin)
+        if not normalized:
+            return False  # malformed origin → refuse, never guess
+        scheme = normalized.split(":", 1)[0]
+        if scheme in _EXTENSION_SCHEMES:
+            return True
+        return normalized in self._owner.allowed_origins
 
     def log_message(self, fmt: str, *args: Any) -> None:  # silence stderr
         return
@@ -197,6 +287,16 @@ class BrowserBridgeServer:
     At most ONE state (the latest) is retained.  Payloads are validated
     with ``json.loads`` and capped at 256 KB.  The socket is bound to
     ``127.0.0.1`` unconditionally — never ``0.0.0.0``.
+
+    CONTAINMENT vs AUTHORIZATION: binding to ``127.0.0.1`` only limits
+    the network reach of the socket; it does NOT authorize callers.
+    Requests carrying a web ``Origin`` must additionally match the
+    EXACT-normalized ``allowed_origins`` allowlist (config key
+    ``"allowed_origins"``, e.g. ``["https://trusted.example",
+    "http://localhost:8765"]``).  By default the allowlist is EMPTY:
+    extension origins are scheme-accepted and headerless local tools
+    are accepted, but NO web page origin is trusted — including
+    loopback ones — until it is configured exactly.
     """
 
     MAX_STATE_BYTES = 256 * 1024
@@ -209,8 +309,39 @@ class BrowserBridgeServer:
         self._thread: Optional[threading.Thread] = None
         self._state: Optional[Dict[str, Any]] = None
         self._lock = threading.Lock()
+        self._allowed_origins = self._normalize_allowlist(
+            cfg.get("allowed_origins"))
+
+    @staticmethod
+    def _normalize_allowlist(raw: Any) -> FrozenSet[str]:
+        """EXACT-normalize the configured allowlist (TT-04).
+
+        Entries that do not normalize cleanly are dropped (fail-closed:
+        a misconfigured origin must not widen trust).  Accepts a list,
+        tuple, set or a single comma-separated string.
+        """
+        items: Iterable[Any]
+        if raw is None:
+            items = ()
+        elif isinstance(raw, str):
+            items = [part.strip() for part in raw.split(",")]
+        elif isinstance(raw, (list, tuple, set, frozenset)):
+            items = raw
+        else:
+            items = ()
+        allowed = set()
+        for item in items:
+            normalized = normalize_origin(item)
+            if normalized:
+                allowed.add(normalized)
+        return frozenset(allowed)
 
     # -- properties ----------------------------------------------------------------
+
+    @property
+    def allowed_origins(self) -> FrozenSet[str]:
+        """The EXACT-normalized origin allowlist (TT-04 / SAF-2)."""
+        return self._allowed_origins
 
     @property
     def port(self) -> int:

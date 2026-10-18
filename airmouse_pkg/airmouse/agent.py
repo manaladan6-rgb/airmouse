@@ -115,6 +115,35 @@ CLICK_CLASS = {
 }
 
 
+def _central_gate_authorize() -> "tuple[bool, str]":
+    """Consult the process-wide CentralSafetyGate for ONE agent action.
+
+    (v19.0.3 R3b2 — agent_action route.)  Every consequential intent the
+    agent is about to execute passes this check BEFORE dispatch: while
+    the E-STOP is latched, the session is shutting down, or the agent
+    backend was declared unavailable, nothing reaches the action
+    engine.  Fail-closed: a missing/broken gate module refuses.
+
+    The per-intent CONFIRMATION requirement on this route is owned by
+    the agent's SafetySystem (``needs_confirmation`` arming + CONFIRM
+    retry — see :func:`run_intent_through_safety`); the central gate's
+    confirmation flag is therefore presented as satisfied here, because
+    refusing with ``confirmation_required`` BEFORE the safety flow
+    would make sensitive intents un-confirmable.  The gate still adds
+    the independent process-wide dimensions (E-STOP latch, shutdown,
+    backend availability) at the last moment before execution.
+    """
+    try:
+        from .safety_gate import get_gate
+    except Exception as exc:            # broken gate import → refuse
+        return False, f"gate_error: {exc}"
+    try:
+        return get_gate().authorize("agent_action", backend="agent",
+                                    confirmed=True)
+    except Exception as exc:            # a broken gate blocks, never enables
+        return False, f"gate_error: {exc}"
+
+
 # ---------------------------------------------------------------------------
 # AgentConfig
 # ---------------------------------------------------------------------------
@@ -824,8 +853,20 @@ class InteractionAgent:
         reports: List[ActionReport] = []
         self.telemetry.record("actions_total", 1)
 
+        # Central safety gate (process-wide E-STOP / shutdown / backend):
+        # consequential intents refuse here BEFORE anything is dispatched.
+        # Control intents (EMERGENCY_STOP / CANCEL / CONFIRM) must always
+        # stay reachable — they ARE the safety release channels.
         if intent.type not in (IntentType.EMERGENCY_STOP, IntentType.CANCEL,
                                IntentType.CONFIRM):
+            gate_ok, gate_reason = _central_gate_authorize()
+            if not gate_ok:
+                blocked = ActionReport(timestamp=t0)
+                blocked.status = ActionStatus.BLOCKED
+                blocked.message = f"refused_by_central_gate:{gate_reason}"
+                reports.append(blocked)
+                self._record_report(blocked)
+                return reports
             # first real execute lazily materializes the PynputExecutor
             self._ensure_executor()
         report = run_intent_through_safety(

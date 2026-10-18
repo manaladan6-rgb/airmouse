@@ -487,3 +487,193 @@ def build_capabilities(features: Dict[str, bool],
                  "kind": "observation", "note": "protocol version"})
     caps.sort(key=lambda c: c["name"])
     return caps
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# central safety gate route (v19.0.3 R3b2 — agent_action)
+# ─────────────────────────────────────────────────────────────────────────────
+# AIP EXECUTE is an AGENT action channel: every real execution is gated
+# by the process-wide CentralSafetyGate ("agent_action" — confirmation-
+# required by default) on top of the §9 permission decision.  Unclassified
+# action names are FAIL-CLOSED denied: they are never forwarded to any
+# engine, estop/shutdown always refuse pre-dispatch.
+
+#: Action names an agent may execute through the real-mode engine.
+#: AipEndpoint's permission table plus the core ActionType vocabulary;
+#: anything else is unclassified and denied before dispatch.
+_AIP_TABLE_ACTIONS = frozenset({
+    "click", "type_text", "open_app", "navigate",
+    "observe", "observe_screen",
+})
+_KNOWN_ACTIONS_CACHE: Optional[frozenset] = None
+
+
+def known_agent_actions() -> frozenset:
+    """The classified AIP action-name allowlist (fail-closed set).
+
+    Computed lazily from the core ``ActionType`` vocabulary plus the
+    AIP permission-table names; unclassified names never reach an
+    engine.  Never raises.
+    """
+    global _KNOWN_ACTIONS_CACHE
+    if _KNOWN_ACTIONS_CACHE is None:
+        names = set(_AIP_TABLE_ACTIONS)
+        try:
+            from .interfaces import ActionType
+            names.update(str(m.value) for m in ActionType
+                         if str(m.name) != "NONE")
+        except Exception:
+            pass  # allowlist stays at the AIP table (still fail-closed)
+        _KNOWN_ACTIONS_CACHE = frozenset(names)
+    return _KNOWN_ACTIONS_CACHE
+
+
+def authorize_agent_execution(action_name: str = "", *,
+                              confirmed: bool = False,
+                              backend: str = "agent") -> Tuple[bool, str]:
+    """Central-gate permission check for ONE agent execution (§9/§23).
+
+    Returns ``(True, "ok")`` or ``(False, reason)``; never raises and
+    NEVER defaults to allow:
+
+    - unknown/unclassified action names are denied outright;
+    - ``agent_action`` is confirmation-required by default — callers
+      must present ``confirmed=True`` only when the operator decision
+      actually happened (the AIP REQUEST/AUTHORIZE flow, or the agent
+      SafetySystem confirmation flow);
+    - E-STOP latched / shutdown in progress / backend unavailable →
+      refused pre-dispatch.
+    """
+    name = str(action_name or "").strip()
+    if not name:
+        return False, "unclassified_action: empty action name"
+    if name not in known_agent_actions():
+        return False, f"unclassified_action: {name[:40]}"
+    try:
+        from .safety_gate import get_gate
+    except Exception as exc:            # broken gate import → refuse
+        return False, f"gate_error: {exc}"
+    try:
+        return get_gate().authorize("agent_action",
+                                    backend=str(backend or "agent"),
+                                    confirmed=bool(confirmed))
+    except Exception as exc:            # a broken gate blocks, never enables
+        return False, f"gate_error: {exc}"
+
+
+def _plan_action_name(plan: Any) -> str:
+    """Best-effort action-name extraction from an engine payload."""
+    if isinstance(plan, dict):
+        for key in ("action", "type"):
+            value = plan.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+    name = getattr(plan, "action", None)
+    name = getattr(name, "value", name)
+    if name is None:
+        return ""
+    return str(name).strip()
+
+
+class GateGuardedEngine:
+    """Wrap a real-mode AIP engine: EVERY ``execute()`` is gate-checked.
+
+    ``--aip-real`` wiring (R3b2): the wrapper is the last thing between
+    an agent EXECUTE and the real engine.  Before the engine is touched
+    it consults the central safety gate via
+    :func:`authorize_agent_execution`; a refusal returns an honest
+    failure result and the engine is NEVER called.  Confirmed default:
+    ``True`` — the upstream AIP permission decision (REQUEST/AUTHORIZE,
+    enforced by ``AipEndpoint._on_execute``) is the operator decision
+    for this channel; the wrapper independently enforces the E-STOP
+    latch, shutdown, backend availability and the classified-action
+    allowlist.  Pass ``confirmed=False`` to require an explicit
+    confirmation signal instead.
+    """
+
+    def __init__(self, engine: Any, backend: str = "agent",
+                 confirmed: bool = True) -> None:
+        self._engine = engine
+        self.backend = str(backend or "agent")
+        self.confirmed = bool(confirmed)
+        self.executes = 0
+        self.refusals = 0
+        self.last_refusal = ""
+
+    # -- the guarded route -----------------------------------------------------
+    def execute(self, plan: Any) -> Any:
+        """Gate-check, then delegate.  Never raises on refusal."""
+        name = _plan_action_name(plan)
+        ok, reason = authorize_agent_execution(
+            name, confirmed=self.confirmed, backend=self.backend)
+        if not ok:
+            self.refusals += 1
+            self.last_refusal = str(reason)
+            return {"ok": False, "refused": True,
+                    "message": f"refused by safety gate: {reason}"}
+        self.executes += 1
+        return self._engine.execute(self._adapt(plan))
+
+    def _adapt(self, plan: Any) -> Any:
+        """Keep the core ActionEngine payload contract intact.
+
+        ``AipEndpoint.build_engine_payload`` only recognises a bare
+        core engine; when the endpoint holds THIS wrapper the payload
+        arrives as a plain dict — re-adapt it here so a real
+        ``ActionEngine`` still receives a proper ``ActionPlan``.
+        """
+        try:
+            if not isinstance(plan, dict):
+                return plan
+            from .actions import ActionEngine
+            if not isinstance(self._engine, ActionEngine):
+                return plan
+            from .agent_sdk import _build_action_plan
+            from .actions import ActionPlan, ActionType
+            return _build_action_plan(
+                ActionPlan, ActionType,
+                str(plan.get("action", "")),
+                dict(plan.get("params") or {}),
+                dict(plan.get("target") or {}),
+                dict(plan))
+        except Exception:
+            return plan
+
+    # -- transparency ----------------------------------------------------------
+    def __getattr__(self, name: str) -> Any:
+        # called only when normal lookup fails → delegate to the engine
+        # (verify_action / verify hooks seen by AipEndpoint, etc.)
+        return getattr(self._engine, name)
+
+
+def gate_guarded_engine(engine: Any, backend: str = "agent",
+                        confirmed: bool = True) -> Any:
+    """Return ``engine`` wrapped in :class:`GateGuardedEngine` (idempotent)."""
+    if engine is None or isinstance(engine, GateGuardedEngine):
+        return engine
+    return GateGuardedEngine(engine, backend=backend, confirmed=confirmed)
+
+
+def wire_real_mode_engine(engine: Any) -> Any:
+    """Wire a ``--aip-real`` engine through the central safety gate.
+
+    This is THE integration point required for real-mode AIP execution:
+    wrap the engine (``AipEndpoint(action_engine=wire_real_mode_engine(
+    ActionEngine(...)))``) so each real execute is preceded by
+    ``authorize("agent_action", ...)`` and refused when the gate
+    refuses.  Idempotent; ``None`` passes through unchanged.
+    """
+    return gate_guarded_engine(engine)
+
+
+def default_real_engine() -> Any:
+    """Engine factory for ``AIRMOUSE_AIP_ENGINE=airmouse.aip:default_real_engine``.
+
+    Builds the core real-mode engine (ActionEngine + PynputExecutor)
+    already wrapped through the central gate, so
+    ``airmouse --aip-stdio`` with ``AIRMOUSE_AIP_REAL=1`` and this env
+    spec runs real executions that are fail-closed gate-checked.
+    """
+    from .actions import ActionEngine, PynputExecutor
+    return gate_guarded_engine(ActionEngine(executor=PynputExecutor()))

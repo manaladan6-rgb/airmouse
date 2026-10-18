@@ -73,7 +73,77 @@ except ImportError:  # pragma: no cover - direct file execution fallback
     from airmouse.interfaces import (Event, EventKind, Modality, ScreenTarget,
                                      ScreenTargetType, now_ts)
 
+try:  # central safety gate (stdlib-only module; guarded for honesty)
+    from .safety_gate import get_gate as _get_gate
+except Exception:  # pragma: no cover - a broken gate import must refuse
+    _get_gate = None
+
 logger = logging.getLogger("airmouse.browser")
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Central safety gate route (v19.0.3 R3b2 — browser_action)
+# ═════════════════════════════════════════════════════════════════════════════
+# EVERY browser dispatch funnels through BrowserController.execute(): the
+# __main__ voice side-door (offline voice → SemanticBrowserResolver →
+# execute), the action-engine browser executor shim and guided tests all
+# land here, so THIS is where the process-wide gate is consulted.  While
+# the E-STOP is latched, the session is shutting down, or the gate refuses
+# for any other reason, NOTHING is sent to Chrome/CDP/bridge — the refusal
+# is reported honestly and no bridge call of any kind is made (not even a
+# read poll).
+
+#: Maximum serialised size of one action's parameters (voice side-door
+#: payloads included).  Anything larger is rejected BEFORE dispatch.
+MAX_BROWSER_PAYLOAD_BYTES = 64 * 1024
+
+#: Maximum utterance length accepted by the semantic resolver (the voice
+#: side-door input).  Longer input is rejected honestly, never matched.
+MAX_BROWSER_UTTERANCE_BYTES = 64 * 1024
+
+#: Unknown/unclassified browser command names are DEFAULT-DENIED here —
+#: they are refused before the gate is even consulted, and never reach
+#: the bridge.  (Mirrors BROWSER_ACTIONS, which is defined further down.)
+_BROWSER_COMMANDS = frozenset(
+    ("click", "focus", "type", "navigate", "new_tab", "close_tab",
+     "switch_tab", "back", "forward", "refresh", "scroll", "search"))
+
+
+def authorize_browser_action(action: str = "", *,
+                             backend: str = "browser") -> Tuple[bool, str]:
+    """Consult the central safety gate before ONE browser action.
+
+    Returns ``(True, "ok")`` or ``(False, reason)``.  Fail-closed in
+    every direction: a missing/broken gate module refuses, an unknown
+    action class refuses, an E-STOP latch / shutdown / unavailable
+    backend refuses.  Never raises.
+    """
+    if _get_gate is None:
+        return False, "gate_error: safety gate unavailable"
+    try:
+        gate = _get_gate()
+        return gate.authorize("browser_action", backend=str(backend or "browser"))
+    except Exception as exc:  # a broken gate blocks, never enables
+        return False, f"gate_error: {exc}"
+
+
+def authorize_browser_voice_command(text: str = "", *,
+                                    backend: str = "browser"
+                                    ) -> Tuple[bool, str]:
+    """Gate-check the VOICE side-door before resolving/executing.
+
+    The side-door (voice transcript → semantic browser action) must
+    refuse honestly while the E-STOP is latched, during shutdown, or
+    when the utterance is oversized — page content is data, but the
+    USER's voice is still a control channel and inherits the latch.
+    """
+    try:
+        raw = str(text or "")
+    except Exception:
+        return False, "malformed_command: utterance is not a string"
+    if len(raw.encode("utf-8", errors="replace")) > MAX_BROWSER_UTTERANCE_BYTES:
+        return False, (f"payload_too_large: utterance exceeds "
+                       f"{MAX_BROWSER_UTTERANCE_BYTES} bytes")
+    return authorize_browser_action(backend=backend)
 
 __all__ = [
     "BrowserElement", "BrowserState", "BrowserBridge",
@@ -84,6 +154,9 @@ __all__ = [
     "BROWSER_ACTIONS",
     "discover_browser_executable", "launch_browser",
     "pinned_ws_parts",
+    # v19.0.3 R3b2 — central-gate route + payload honesty
+    "authorize_browser_action", "authorize_browser_voice_command",
+    "MAX_BROWSER_PAYLOAD_BYTES", "MAX_BROWSER_UTTERANCE_BYTES",
 ]
 
 
@@ -1640,8 +1713,20 @@ class SemanticBrowserResolver:
 
     def resolve(self, text: str,
                 now: Optional[float] = None) -> BrowserResolution:
-        """Resolve one utterance.  Never raises; unmatched → matched=False."""
+        """Resolve one utterance.  Never raises; unmatched → matched=False.
+
+        SAFETY (v19.0.3 R3b2): the utterance is the VOICE side-door
+        input.  Oversized utterances (> :data:`MAX_BROWSER_UTTERANCE_BYTES`)
+        are rejected honestly (unmatched, never matched against a page
+        element), and while the central safety gate refuses (E-STOP
+        latched / shutdown) the resolver returns an unmatched resolution
+        so a latched stop can never resolve into a browser action.
+        """
         try:
+            gate_ok, _reason = authorize_browser_voice_command(text)
+            if not gate_ok:
+                return BrowserResolution(matched=False,
+                                         text=str(text or ""))
             return self._resolve(text)
         except Exception:
             return BrowserResolution(matched=False, text=str(text or ""))
@@ -2082,18 +2167,64 @@ class BrowserController:
                 now: Optional[float] = None) -> Dict[str, Any]:
         """Execute one :class:`BrowserResolution` via the bridge.
 
-        Returns ``{'status': 'executed'|'failed'|'unavailable', 'action',
-        'element_id', 'sensitive', 'verification': {...}}``.  Destructive
-        actions (``close_tab``) carry ``'sensitive': True``.  Never raises.
+        Returns ``{'status': 'executed'|'failed'|'unavailable'|'refused',
+        'action', 'element_id', 'sensitive', 'verification': {...}}``.
+        Destructive actions (``close_tab``) carry ``'sensitive': True``.
+
+        SAFETY (v19.0.3 R3b2): this is the single choke point for EVERY
+        browser dispatch (voice side-door included).  Before anything is
+        sent to the bridge/Chrome it is refused — with nothing dispatched
+        at all — when
+
+        1. the command name is unknown/unclassified (default deny),
+        2. the payload is malformed or exceeds
+           :data:`MAX_BROWSER_PAYLOAD_BYTES`, or
+        3. the central safety gate refuses (E-STOP latched, session
+           shutting down, backend declared down, ...).
+
+        Never raises.
         """
         action = str(getattr(resolution, "action", "") or "")
         element = getattr(resolution, "element", None)
-        params = dict(getattr(resolution, "params", {}) or {})
+        params_raw = getattr(resolution, "params", {})
         element_id = str(getattr(element, "id", "") or "") \
             if element is not None else ""
         result: Dict[str, Any] = {"status": "failed", "action": action,
                                   "element_id": element_id,
                                   "sensitive": action == "close_tab"}
+
+        # -- 1. unknown / unclassified command names: default deny --------
+        if action not in _BROWSER_COMMANDS:
+            result["status"] = "refused"
+            result["message"] = (f"unknown browser action: {action!r} "
+                                 "(default deny)")
+            return result
+
+        # -- 2. malformed / oversized payloads: honest rejection ----------
+        if not isinstance(params_raw, dict):
+            result["status"] = "refused"
+            result["message"] = "malformed payload: params must be an object"
+            return result
+        params = dict(params_raw)
+        try:
+            payload_bytes = len(json.dumps(params, default=str)
+                                .encode("utf-8"))
+        except Exception:
+            payload_bytes = -1
+        if payload_bytes < 0 or payload_bytes > MAX_BROWSER_PAYLOAD_BYTES:
+            result["status"] = "refused"
+            result["message"] = (f"payload_too_large or unserialisable: "
+                                 f"{payload_bytes} bytes "
+                                 f"(cap {MAX_BROWSER_PAYLOAD_BYTES})")
+            return result
+
+        # -- 3. the central safety gate (E-STOP / shutdown / backend) -----
+        gate_ok, gate_reason = authorize_browser_action(action)
+        if not gate_ok:
+            result["status"] = "refused"
+            result["message"] = f"refused by safety gate: {gate_reason}"
+            return result
+
         try:
             if not self._running or self._bridge is None:
                 result["status"] = "unavailable"

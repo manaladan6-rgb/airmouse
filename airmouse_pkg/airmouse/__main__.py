@@ -2604,6 +2604,30 @@ def main():
     # never touches the camera: E-STOP works with the preview CLOSED.
     session_gate = bind_session()
 
+    # ═══ v19.0.3 R3b2 — GLOBAL E-STOP HOTKEYS (armed EVERY session) ═══
+    # Ctrl+Alt+E trips the central gate, Ctrl+Alt+R is the reset channel.
+    # Needs only a keyboard listener — works with the camera preview
+    # closed and without debug mode. Honest when no keyboard service
+    # exists (headless): reported unavailable, never faked.
+    hotkeys = None
+    try:
+        from .estop_hotkey import arm_estop_hotkeys as _aeh
+        hotkeys = _aeh(session_gate)
+    except Exception as _e:
+        hotkeys = {"available": False,
+                   "unavailable_reason": f"hotkey arming failed: {_e}"}
+    try:
+        if isinstance(hotkeys, dict) and hotkeys.get("available"):
+            print(f"  >> E-STOP hotkeys armed: "
+                  f"{hotkeys.get('trip_hotkey', 'Ctrl+Alt+E')} trip, "
+                  f"{hotkeys.get('reset_hotkey', 'Ctrl+Alt+R')} reset")
+        else:
+            _hk_reason = (hotkeys.get("unavailable_reason", "unknown")
+                          if isinstance(hotkeys, dict) else "unknown")
+            print(f"  >> E-STOP hotkeys unavailable: {_hk_reason}")
+    except Exception:
+        pass
+
     try:
         while running:
             t0 = time.perf_counter()
@@ -3548,6 +3572,91 @@ def main():
         print("\n  Shutting down...")
     finally:
         running = False
+
+        # ═══ v19.0.3 R3b2 — ORDERED SHUTDOWN (each step bounded, honest) ═══
+        # 1) the central gate refuses every NEW consequential action first,
+        # 2) then macro playback, 3) voice capture/engines, 4) the hotkey
+        # listener, 5) bounded joins of the remaining worker threads.
+        try:
+            from .safety_gate import get_gate as _get_gate
+            _get_gate().mark_shutdown("session shutdown")
+        except Exception as _se:
+            print(f"  !! central gate shutdown mark failed: {_se}")
+        # 2. stop macro playback if active (bounded cancel)
+        try:
+            from . import macros as _macros_mod
+            _cancel = getattr(_macros_mod, "cancel_current_replay", None)
+            if callable(_cancel):
+                _cancel()
+            else:
+                _mth = getattr(_macros_mod, "_current_play_thread", None)
+                if (_mth is not None and _mth.is_alive()
+                        and _mth is not threading.current_thread()):
+                    _mth.join(timeout=1.0)   # bounded; replay is a daemon
+                    if _mth.is_alive():
+                        print("  !! macro replay thread did not stop "
+                              "within 1.0 s (daemon — left to exit)")
+        except Exception as _me:
+            print(f"  !! macro playback shutdown skipped: {_me}")
+        # 3. stop voice capture / engines (v5 cloud, v10 offline, live capture)
+        try:
+            if voice is not None:
+                voice.stop()
+        except Exception as _ve:
+            print(f"  !! v5 voice stop skipped: {_ve}")
+        try:
+            if voice_engine10 is not None:
+                for _fn in ("stop_audio", "shutdown"):
+                    _vfn = getattr(voice_engine10, _fn, None)
+                    if callable(_vfn):
+                        _vfn()
+        except Exception as _ve2:
+            print(f"  !! v10 voice shutdown skipped: {_ve2}")
+        try:
+            _vcap = (locals().get("live_voice_capture")
+                     or locals().get("voice_capture"))
+            _vstop = getattr(_vcap, "stop", None)
+            if callable(_vstop):
+                _vstop()
+        except Exception as _ve3:
+            print(f"  !! live voice capture stop skipped: {_ve3}")
+        # 4. stop the E-STOP hotkey listener (bounded, never joined)
+        try:
+            _hk = locals().get("hotkeys")
+            _hk_stop = _hk.get("stop") if isinstance(_hk, dict) else None
+            if callable(_hk_stop):
+                _hk_stop()
+        except Exception as _he:
+            print(f"  !! E-STOP hotkey shutdown skipped: {_he}")
+        # 5. stop + bounded-join the remaining worker threads (never the
+        #    current thread); report any worker that failed to terminate.
+        try:
+            _bbs = locals().get("browser_bridge_server")
+            if _bbs is not None:
+                _bbs.stop()               # bounded (joins its own thread ≤1 s)
+        except Exception as _be:
+            print(f"  !! browser bridge stop skipped: {_be}")
+        try:
+            _workers = []
+            _bbs = locals().get("browser_bridge_server")
+            _bth = getattr(_bbs, "_thread", None)
+            if _bth is not None:
+                _workers.append(("browser bridge server", _bth))
+            _mm = locals().get("_macros_mod")
+            _mth2 = getattr(_mm, "_current_play_thread", None) \
+                if _mm is not None else None
+            if _mth2 is not None:
+                _workers.append(("macro replay", _mth2))
+            for _wname, _wth in _workers:
+                if _wth is threading.current_thread() or not _wth.is_alive():
+                    continue
+                _wth.join(timeout=1.0)
+                if _wth.is_alive():
+                    print(f"  !! worker '{_wname}' did not terminate "
+                          "within 1.0 s")
+        except Exception as _we:
+            print(f"  !! worker shutdown check skipped: {_we}")
+
         tracker.release()
         # v5.0 cleanup — persist what was learned, stop threads, save macros
         try:
