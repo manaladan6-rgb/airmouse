@@ -44,6 +44,25 @@ Sensitive/destructive commands (shutdown, restart, delete file, close
 tab, system operations) are flagged so the v8 safety layer requires
 confirmation before execution.
 
+v19.0.3 R3d rebuild (OPERATION FINAL FORM / AIRLOCK) — measured facts
+restored after infrastructure loss: the registry grew from 75 specs
+across 10 namespaces to **90 specs across 11 namespaces**:
+
+    +14  DICTATION namespace, TEXT_EDIT intents — spoken edit literals
+         ("delete last word", "scratch that", "delete that", …) that
+         edit the DICTATION TEXT BUFFER (see dictation_text.py) and
+         must NEVER trigger destructive file operations.  When a
+         dictation buffer is active the TEXT_EDIT literals outrank the
+         FILES "delete <name>" wildcard; the FILES wildcard stays
+         destructive/file-targeted ("delete demo.txt").
+    +1   deictic "move over there" → move_pointer (cursor moves toward
+         the pointing direction).
+
+Because :mod:`airmouse.interfaces` froze the v10 enum vocabulary, the
+extra ``CommandNamespace.DICTATION`` / ``IntentType.TEXT_EDIT``
+members are attached here as duck-typed members (same ``.name`` and
+``.value`` surface) — see :func:`_ensure_member`.
+
 `match_command_grammar()` is a PURE function — no audio, no hardware,
 fully unit-testable.
 
@@ -64,7 +83,7 @@ except ImportError:  # pragma: no cover - direct file execution fallback
 __all__ = [
     "CommandSpec", "VoiceCommandMatch", "REGISTRY",
     "match_command_grammar", "commands_by_namespace", "list_commands",
-    "NUM_WORDS",
+    "NUM_WORDS", "DICTATION", "TEXT_EDIT", "apply_dictation_text_edit",
 ]
 
 # ---------------------------------------------------------------------------
@@ -200,6 +219,50 @@ def _spec(name: str, namespace: CommandNamespace, intent: IntentType,
     return CommandSpec(name, namespace, intent, patterns, **kw).compile()
 
 
+# ---------------------------------------------------------------------------
+# v19.0.3 R3d — the 11th namespace (DICTATION) + the TEXT_EDIT intent
+# ---------------------------------------------------------------------------
+# interfaces.py froze the v10 enum vocabulary (10 namespaces).  The FINAL
+# FORM build adds the DICTATION namespace and the TEXT_EDIT intent; they
+# are attached to the frozen enums as duck-typed members (same .name and
+# .value surface as real members) so every importer sees one truth.  If a
+# later interfaces.py declares the real members, the real ones win.
+
+
+class _ExtMember:
+    """Duck-typed enum member (name + value) for a frozen enum contract."""
+
+    __slots__ = ("_owner", "name", "value")
+
+    def __init__(self, owner: str, name: str, value: str) -> None:
+        self._owner = owner
+        self.name = name
+        self.value = value
+
+    def __repr__(self) -> str:
+        return "<%s.%s: %r> (ext)" % (self._owner, self.name, self.value)
+
+
+def _ensure_member(enum_cls: Any, name: str, value: str) -> Any:
+    """Return ``enum_cls.NAME`` — the real member, or a duck-typed one
+    attached to the class (visible to every importer of the enum)."""
+    real = getattr(enum_cls, name, None)
+    if real is not None and getattr(real, "value", None) == value:
+        return real
+    ext = _ExtMember(enum_cls.__name__, name, value)
+    try:
+        setattr(enum_cls, name, ext)
+    except Exception:      # fully frozen enum: local constant still works
+        pass
+    return ext
+
+
+#: 11th command namespace — edits of the DICTATION TEXT BUFFER.
+DICTATION = _ensure_member(CommandNamespace, "DICTATION", "dictation")
+#: Intent type: buffer-local dictation edit (NEVER a file operation).
+TEXT_EDIT = _ensure_member(IntentType, "TEXT_EDIT", "text_edit")
+
+
 REGISTRY: List[CommandSpec] = [
     # ── ENGINE ─────────────────────────────────────────────────────────────
     _spec("estop", CommandNamespace.ENGINE, IntentType.EMERGENCY_STOP,
@@ -240,6 +303,10 @@ REGISTRY: List[CommandSpec] = [
           ["zoom in", "magnify", "bigger"], params={"direction": "in"}),
     _spec("zoom_out", CommandNamespace.MOUSE, IntentType.ZOOM,
           ["zoom out", "shrink", "smaller"], params={"direction": "out"}),
+    _spec("move_pointer", CommandNamespace.MOUSE, IntentType.MOVE,
+          ["move over there", "move it over there"],
+          params={"what": "pointer", "deictic": True,
+                  "action": "move_pointer"}),
 
     # ── SYSTEM ─────────────────────────────────────────────────────────────
     _spec("volume_up", CommandNamespace.SYSTEM, IntentType.VOLUME,
@@ -404,6 +471,65 @@ REGISTRY: List[CommandSpec] = [
           ["go forward", "forward"]),
     _spec("refresh", CommandNamespace.BROWSER, IntentType.REFRESH,
           ["refresh", "reload", "reload the page", "refresh the page"]),
+
+    # ── DICTATION (v19.0.3 R3d) — TEXT_EDIT of the dictation TEXT BUFFER ──
+    # These edit the dictation buffer ONLY (dictation_text.py
+    # VoiceTypingEngine — see apply_dictation_text_edit below); they must
+    # NEVER trigger destructive file operations.  The exact literals
+    # outrank the FILES "delete <name>" wildcard while a dictation buffer
+    # is active; the FILES wildcard stays destructive/file-targeted.
+    _spec("dict_delete_last_word", DICTATION, TEXT_EDIT,
+          ["delete last word", "delete the last word"],
+          params={"edit_op": "delete_last_word",
+                  "edit_phrase": "delete last word"}),
+    _spec("dict_delete_last_sentence", DICTATION, TEXT_EDIT,
+          ["delete last sentence", "delete the last sentence"],
+          params={"edit_op": "delete_last_sentence",
+                  "edit_phrase": "delete last sentence"}),
+    _spec("dict_scratch_that", DICTATION, TEXT_EDIT,
+          ["scratch that"],
+          params={"edit_op": "delete_last_segment",
+                  "edit_phrase": "scratch that"}),
+    _spec("dict_delete_that", DICTATION, TEXT_EDIT,
+          ["delete that"],
+          params={"edit_op": "delete_last_segment",
+                  "edit_phrase": "delete that"}),
+    _spec("dict_strike_that", DICTATION, TEXT_EDIT,
+          ["strike that"],
+          params={"edit_op": "delete_last_segment",
+                  "edit_phrase": "strike that"}),
+    _spec("dict_new_line", DICTATION, TEXT_EDIT,
+          ["new line"],
+          params={"edit_op": "new_line", "edit_phrase": "new line"}),
+    _spec("dict_new_paragraph", DICTATION, TEXT_EDIT,
+          ["new paragraph"],
+          params={"edit_op": "new_paragraph",
+                  "edit_phrase": "new paragraph"}),
+    _spec("dict_capitalize_that", DICTATION, TEXT_EDIT,
+          ["capitalize that"],
+          params={"edit_op": "capitalize_last",
+                  "edit_phrase": "capitalize that"}),
+    _spec("dict_uppercase_that", DICTATION, TEXT_EDIT,
+          ["uppercase that"],
+          params={"edit_op": "uppercase_last",
+                  "edit_phrase": "uppercase that"}),
+    _spec("dict_lowercase_that", DICTATION, TEXT_EDIT,
+          ["lowercase that"],
+          params={"edit_op": "lowercase_last",
+                  "edit_phrase": "lowercase that"}),
+    _spec("dict_replace_that", DICTATION, TEXT_EDIT,
+          [r"replace that with <text>"],
+          params={"edit_op": "replace_last_segment",
+                  "edit_phrase": "replace that with"}),
+    _spec("dict_copy_that", DICTATION, TEXT_EDIT,
+          ["copy that"],
+          params={"edit_op": "copy_last", "edit_phrase": "copy that"}),
+    _spec("dict_cut_that", DICTATION, TEXT_EDIT,
+          ["cut that"],
+          params={"edit_op": "cut_last", "edit_phrase": "cut that"}),
+    _spec("dict_paste_that", DICTATION, TEXT_EDIT,
+          ["paste that"],
+          params={"edit_op": "paste", "edit_phrase": "paste that"}),
 ]
 
 
@@ -465,7 +591,8 @@ def _fuzzy_fixup(norm: str) -> List[str]:
 
 def match_command_grammar(text: str,
                           min_confidence: float = 0.62,
-                          now: Optional[float] = None) -> VoiceCommandMatch:
+                          now: Optional[float] = None,
+                          dictation_active: bool = False) -> VoiceCommandMatch:
     """Match one utterance against the command registry.
 
     Pure + total: accepts anything, never raises.  Returns a
@@ -476,11 +603,25 @@ def match_command_grammar(text: str,
     2. prefer the most literal (specific) template
     3. ties → namespace priority (ENGINE > MOUSE > … > BROWSER)
     4. same-priority ties → ambiguity flag + reduced confidence
+
+    ``dictation_active``: a dictation TEXT BUFFER is live.  The
+    DICTATION TEXT_EDIT literals then outrank the FILES
+    "delete <name>" wildcard, so "delete that" edits the buffer and
+    never deletes a file.  Without an active buffer the exact
+    dictation literals still win on template specificity; the FILES
+    wildcard keeps claiming file-shaped utterances ("delete demo.txt").
     """
     norm = _normalize(text)
     if not norm:
         return VoiceCommandMatch(text=str(text or ""))
     ns_priority = {ns: i for i, ns in enumerate(CommandNamespace)}
+    if DICTATION not in ns_priority:          # duck-typed (or future) member
+        base = float(len(ns_priority))        # deterministic: after BROWSER
+        if dictation_active:
+            # safety precedence: dictation TEXT_EDIT > FILES wildcard
+            files_p = float(ns_priority.get(CommandNamespace.FILES, base))
+            base = min(base, files_p - 0.5)
+        ns_priority[DICTATION] = base
     candidates: List[Tuple[CommandSpec, Dict[str, str], float, int]] = []
     for attempt in _fuzzy_fixup(norm):
         for idx, spec in enumerate(REGISTRY):
@@ -520,6 +661,42 @@ def match_command_grammar(text: str,
 # ---------------------------------------------------------------------------
 # Introspection helpers (CLI: airmouse commands)
 # ---------------------------------------------------------------------------
+
+
+def apply_dictation_text_edit(match: VoiceCommandMatch,
+                              engine: Any) -> List[Any]:
+    """Apply a resolved DICTATION TEXT_EDIT match to the dictation buffer.
+
+    ``engine`` is a :class:`airmouse.dictation_text.VoiceTypingEngine`
+    (duck-typed: only ``ingest()`` is used — the same deterministic edit
+    table that live dictation uses).  The edit lands in the engine's
+    TEXT BUFFER and nowhere else: this function performs NO filesystem
+    work of any kind, so a spoken dictation edit can never become a
+    destructive file operation.  Returns the list of
+    :class:`airmouse.dictation_text.DictationOp` produced (empty for
+    non-dictation matches or when no engine/buffer is available).
+    Never raises.
+    """
+    if match is None or not getattr(match, "is_command", False):
+        return []
+    if match.namespace is not DICTATION or match.intent is not TEXT_EDIT:
+        return []
+    if engine is None:
+        return []
+    params = dict(match.params or {})
+    op = str(params.get("edit_op", ""))
+    try:
+        if op == "replace_last_segment":
+            text = str((match.entities or {}).get("text", "")).strip()
+            if not text:
+                return []
+            return list(engine.ingest("replace that with " + text) or [])
+        phrase = str(params.get("edit_phrase", "")).strip()
+        if not phrase:
+            return []
+        return list(engine.ingest(phrase) or [])
+    except Exception:
+        return []
 
 
 def commands_by_namespace() -> Dict[str, List[str]]:

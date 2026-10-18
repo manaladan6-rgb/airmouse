@@ -26,8 +26,9 @@ Copyright (c) AirMouse.  MIT License.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 from .capabilities import (
     Component,
@@ -37,7 +38,7 @@ from .capabilities import (
 
 __all__ = [
     "DoctorSection", "DoctorReport", "run_doctor", "format_doctor_report",
-    "SECTION_NAMES",
+    "run_doctor_json", "format_doctor_json", "SECTION_NAMES",
 ]
 
 
@@ -149,10 +150,111 @@ class DoctorReport:
                        f"review '{c.name}' in airmouse doctor output")
         return out
 
+    # -- machine report (v19.0.3 R3d: honest stable ``--json``) --------------
+
+    def to_machine(self) -> Dict[str, Any]:
+        """The structured ``--json`` payload — the SAME truth as the text
+        panel, never nicer.
+
+        Shape (stable key order):
+
+            version               package version string
+            kind                  "airmouse.doctor"
+            overall               "READY" | "PARTIAL" | "BLOCKED"
+                                  (machine form of the bracketed verdict;
+                                  PARTIAL/BLOCKED are reported as detected,
+                                  never upgraded)
+            verdict               the exact bracketed panel line
+            counts                {READY, OPTIONAL, HARDWARE, WARNING,
+                                   FAILED}
+            active_asr_provider   THE registry's active ASR provider
+            sections              [{name, components: [{name, category,
+                                  state, detail, why, remediation,
+                                  hardware_state}]}] — contract order
+            blocked               required-category FAILED/INCOMPATIBLE
+                                  rows with their why/fix reasons
+            degraded              WARNING rows plus non-required FAILED
+                                  rows (degraded-but-not-blocking)
+            remediations          the copy/paste fix lines
+        """
+        required = {"SYSTEM", "PYTHON", "AIRMOUSE", "SAFETY"}
+        blocking = (ComponentState.FAILED, ComponentState.INCOMPATIBLE)
+        blocked: List[Dict[str, str]] = []
+        degraded: List[Dict[str, str]] = []
+        for c in self.all_components():
+            state = ComponentState(c.state)
+            if state not in blocking and state is not ComponentState.WARNING:
+                continue
+            row = {
+                "name": c.name,
+                "category": c.category,
+                "state": state.value,
+                "why": c.why or c.detail or "",
+                "fix": c.remediation or c.detail or "",
+            }
+            if state in blocking and c.category in required:
+                blocked.append(row)
+            else:
+                degraded.append(row)
+        return {
+            "version": _doctor_version(),
+            "kind": "airmouse.doctor",
+            "overall": _overall_machine(self),
+            "verdict": self.overall(),
+            "counts": self.summary_counts(),
+            "active_asr_provider": self.active_asr_provider,
+            "sections": [
+                {
+                    "name": s.name,
+                    "components": [
+                        {
+                            "name": c.name,
+                            "category": c.category,
+                            "state": ComponentState(c.state).value,
+                            "detail": c.detail,
+                            "why": c.why,
+                            "remediation": c.remediation,
+                            "hardware_state": c.hardware_state,
+                        }
+                        for c in s.components
+                    ],
+                }
+                for s in self.sections
+            ],
+            "blocked": blocked,
+            "degraded": degraded,
+            "remediations": self.remediations(),
+        }
+
 
 # ---------------------------------------------------------------------------
 # runners
 # ---------------------------------------------------------------------------
+
+def _doctor_version() -> str:
+    """The package version, read honestly ("" when unavailable)."""
+    try:
+        from . import __version__ as v
+        return str(v)
+    except Exception:
+        try:
+            from airmouse import __version__ as v    # type: ignore
+            return str(v)
+        except Exception:
+            return ""
+
+
+def _overall_machine(report: "DoctorReport") -> str:
+    """Machine form of the bracketed panel verdict — no upgrades."""
+    verdict = report.overall()
+    if verdict.startswith("[BLOCKED"):
+        return "BLOCKED"
+    if verdict.startswith("[PARTIAL"):
+        return "PARTIAL"
+    if verdict.startswith("[READY"):
+        return "READY"
+    return "UNKNOWN"      # fail-closed: an unknown verdict stays unknown
+
 
 def run_doctor(verbose: bool = False) -> DoctorReport:
     """Detect everything and section it.  NEVER raises (fail-closed
@@ -177,6 +279,25 @@ def run_doctor(verbose: bool = False) -> DoctorReport:
     except Exception:
         doc.active_asr_provider = "Built-in command recognition"
     return doc
+
+
+def run_doctor_json() -> Dict[str, Any]:
+    """Detect everything and return the stable machine report (dict).
+
+    The doctor-owned ``--json`` structure: parseable, deterministic,
+    honest (PARTIAL/BLOCKED stay PARTIAL/BLOCKED — a headless sandbox
+    reports its real degradation), and carrying the same per-section
+    truth as :func:`format_doctor_report`.  Exit codes belong to the
+    CLI dispatcher, not to this module.
+    """
+    return run_doctor().to_machine()
+
+
+def format_doctor_json(report: Optional[DoctorReport] = None,
+                       indent: int = 2) -> str:
+    """The ``--json`` document as a JSON string (stable key order)."""
+    doc = report.to_machine() if report is not None else run_doctor_json()
+    return json.dumps(doc, indent=indent)
 
 
 def format_doctor_report(report: DoctorReport, verbose: bool = False) -> str:

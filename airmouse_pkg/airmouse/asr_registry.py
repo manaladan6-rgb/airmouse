@@ -74,6 +74,8 @@ __all__ = [
     "registry", "detect_microphone", "active_asr_provider",
     "PROBE_POCKETSPHINX", "PROBE_VOSK", "PROBE_WHISPER",
     "VoskModelMissing",  # v16.5.3 — engine present, model absent
+    "verify_offline_path",  # R3c — engine-installed vs model-available
+    "offline_capability_report",  #        vs offline-path-works
 ]
 
 
@@ -284,7 +286,19 @@ def _persist(name: str) -> None:
 
 @dataclass
 class ProviderDiagnosis:
-    """One engine's honest state (rendered by voice-status / doctor)."""
+    """One engine's honest state (rendered by voice-status / doctor).
+
+    R3c three-way capability distinction (all three are reported
+    separately — no entry may claim readiness it does not have):
+
+    * ``engine_installed``  the engine package really imports here
+    * ``model_available``   its acoustics model/weights resolve LOCALLY
+                            now (probed); ``None`` = deferred/unverified
+                            (whisper loads on first use, never downloads)
+    * ``offline_path_ok``   the END-TO-END offline path was proven:
+                            a runtime provider constructs and reports
+                            ``available()``; ``None`` = not yet verified
+    """
 
     name: str
     installed: bool = False          # import metadata discoverable
@@ -294,6 +308,9 @@ class ProviderDiagnosis:
     state: str = ProviderState.NOT_INSTALLED
     reason: str = ""                 # failure/detail reason (shown, never hidden)
     role: str = "OPTIONAL"           # ACTIVE | FALLBACK | OPTIONAL | DISABLED
+    engine_installed: bool = False   # R3c — the engine itself imports
+    model_available: Optional[bool] = False  # R3c — local model resolves
+    offline_path_ok: Optional[bool] = None   # R3c — end-to-end path proven
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -305,6 +322,9 @@ class ProviderDiagnosis:
             "state": self.state,
             "reason": self.reason,
             "role": self.role,
+            "engine_installed": self.engine_installed,
+            "model_available": self.model_available,
+            "offline_path_ok": self.offline_path_ok,
         }
 
 
@@ -352,6 +372,7 @@ class ASRProviderRegistry:
             mods = _vs._ENGINE_MODULES.get(name, ())
             installed = any(_vs._spec_found(m) for m in mods) if mods else False
             d.installed = installed
+            d.engine_installed = installed   # R3c: the engine gate, alone
             if not installed:
                 d.state = ProviderState.NOT_INSTALLED
                 d.reason = "engine package not importable " \
@@ -367,11 +388,20 @@ class ASRProviderRegistry:
                 if name == "pocketsphinx":
                     d.initialization = "PASS"
                     d.state = ProviderState.INITIALIZABLE
+                    # the probe BUILT a Decoder with the bundled
+                    # acoustics — the model is genuinely available
+                    d.model_available = True
                 else:
                     # vosk/whisper: import verified; the acoustics model
-                    # loads on first use — reported DEFERRED, honestly
+                    # loads on first use — reported DEFERRED, honestly.
+                    # model_available: for vosk the probe itself resolved
+                    # a LOCAL model (PROBE_VOSK raises VoskModelMissing
+                    # otherwise), so a PASS here IS the model proof;
+                    # whisper's weights stay unverified (None) — they
+                    # load on first use and are NEVER auto-downloaded.
                     d.initialization = "DEFERRED"
                     d.state = ProviderState.AVAILABLE
+                    d.model_available = True if name == "vosk" else None
                     d.reason = ("import verified; acoustics model loads "
                                 "on first use (never auto-downloaded)")
                 d.init_seconds = secs
@@ -390,6 +420,7 @@ class ASRProviderRegistry:
                     d.importable = True   # the probe DID import vosk
                     d.initialization = "MODEL MISSING"
                     d.state = ProviderState.INSTALLED
+                    d.model_available = False   # R3c: the exact gap
                     d.reason = str(exc) + " — " + getattr(exc, "fix", "")
             out[name] = d
         self._diagnoses = out
@@ -399,6 +430,41 @@ class ASRProviderRegistry:
         """Engine names that can actually transcribe on THIS machine."""
         d = self.discover()
         return [n for n in DEFAULT_PRIORITY if d[n].state in _USABLE_STATES]
+
+    # -- R3c: the end-to-end offline-path proof --------------------------------
+
+    def verify_offline_path(self, name: str) -> tuple:
+        """Prove the OFFLINE path for one engine END-TO-END.
+
+        Distinguishes the three capability levels for ``name``:
+        engine-installed (import gate) vs model-available (probe) vs
+        offline-path-WORKS (a runtime provider constructs and its own
+        ``available()`` is True — the only level that may be called
+        ready).  The verdict is recorded on the diagnosis row
+        (``offline_path_ok``) and returned as ``(ok, reason)``.
+        Never raises.
+        """
+        d = self.discover()
+        row = d.get(name)
+        if row is None:
+            return False, f"unknown engine '{name}'"
+        if row.state == ProviderState.DISABLED:
+            row.offline_path_ok = False
+            return False, row.reason or "disabled by configuration"
+        provider = self._ctor_ok(name)
+        if provider is None:
+            row.offline_path_ok = False
+            reason = row.reason or \
+                "runtime provider construction/availability failed"
+            if row.state in _USABLE_STATES:
+                # the row claimed readiness the runtime disproves —
+                # correct it honestly, never leave the over-claim
+                row.state = ProviderState.FAILED
+                row.initialization = "FAIL"
+                row.reason = reason
+            return False, reason
+        row.offline_path_ok = True
+        return True, ""
 
     # -- deterministic selection ----------------------------------------------
 
@@ -503,6 +569,14 @@ class ASRProviderRegistry:
         """Everything voice-status --verbose and doctor need — ONE call."""
         d = self.discover(force=force)
         active = self.active()
+        # R3c: prove (or honestly disprove) the end-to-end offline path
+        # for every engine that CLAIMS usable readiness
+        for name, row in d.items():
+            if row.state in _USABLE_STATES:
+                try:
+                    self.verify_offline_path(name)
+                except Exception:
+                    row.offline_path_ok = False
         rows: Dict[str, ProviderDiagnosis] = {}
         for name, row in d.items():
             r = ProviderDiagnosis(**row.to_dict())
@@ -549,6 +623,41 @@ def active_asr_provider() -> str:
         return registry.active() or _vs.BUILT_IN_ACTIVE_LABEL
     except Exception:
         return _vs.BUILT_IN_ACTIVE_LABEL
+
+
+def verify_offline_path(name: str) -> tuple:
+    """Singleton convenience for :meth:`ASRProviderRegistry.
+    verify_offline_path` — proves the engine's end-to-end offline path
+    (engine-installed vs model-available vs offline-path-works)."""
+    return registry.verify_offline_path(name)
+
+
+def offline_capability_report() -> Dict[str, Dict[str, Any]]:
+    """The R3c three-way capability report for every known engine.
+
+    ``{name: {engine_installed, model_available, offline_path_ok,
+    state, reason}}`` — exactly the distinction doctor / voice-status /
+    the banner helpers need to never claim readiness that is not there.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    try:
+        d = registry.discover()
+    except Exception:
+        return out
+    for name, row in d.items():
+        try:
+            if row.state in _USABLE_STATES:
+                registry.verify_offline_path(name)
+        except Exception:
+            row.offline_path_ok = False
+        out[name] = {
+            "engine_installed": bool(row.engine_installed),
+            "model_available": row.model_available,
+            "offline_path_ok": row.offline_path_ok,
+            "state": row.state,
+            "reason": row.reason,
+        }
+    return out
 
 
 # ---------------------------------------------------------------------------

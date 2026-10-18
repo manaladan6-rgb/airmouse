@@ -140,7 +140,9 @@ def test_resolve_voice_natural_and_context_phrases():
 
 
 def test_resolve_voice_honest_about_grammar_gaps():
-    for miss in ("move over there", "gibberish wibble nonsense",
+    # v19.0.3: "move over there" now RESOLVES (deictic move_pointer);
+    # genuine grammar gaps are still honestly unresolved.
+    for miss in ("gibberish wibble nonsense",
                  "do the thing please"):
         r = va.resolve_voice(miss)
         assert r.ok is False, miss
@@ -283,20 +285,22 @@ def test_l2_all_pass_and_shows_the_honest_grammar_limit():
     assert entry["completed"] is True
     assert entry["score"] == (5, 5)
     out = buf.getvalue()
-    assert "NOT in the deterministic grammar" in out   # "move over there"
+    assert "NOT in the deterministic grammar" in out   # "do the thing please"
     assert "move left" in out
     assert out.count('  ✓ "') == 5
 
 
 def test_l2_move_over_there_fails_then_real_form_passes():
+    # v19.0.3: "move over there" is in the grammar now (deictic move),
+    # so the L2 wrong-attempt slot uses a genuine gap phrase instead.
     buf = io.StringIO()
-    lines = L2_ANSWERS[:4] + ["move over there", "move over there",
+    lines = L2_ANSWERS[:4] + ["do the thing please", "move over there",
                               "move left"]
     res = va.run_voice_academy(level="l2_natural", out=buf,
                                input_fn=_script(lines))
     assert res["levels"]["l2_natural"]["score"] == (5, 5)
     out = buf.getvalue()
-    assert '✗ "move over there"' in out
+    assert '✗ "do the thing please"' in out
     assert "The answer:" not in out
 
 

@@ -1,16 +1,25 @@
 """
-airmouse.selftest — `airmouse --self-test` (v11.5 §45).
+airmouse.selftest — `airmouse --self-test` (v11.5 §45, rebuilt R3c).
 
 Reports one row per subsystem:
 
     Core / Voice / Transcription / Gesture / Gaze / Browser / Fusion /
     Intelligence / Memory / Prediction / Safety / Offline / Packaging
 
-Statuses:
+Statuses (the honest vocabulary — R3c voice-truth law):
+
     PASS      deterministic self-check succeeded
-    FAIL      deterministic self-check failed
-    OPTIONAL  available only with optional deps/hardware (not a failure)
+    FAIL      deterministic self-check failed — NEVER downgraded to a
+              softer status by the reporter
+    SKIP      installed but UNUSABLE (e.g. vosk present, no model) —
+              reported WITH the reason; not a FAIL, and never silently
+              rewritten to OPTIONAL
+    OPTIONAL  only for capabilities that were never enabled / not
+              installed (truly optional deps or hardware)
     HARDWARE  requires physical hardware — cannot verify here (honest)
+
+The tally counts PASS / FAIL / SKIP separately and includes SKIP in the
+totals; the overall RESULT is FAIL when any check FAILs.
 
 Clearly distinguishes unavailable hardware/providers from failures (§45).
 
@@ -26,8 +35,14 @@ from typing import Any, Callable, Dict, List, Optional
 
 PASS = "PASS"
 FAIL = "FAIL"
+SKIP = "SKIP"
 OPTIONAL = "OPTIONAL"
 HARDWARE = "HARDWARE"
+
+
+class _SkipCheck(Exception):
+    """Internal signal: this check is honestly SKIPPED, with a reason.
+    (Caught by ``_check`` — never leaks to callers.)"""
 
 
 @dataclass
@@ -35,20 +50,27 @@ class SelfTestResult:
     component: str
     status: str
     detail: str = ""
+    #: True for required components — a FAIL here is never downgraded
+    required: bool = False
 
     @property
     def ok(self) -> bool:
-        return self.status in (PASS, OPTIONAL, HARDWARE)
+        return self.status in (PASS, OPTIONAL, HARDWARE, SKIP)
 
 
-def _check(name: str, fn: Callable[[], None]) -> SelfTestResult:
+def _check(name: str, fn: Callable[[], None],
+           required: bool = False) -> SelfTestResult:
     t0 = time.perf_counter()
     try:
         fn()
+    except _SkipCheck as sk:
+        return SelfTestResult(name, SKIP, str(sk), required=required)
     except Exception as exc:
-        return SelfTestResult(name, FAIL, f"{type(exc).__name__}: {exc}")
+        return SelfTestResult(name, FAIL,
+                              f"{type(exc).__name__}: {exc}",
+                              required=required)
     ms = (time.perf_counter() - t0) * 1000.0
-    return SelfTestResult(name, PASS, f"{ms:.1f}ms")
+    return SelfTestResult(name, PASS, f"{ms:.1f}ms", required=required)
 
 
 def run_self_test(intelligence: bool = True) -> List[SelfTestResult]:
@@ -63,7 +85,7 @@ def run_self_test(intelligence: bool = True) -> List[SelfTestResult]:
         i = Intent(type=IntentType.CLICK, confidence=1.0)
         assert i.target_point is None
 
-    results.append(_check("Core", core))
+    results.append(_check("Core", core, required=True))
 
     # -- Voice (offline engine, simulated provider — no mic needed) ----------
     def voice() -> None:
@@ -72,7 +94,7 @@ def run_self_test(intelligence: bool = True) -> List[SelfTestResult]:
         eng.feed_transcript("open browser", 0.95, now=1.0)
         assert eng.poll() is not None
 
-    results.append(_check("Voice", voice))
+    results.append(_check("Voice", voice, required=True))
 
     # -- Transcription (streaming engine + simulated provider) -----------------
     def transcription() -> None:
@@ -89,18 +111,44 @@ def run_self_test(intelligence: bool = True) -> List[SelfTestResult]:
 
     results.append(_check("Transcription", transcription))
 
-    # real local ASR providers — OPTIONAL, honestly reported
+    # real local ASR providers — the HONEST classification (TF-005):
+    #   usable                    → PASS
+    #   installed but unusable    → SKIP with the exact reason (never a
+    #                               silent rewrite to OPTIONAL, never a
+    #                               fake PASS)
+    #   installed but broken      → FAIL (a real failure is a failure)
+    #   nothing ever installed    → OPTIONAL (a never-enabled optional
+    #                               capability — honestly not a failure)
     def real_asr() -> None:
         from .offline_voice import detect_providers
+        from .asr_registry import ProviderState, registry
+        from . import voice_stack as _vs
+        engines = ("pocketsphinx", "vosk", "whisper")
+        installed = [n for n in engines
+                     if any(_vs._spec_found(m)
+                            for m in _vs._ENGINE_MODULES.get(n, ()))]
         provs = detect_providers()
-        installed = [k for k, v in provs.items() if v and k != "simulated"]
+        usable = [k for k, v in provs.items() if v and k != "simulated"]
+        if usable:
+            return   # PASS — at least one real engine works
         if not installed:
-            raise RuntimeError("no third-party local ASR installed")
+            raise _SkipCheck(
+                "no local ASR engine installed (optional capability — "
+                "install pocketsphinx or run: airmouse voice-setup)")
+        # installed but NOT usable: classify each engine honestly
+        d = registry.discover()
+        reasons = []
+        for n in installed:
+            row = d.get(n)
+            if row is None:
+                continue
+            if row.state == ProviderState.FAILED:
+                # a genuinely broken install is a FAIL — never downgraded
+                raise RuntimeError(f"{n}: {row.reason or 'initialization failed'}")
+            reasons.append(f"{n}: {row.reason or row.state}")
+        raise _SkipCheck("installed but not usable — " + "; ".join(reasons))
 
-    r = _check("RealLocalASR", real_asr)
-    r.status = PASS if r.status == PASS else OPTIONAL
-    r.detail = r.detail or "vosk/whisper/pocketsphinx not installed"
-    results.append(r)
+    results.append(_check("RealLocalASR", real_asr, required=True))
 
     # -- Gesture -----------------------------------------------------------------
     def gesture() -> None:
@@ -205,7 +253,8 @@ def run_self_test(intelligence: bool = True) -> List[SelfTestResult]:
 
 
 def format_self_test(results: List[SelfTestResult]) -> str:
-    """The §45 report table."""
+    """The §45 report table (R3c tally: PASS/FAIL/SKIP counted
+    separately; SKIP included in the totals line)."""
     names = ["Core", "Voice", "Transcription", "RealLocalASR", "Gesture",
              "Gaze", "Camera", "Browser", "Fusion", "Intelligence",
              "Memory", "Prediction", "Safety", "Offline", "Packaging"]
@@ -224,10 +273,13 @@ def format_self_test(results: List[SelfTestResult]) -> str:
         dots = "." * max(2, 22 - len(r.component))
         lines.append(f"  {r.component} {dots} {r.status:<8} {r.detail[:38]}")
     ok = all(r.ok for r in rows)
+    n_pass = sum(1 for r in rows if r.status == PASS)
+    n_skip = sum(1 for r in rows if r.status == SKIP)
+    n_opt = sum(1 for r in rows if r.status == OPTIONAL)
+    n_hw = sum(1 for r in rows if r.status == HARDWARE)
+    n_fail = sum(1 for r in rows if r.status == FAIL)
     lines.append("  " + "─" * 52)
     lines.append(f"  RESULT: {'PASS' if ok else 'FAIL'} "
-                 f"({sum(1 for r in rows if r.status == PASS)} pass, "
-                 f"{sum(1 for r in rows if r.status == OPTIONAL)} optional, "
-                 f"{sum(1 for r in rows if r.status == HARDWARE)} hardware, "
-                 f"{sum(1 for r in rows if r.status == FAIL)} fail)")
+                 f"({n_pass} pass, {n_skip} skip, {n_opt} optional, "
+                 f"{n_hw} hardware, {n_fail} fail)")
     return "\n".join(lines)

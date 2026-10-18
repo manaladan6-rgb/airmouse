@@ -67,6 +67,9 @@ __all__ = [
     "EnergyVAD", "WakeWordGate", "DictationBuffer",
     "OfflineVoiceEngine", "voice_match_to_intent",
     "WAKE_MARKERS",
+    # voice-truth banner helpers (TF-005) — wired into __main__
+    "BANNER_LIVE", "BANNER_GRAMMAR_ONLY", "CLOUD_DISCLOSURE",
+    "session_banner_state", "grammar_only_reason", "cloud_voice_banner",
 ]
 
 # audioop may be absent (py3.13+); fall back to a tiny RMS implementation
@@ -196,16 +199,24 @@ def resolve_vosk_model_path(explicit: str = "") -> str:
 
 @dataclass
 class Transcript:
-    """One recognized utterance (provider output)."""
+    """One recognized utterance (provider output).
+
+    ``confidence`` is ``Optional[float]``: ``None`` means the provider
+    did NOT supply a real confidence.  A number is present ONLY when
+    the engine actually reported one — fabricated percentages (hard-
+    coded 0.7/0.75 placeholders) are forbidden (TF-005 §12).  Renderers
+    treat ``None`` / ``confidence_known=False`` as "confidence:
+    unavailable".
+    """
 
     text: str = ""
-    confidence: float = 0.0
+    confidence: Optional[float] = None   # None = UNKNOWN — never invented
     provider: str = ""
     duration: float = 0.0
     timestamp: float = field(default_factory=now_ts)
-    #: v16.5.2 §12 — False when the provider does NOT supply a real
-    #: confidence (e.g. PocketSphinx).  Never fabricate a percentage;
-    #: renderers show "confidence: unavailable" instead.
+    #: False when the provider does NOT supply a real confidence (e.g.
+    #: PocketSphinx, or a vosk result without a confidence field).
+    #: Never fabricate a percentage; keep this in sync with ``confidence``.
     confidence_known: bool = True
 
 
@@ -304,8 +315,9 @@ class PocketSphinxProvider(OfflineSpeechProvider):
             r = self._recognizer or self._sr.Recognizer()
             text = r.recognize_sphinx(audio)
             # §12: PocketSphinx exposes no reliable confidence —
-            # report 0.0 with confidence_known=False, never a made-up %
-            return Transcript(text=str(text or ""), confidence=0.0,
+            # report None (unknown) with confidence_known=False,
+            # never a made-up %
+            return Transcript(text=str(text or ""), confidence=None,
                               provider=self.name, confidence_known=False)
         except Exception:
             return Transcript(provider=self.name, confidence_known=False)
@@ -348,9 +360,25 @@ class VoskProvider(OfflineSpeechProvider):
         except Exception:
             return False
 
+    @staticmethod
+    def _result_confidence(obj: Any) -> Optional[float]:
+        """The REAL confidence a vosk result reported, or None.
+
+        Vosk only includes ``confidence`` in some result payloads; when
+        it is absent (or not a positive number) the honest answer is
+        None — never a placeholder percentage.
+        """
+        try:
+            v = obj.get("confidence")
+            if isinstance(v, (int, float)) and float(v) > 0.0:
+                return float(v)
+        except Exception:
+            pass
+        return None
+
     def transcribe(self, audio: Any) -> Transcript:
         if not self.available():
-            return Transcript(provider=self.name)
+            return Transcript(provider=self.name, confidence_known=False)
         try:
             import json
             import wave
@@ -359,7 +387,8 @@ class VoskProvider(OfflineSpeechProvider):
                 from vosk import KaldiRecognizer
                 rec = KaldiRecognizer(self._model, 16000)
             except Exception:
-                return Transcript(provider=self.name)
+                return Transcript(provider=self.name, confidence_known=False)
+            conf: Optional[float] = None
             if isinstance(audio, str) and audio.endswith(".wav"):
                 with wave.open(audio, "rb") as wf:
                     text = ""
@@ -370,19 +399,25 @@ class VoskProvider(OfflineSpeechProvider):
                         if rec.AcceptWaveform(data):
                             part = json.loads(rec.Result() or "{}")
                             text += " " + str(part.get("text", ""))
+                            conf = self._result_confidence(part) or conf
                     final = json.loads(rec.FinalResult() or "{}")
                     text += " " + str(final.get("text", ""))
+                    conf = self._result_confidence(final) or conf
             else:  # raw PCM bytes
                 if rec.AcceptWaveform(bytes(audio)):
                     part = json.loads(rec.Result() or "{}")
                     text = str(part.get("text", ""))
+                    conf = self._result_confidence(part)
                 else:
                     final = json.loads(rec.FinalResult() or "{}")
                     text = str(final.get("text", ""))
+                    conf = self._result_confidence(final)
             return Transcript(text=re.sub(r"\s+", " ", text).strip(),
-                              confidence=0.7, provider=self.name)
+                              confidence=conf,
+                              confidence_known=conf is not None,
+                              provider=self.name)
         except Exception:
-            return Transcript(provider=self.name)
+            return Transcript(provider=self.name, confidence_known=False)
 
 
 class WhisperProvider(OfflineSpeechProvider):
@@ -414,18 +449,22 @@ class WhisperProvider(OfflineSpeechProvider):
                 self._model = self._model or self._whisper.load_model(
                     self.model_name)
                 result = self._model.transcribe(audio)
+                # whisper's avg_logprob is NOT a 0-1 confidence — mapping
+                # it would be fabrication; report unknown honestly
                 return Transcript(
                     text=str(result.get("text", "")).strip(),
-                    confidence=0.75, provider=self.name)
+                    confidence=None, provider=self.name,
+                    confidence_known=False)
             if self._fw is not None:
                 self._model = self._model or self._fw(self.model_name)
                 segments, _info = self._model.transcribe(audio)
                 text = " ".join(str(s.text).strip() for s in segments)
-                return Transcript(text=text.strip(), confidence=0.75,
-                                  provider=self.name)
+                return Transcript(text=text.strip(), confidence=None,
+                                  provider=self.name,
+                                  confidence_known=False)
         except Exception:
             pass
-        return Transcript(provider=self.name)
+        return Transcript(provider=self.name, confidence_known=False)
 
 
 #: provider name → factory (registration point for third-party engines)
@@ -769,7 +808,8 @@ class OfflineVoiceEngine:
         # state
         self.last_transcript = ""
         self.last_command = ""
-        self.last_confidence = 0.0
+        self.last_confidence: Optional[float] = 0.0
+        self.last_confidence_known = True   # False when ASR gave no number
         self.last_intent: Optional[Intent] = None
         self.last_committed_text = ""
         self.enabled = True
@@ -782,6 +822,11 @@ class OfflineVoiceEngine:
         self._audio_thread: Optional[threading.Thread] = None
         self._stop_audio = threading.Event()
         self.on_speech: Optional[Callable[[str], None]] = None
+        # TF-004: the REAL PCM of the in-flight utterance (VAD-selected)
+        self._utterance: List[bytes] = []
+        # honest rejection accounting for feed_audio payloads
+        self.rejected_audio = 0
+        self.last_audio_reject_reason = ""
 
     # -- mode switching -------------------------------------------------------
 
@@ -799,41 +844,85 @@ class OfflineVoiceEngine:
 
     # -- transcript ingestion (deterministic core) -----------------------------
 
-    def feed_transcript(self, text: str, confidence: float = 0.95,
+    def feed_transcript(self, text: str, confidence: Optional[float] = 0.95,
                         now: Optional[float] = None) -> List[Event]:
         """Inject one transcript (from any ASR source) through the full
         mode-aware pipeline.  Returns the Events produced this call.
 
         This is the deterministic entry point — the audio path just ends
-        here after VAD segmentation.
+        here after VAD segmentation.  ``confidence=None`` (the ASR did
+        not report one) is accepted honestly: the pipeline weights it
+        as 0.0 and ``last_confidence_known`` records the uncertainty —
+        no number is ever invented.
         """
         t0 = float(now if now is not None else now_ts())
+        conf_known = confidence is not None
+        conf = float(confidence) if conf_known else 0.0
         with self._lock:
+            self.last_confidence_known = conf_known
             self._events = []
             if not self.enabled:
                 return []
             try:
-                self._handle_transcript(str(text or ""), float(confidence), t0)
+                self._handle_transcript(str(text or ""), conf, t0)
             except Exception:
                 pass  # the voice layer must never crash the interaction loop
             return list(self._events)
 
     # -- audio path --------------------------------------------------------------
 
-    def feed_audio(self, chunk: bytes, now: Optional[float] = None) -> None:
-        """Feed one PCM chunk through the VAD; on utterance end, the
-        provider transcribes and the pipeline runs.  Never raises."""
+    def feed_audio(self, chunk: Optional[bytes],
+                   now: Optional[float] = None) -> bool:
+        """Feed one REAL PCM chunk through the VAD (TF-004, rebuilt).
+
+        The chunks of each utterance (VAD onset → end) are buffered
+        VERBATIM; on utterance end the concatenated REAL PCM is handed
+        to the provider — ``transcribe(None)`` is FORBIDDEN on this
+        path and structurally tested against.
+
+        Honesty contract:
+
+        * ``None`` / empty payloads are REJECTED here with a recorded
+          reason — they never reach the engine's ``transcribe``, and no
+          exception ever leaks out of this method.
+        * Returns True when the chunk was accepted into the utterance
+          buffer (or completed one), False when it was rejected.
+        """
         try:
+            if chunk is None:
+                self.rejected_audio += 1
+                self.last_audio_reject_reason = \
+                    "rejected: None audio payload (no real PCM to transcribe)"
+                return False
+            data = bytes(chunk)
+            if not data:
+                self.rejected_audio += 1
+                self.last_audio_reject_reason = \
+                    "rejected: empty audio payload (zero-length PCM)"
+                return False
             t0 = float(now if now is not None else now_ts())
             was_active = self.vad.active
-            self.vad.feed(bytes(chunk), t0)
+            self.vad.feed(data, t0)
+            if self.vad.active:
+                # inside an utterance (including the onset chunk):
+                # buffer the REAL PCM verbatim
+                self._utterance.append(data)
             if was_active and self.vad.speech_ended:
-                tr = self.provider.transcribe(None)
+                # the closing (silence) chunk is real captured audio too
+                self._utterance.append(data)
+                pcm = b"".join(self._utterance)
+                self._utterance = []
+                if not pcm:
+                    return False   # honest: nothing real was captured
+                tr = self.provider.transcribe(pcm)
                 if tr and tr.text:
                     tr.timestamp = t0
                     self.feed_transcript(tr.text, tr.confidence, t0)
-        except Exception:
-            pass
+            return True
+        except Exception as exc:
+            self.last_audio_reject_reason = \
+                f"audio path error: {type(exc).__name__}: {exc}"
+            return False   # the voice layer must never crash the caller
 
     def start_audio(self, source: Any = None,
                     chunk_ms: int = 30) -> bool:
@@ -1038,6 +1127,9 @@ class OfflineVoiceEngine:
             "last_command": self.last_command,
             "last_transcript": self.last_transcript,
             "last_confidence": self.last_confidence,
+            "last_confidence_known": self.last_confidence_known,
+            "rejected_audio": self.rejected_audio,
+            "last_audio_reject_reason": self.last_audio_reject_reason,
             "dictation_pending": self.dictation.pending,
             "wake_word_required": self.wake_word_required,
             "latency_ms": self.latency_ms,
@@ -1045,3 +1137,86 @@ class OfflineVoiceEngine:
 
     def shutdown(self) -> None:
         self.stop_audio()
+
+
+# ---------------------------------------------------------------------------
+# honest session-banner helpers (TF-005) — wired into __main__
+# ---------------------------------------------------------------------------
+
+#: banner state: a REAL local ASR provider is active (proven, not assumed)
+BANNER_LIVE = "LIVE"
+
+#: banner state: the deterministic local grammar runs, but NO usable ASR
+#: engine is behind it — the reason string names the exact gap + remedy
+BANNER_GRAMMAR_ONLY = "GRAMMAR-ONLY"
+
+#: the honest v5 SpeechRecognition disclosure: that path sends recorded
+#: audio to Google's cloud for recognition.  It must NEVER be labelled
+#: "offline" — this string is the exact wording __main__ prints.
+CLOUD_DISCLOSURE = "uses Google Web Speech (cloud)"
+
+
+def session_banner_state() -> Tuple[str, str]:
+    """The honest banner state for the offline voice session.
+
+    Returns ``(state, reason)`` where state is exactly
+    :data:`BANNER_LIVE` or :data:`BANNER_GRAMMAR_ONLY`:
+
+    * ``("LIVE", reason)`` — ONLY when a real local ASR provider
+      constructs AND reports ``available()`` (engine-installed is NOT
+      model-available; readiness is proven here, never assumed).
+    * ``("GRAMMAR-ONLY", reason)`` — the engine still runs on the
+      deterministic local grammar; ``reason`` names the exact missing
+      capability and the actionable remedy (e.g. vosk installed but no
+      model → ``run: airmouse voice-setup``).
+
+    Never raises; never claims LIVE without proof.
+    """
+    provider = None
+    try:
+        from .asr_registry import registry   # lazy: avoids import cycle
+        provider = registry.select()
+    except Exception:
+        provider = None
+    if provider is not None:
+        try:
+            ok = bool(provider.available())
+        except Exception:
+            ok = False
+        if ok:
+            return (BANNER_LIVE,
+                    f"real local ASR online: {getattr(provider, 'name', '?')}")
+    # no usable provider — build the exact honest reason
+    vosk_installed = False
+    try:
+        from . import voice_stack as _vs
+        vosk_installed = any(_vs._spec_found(m)
+                             for m in _vs._ENGINE_MODULES.get("vosk", ()))
+    except Exception:
+        vosk_installed = False
+    if vosk_installed:
+        reason = ("vosk engine installed but no local acoustics model — "
+                  "run: airmouse voice-setup")
+    else:
+        reason = ("no local ASR engine installed — install pocketsphinx "
+                  "or run: airmouse voice-setup (vosk)")
+    return BANNER_GRAMMAR_ONLY, reason
+
+
+def grammar_only_reason() -> str:
+    """The exact GRAMMAR-ONLY reason for THIS machine ('' when a real
+    ASR provider is LIVE — check :func:`session_banner_state` first)."""
+    state, reason = session_banner_state()
+    return reason if state == BANNER_GRAMMAR_ONLY else ""
+
+
+def cloud_voice_banner() -> str:
+    """The honest banner for the v5 SpeechRecognition path.
+
+    That path records the microphone and uploads the audio to Google's
+    Web Speech API — this string discloses exactly that, instead of any
+    fake OFFLINE claim.
+    """
+    return ("VOICE ONLINE (cloud) — " + CLOUD_DISCLOSURE +
+            "; spoken audio is uploaded to Google for recognition "
+            "(nothing about this path is offline)")
