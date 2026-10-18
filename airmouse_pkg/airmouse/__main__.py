@@ -89,6 +89,7 @@ from .config import Config, CONFIG_PATH
 from .tutorial import run_tutorial
 from .display import enumerate_displays, get_primary_display
 from .voice_control import VoiceCommandEngine, VoiceCommand, SENSITIVITY_PROFILES
+from .safety_gate import bind_session
 from .calibration import AdaptiveCalibration, get_default_calibration
 from .macros import MacroRecorder, MacroPlayer, list_macros, MACRO_DIR
 from .zoom import PinchZoomController, zoom_scroll
@@ -640,7 +641,7 @@ _COMMAND_CHOICES = [
     "voice-setup", "voice-benchmark",
     "wizard", "reset", "repair",
     "uninstall", "update",
-    "logs", "config",
+    "logs", "config", "estop",
 ]
 
 
@@ -1607,6 +1608,43 @@ def main():
             print(f"  ✓ {cfg_path} parses cleanly (UTF-8 TOML){tail}")
         return 0
 
+    # ═══ v19.0.3 — `airmouse estop` (trip / reset / status) ═══
+    # The cross-process E-STOP: works against a RUNNING session without
+    # any camera, preview or window. Bare words only; the flag file
+    # carries a fixed reason and NEVER auto-resets.
+    if args.command == "estop":
+        from . import safety_gate as _sg
+        sub = str(args.command_arg or "status").strip().lower()
+        if sub == "trip":
+            path = _sg.write_estop_flag(
+                "estop requested via CLI (airmouse estop)")
+            print("  >> EMERGENCY STOP FLAG SET — estop requested via CLI"
+                  " (airmouse estop)")
+            print(f"     Flag: {path}")
+            print("     A running AirMouse session trips its central gate"
+                  " within one frame.")
+            return 0
+        if sub == "reset":
+            if _sg.clear_estop_flag():
+                print("  E-STOP flag cleared — actions re-enabled on the"
+                      " next session (and in any running session that has"
+                      " its reset channel armed).")
+            else:
+                print("  E-STOP flag: not set (nothing to clear)")
+            return 0
+        if sub == "status":
+            if _sg.estop_flag_present():
+                print("  E-STOP flag: SET")
+                reason = _sg.estop_flag_reason()
+                if reason:
+                    print(f"  Reason: {reason}")
+            else:
+                print("  E-STOP flag: not set")
+            print("  Usage: airmouse estop [trip|reset|status]")
+            return 0
+        print("  !! usage: airmouse estop [trip|reset|status]")
+        return 2
+
     # Handle --settings
     if args.settings:
         from .settings_gui import show_settings
@@ -2560,6 +2598,12 @@ def main():
             pass
     print()
 
+    # ═══ v19.0.3 — CENTRAL SAFETY GATE (one authoritative E-STOP) ═══
+    # The session binds the process-wide gate; every frame folds the
+    # cross-process `airmouse estop` flag file into the latch. The poll
+    # never touches the camera: E-STOP works with the preview CLOSED.
+    session_gate = bind_session()
+
     try:
         while running:
             t0 = time.perf_counter()
@@ -2585,6 +2629,14 @@ def main():
                     and str(getattr(agent.safety, "level", "")).endswith("EMERGENCY")
                     and not spine.estopped):
                 spine.trip_estop("safety_system")
+
+            # ═══ v19.0.3 — central gate poll (cross-process E-STOP) ═══
+            # `airmouse estop trip` writes a flag file; a RUNNING session
+            # trips its central gate within one frame. A latched central
+            # gate dominates the spine (cursor stops, actions refused).
+            if session_gate.poll_estop_flag() and not spine.estopped:
+                spine.trip_estop(session_gate.estop_reason()
+                                 or "estop flag")
 
             # ═══ v5.0 — VOICE POLL ═══
             # Voice works even when no hand is visible — poll every frame.
