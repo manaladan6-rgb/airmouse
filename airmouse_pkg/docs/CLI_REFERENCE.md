@@ -7,14 +7,17 @@ flag below is registered exactly as listed — nothing is invented. The
 executable truth is always `airmouse --help`; this document adds the
 exit codes and `command_arg` semantics the help text does not show.
 
-Measured parser facts (this tree): **34 subcommand choices**, **56
-visible flags + 1 hidden CI flag** (57 `add_argument` flags + 2
+Measured parser facts (v16.5 tree, historical): **34 subcommand choices**,
+**56 visible flags + 1 hidden CI flag** (57 `add_argument` flags + 2
 positionals = 59 registrations — v16.5 added four subcommands, no new
-flags), help banner currently printed as
-`AirMouse v16.5.0 — Adaptive Human-Computer Intelligence Edition` (the
-version string in `__init__.py` / `pyproject.toml` is bumped to 16.5.0
-by step 1 of the release process — every capability documented here is
-independent of that string).
+flags).
+
+Measured parser facts (v19.0.3 tree, current): **44 subcommand choices**
+(v19.0.3 adds `estop`), **70 visible flags + 1 hidden CI flag**
+(71 `add_argument` flags + 2 positionals = 73 registrations — v19.0.2
+added `--live/--live-sim/--live-seconds/--check` + `logs`/`config`;
+v19.0.3 adds the `estop` subcommand only). Help banner:
+`AirMouse v19.0.3 — Adaptive Human-Computer Intelligence Edition`.
 
 **v19 update (measured on the v19 tree):** the parser now registers
 **41 subcommand choices** and **66 visible flags + 1 hidden CI flag**
@@ -233,7 +236,7 @@ and `uninstall` as the scripted-confirmation bypass.)
 | Command | Prints / does | Exit codes |
 |---|---|---|
 | `setup` | 11-step consent-gated wizard; never installs without an interactive Y; writes `<home>/.setup_complete`. With `--repair-config`: backup → repair → validate → report (v16.5.1) | 0 (also on honest hardware rows) |
-| `doctor` | 12 sections / 43 components; every WARNING/FAILED row explains WHAT / WHY / FIX (v16.5.1); hardware rows carry `[CAPABILITY-STATE]` labels; verdict `[READY FOR TESTING]` / `[PARTIAL — …]` / `[BLOCKED]`; `--json` supported | 0 READY · 1 PARTIAL · 2 BLOCKED |
+| `doctor` | 12 sections / 42 components; every WARNING/FAILED row explains WHAT / WHY / FIX (v16.5.1); hardware rows carry `[CAPABILITY-STATE]` labels; verdict `[READY FOR TESTING]` / `[PARTIAL — …]` / `[BLOCKED]`; `--json` supported and carries the SAME exit contract since v19.0.3 | 0 READY · 1 PARTIAL · 2 BLOCKED |
 | `test` | 12-test laboratory; physical tests NEVER auto-pass (ACTION_REQUIRED), simulations labelled `[SIMULATION]`; `--guided` = interactive | 0 unless a test FAILs · 1 on FAIL |
 | `verify` | 12 automated checks (import, voice determinism, intelligence roundtrip, safety gates, offline 18/18, simulated browser, permission deny-by-default, lease conflict, AIP validator, packaging match, **Teacher** — onboarding ladder + honest grading + help + profile store + learning-loop approval gate + transcribe session, **Temporal** — recognizer timing ≈293 µs/frame) + 5 physical ACTION_REQUIRED rows | 0 · 1 on any automated FAIL |
 | `privacy` | telemetry/network/model state, store inventory, controls, the **storage manifest — all 24 on-disk artifacts** with purpose + location + exists flag, and the **PERSONALIZATION summary** (learned-counters only, ends `Nothing is uploaded.`); `--json` supported | 0 |
@@ -328,7 +331,7 @@ proceeds — the menu never blocks the app.
 | `voice-status` | v16.5.2 §8 sections: MICROPHONE (detection detail) + ASR PROVIDERS (per-engine honest rows; `--verbose` adds reasons + probe times) + TRANSCRIPTION verdict (offline: YES, audio storage: NONE, network: NOT REQUIRED) + the bootstrap-aware install hint when no engine is usable | 0 · 1 renderer failure |
 | `voice-benchmark` | v16.5.3 §22 — deterministic local benchmark: provider + engine startup, first-result latency, average utterance latency (scripted PCM), CPU time, peak RAM, disclosed wheel/model sizes. Real-speech metrics (latency, words/minute) ONLY with `--wav`. Never claims accuracy without samples. | 0 · 1 no usable engine |
 | `gestures` | built-in gesture→intent mappings + custom mappings from `gestures.json` | 0 |
-| `commands` | the 75-command grammar across 10 namespaces (engine, mouse, system, window, application, files, text, navigation, media, browser) | 0 |
+| `commands` | the 90-command grammar across 11 namespaces (engine, mouse, system, window, application, files, text, navigation, media, browser, dictation — v19.0.3 adds DICTATION/TEXT_EDIT + deictic move) | 0 |
 | `browser` | `CDP bridge on :9222 -> available: True/False` + start instructions | 0 |
 | `offline-test` | full-stack selftest with networking really blocked (18 checks) | 0 all pass · 1 any fail |
 | `diagnostics` | version, ASR providers, offline selftest summary, optional-dep probe (cv2/mediapipe/pynput/speech_recognition/vosk/whisper) | 0 · 1 if offline selftest fails |
@@ -447,6 +450,21 @@ airmouse config path|show|validate [--json]
 - `validate` — unknown top-level sections are ERRORS (exit 1); unknown
   keys inside known sections are WARNINGS (exit 0) because a newer
   AirMouse may add keys the loader silently ignores.
+
+## `estop` (v19.0.3)
+
+```
+airmouse estop trip|reset|status
+```
+
+The cross-process E-STOP. `trip` writes a flag file under
+`AIRMOUSE_HOME` (never auto-resets); a RUNNING AirMouse session trips
+its central safety gate within one frame — with the camera preview
+closed. `Ctrl+Alt+E` / `Ctrl+Alt+R` arm the same latch in-session.
+Bare words only: the dash spellings (`--trip` etc.) are REJECTED by
+argparse (exit 2). The flag-file reason is fixed ("estop requested via
+CLI (airmouse estop)"); `estop trip extra` exits 2 (no custom reason).
+Exit codes: 0 for trip/reset/status, 2 for bad usage.
 
 ## `diagnostics --live-sim` / `--live` (v19.0.2)
 

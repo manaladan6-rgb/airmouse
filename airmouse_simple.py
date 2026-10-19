@@ -1,4 +1,14 @@
-"""AirMouse Simple v5.0-compatible — single-file edition. Everything in one file:
+"""LEGACY / UNSUPPORTED — NOT covered by the v19.0.3 central safety gate.
+
+This single-file edition is a historical v5.0-compatible demo kept in the
+repository for reference only. It does NOT integrate the central safety
+gate (no E-STOP latch, no shutdown/backends/confirmation policy), it is
+NOT part of the supported product, and it ships NO support or security
+guarantees. It is excluded from the packaged wheel/sdist on purpose.
+Use the supported entry point instead: the `airmouse` CLI (see README.md).
+
+--------------------------------------------------------------------
+AirMouse Simple v5.0-compatible — single-file edition. Everything in one file:
 hybrid One Euro + Kalman cursor filter, adaptive calibration, pinch-to-zoom,
 optional voice control, macro record/replay. Usage: python airmouse_simple.py
 [--cam N] [--voice] [--turbo] [--no-kalman] [--no-calibration] [--zoom-off]

@@ -7,6 +7,89 @@ The detailed per-release engineering notes live in
 [airmouse_pkg/CHANGELOG.md](airmouse_pkg/CHANGELOG.md); this file is the
 user-facing summary.
 
+## [19.0.3] — One Safety Gate, Real Audio, Truthful Diagnostics
+
+### Fixed — safety
+- **One authoritative E-STOP for every route.** A new central safety
+  gate (`airmouse.safety_gate`) carries the process-wide emergency
+  stop, shutdown state, backend availability and confirmation flags.
+  Gestures, browser voice commands, browser-bridge actions, AIP agent
+  execution, macro replay and PEACE scrolling all consult it. On
+  v19.0.2 an E-STOP did not necessarily block the browser voice
+  side-door, AIP execution, PEACE scrolling or macro steps.
+- **`airmouse estop trip|reset|status`** — a cross-process E-STOP
+  (flag file under `AIRMOUSE_HOME`, never auto-resets) that stops a
+  RUNNING session within one frame. Works with the camera preview
+  closed. Bare words only; unknown args exit 2.
+- **Global E-STOP hotkeys** `Ctrl+Alt+E` (trip) / `Ctrl+Alt+R`
+  (reset), armed every session with honest availability reporting —
+  E-STOP no longer depends on the camera preview or a debug mode.
+- **TF-001 root fix** — `HandTracker()` no longer raises
+  `NameError: name 'mp' is not defined`. The lazy import is now a real
+  module global (a delegating proxy); missing dependency, missing
+  model and unusable camera each produce an actionable error, and a
+  dead camera can never look like "hands active".
+- **Macro replay is cancellable** — cooperative stop checks before the
+  first action, between steps and inside waits; bounded cancel/join;
+  fail-closed start while the gate is latched.
+- **Browser bridge exact-origin allowlist** — the substring match that
+  let a look-alike origin through is closed; payloads are size-capped;
+  unknown commands are rejected; binding to loopback is containment,
+  not authorization.
+- **AIP agent execution is fail-closed** — every action type goes
+  through a permission check; unclassified action types are denied;
+  `agent_action` requires confirmation by default.
+- **Ordered shutdown** — the central gate is marked shutting-down
+  first, then macro playback is cancelled (bounded), voice capture
+  stops, workers join with bounded timeouts and unterminated workers
+  are reported.
+
+### Fixed — voice
+- **Real audio path** — utterance PCM is buffered and handed to the
+  offline recognizer as real frames; `transcribe(None)` is gone;
+  None/empty payloads are rejected with a recorded reason.
+- **No fabricated confidence** — when an engine cannot provide a
+  confidence value, none is invented (vosk parses its real value).
+- **Honest session banners** — `V10 OFFLINE VOICE LIVE` only when a
+  real local ASR provider is constructed AND available; otherwise
+  `GRAMMAR-ONLY` with the exact gap and the remedy
+  (`airmouse voice-setup`). The v5 cloud path discloses on its banner
+  that spoken audio is uploaded to Google.
+- **Self-test honesty** — a component that is installed but unusable
+  (e.g. vosk without a model) is SKIP with the reason, never silently
+  rewritten to OPTIONAL; FAIL rows keep the overall result FAIL; SKIP
+  rows are counted in the tally.
+
+### Fixed — diagnostics & CLI
+- **`doctor --json`** now emits real structured JSON (overall,
+  sections, blocked/degraded with reasons and fixes) and carries the
+  same exit contract as the text panel: READY → 0, PARTIAL → 1,
+  BLOCKED → 2.
+- **Dictation edits are buffer edits** — "delete last word",
+  "scratch that", "capitalize that" and friends edit the dictation
+  text buffer only; they can never delete files ("delete demo.txt"
+  stays a destructive FILES command). 14 new TEXT_EDIT intents.
+- **Deictic move** — "move over there" moves the cursor toward the
+  pointing direction. Grammar is now 90 commands across 11 namespaces.
+- **Autostart entries launch the real CLI** (`<python> -m airmouse
+  --skip`) — the previous entry ran nothing; `verify_launch_command`
+  checks usability.
+- `airmouse estop` added as subcommand #44.
+
+### Disclosed limitations (honest)
+- Physical hardware validation (webcam, microphone, real clicks,
+  hotkey presses) is NOT INCLUDED in this release's automated
+  evidence: the release is software-verified only. Run
+  `airmouse verify` on real hardware for the ACTION_REQUIRED
+  physical checklist.
+- Offline ASR needs its acoustic model installed once via
+  `airmouse voice-setup` (consent-gated, SHA-256-verified, never
+  auto-downloaded).
+- The legacy root-level `airmouse_simple.py` single-file demo is
+  explicitly UNSUPPORTED: it predates the central safety gate (no
+  E-STOP integration), is excluded from the packaged wheel/sdist,
+  and is kept only as a reference. Use the `airmouse` CLI.
+
 ## [19.0.2] — Real Physics, E-STOP Contract, Honest Diagnostics
 
 ### Fixed — safety (the E-STOP contract now actually holds)

@@ -193,7 +193,10 @@ def test_v10_voice_owns_speech_when_active(monkeypatch, tmp_path):
         except _StartupProbeDone:
             pass
     out = buf.getvalue()
-    assert "V10 OFFLINE VOICE ONLINE" in out
+    # v19.0.3 — the v10 banner is HONEST: LIVE only with a real local ASR
+    # provider available, otherwise GRAMMAR-ONLY with the exact gap.
+    assert ("V10 OFFLINE VOICE LIVE" in out
+            or "V10 OFFLINE VOICE GRAMMAR-ONLY" in out)
     # v5 engine was constructed, started, then replaced by v10: stopped once.
     assert "v5 cloud voice stopped" in out
     assert stopped["count"] == 1

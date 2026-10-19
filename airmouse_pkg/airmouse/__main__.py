@@ -965,15 +965,18 @@ def main():
             str(args.command_arg or "").strip().lower() in (
                 "verbose", "advanced", "-v", "--verbose", "--advanced")
         if args.json:
-            from .capability_registry import build_registry
-            base = detect_all().to_machine()
+            # v19.0.3 — honest structured JSON + the SAME exit contract
+            # as the text panel (BLOCKED -> 2, READY -> 0, else 1).
+            from .doctor import run_doctor_json
+            payload = run_doctor_json()
+            print(json.dumps(payload, indent=2))
             try:
-                base["interaction_readiness"] = \
-                    build_registry(quick=True).to_machine()
-            except Exception:            # fail-open to the raw record
-                pass
-            print(json.dumps(base, indent=2))
-            return 0
+                _overall = str(payload.get("overall", ""))
+            except Exception:
+                _overall = ""
+            if "BLOCKED" in _overall:
+                return 2
+            return 0 if "READY" in _overall else 1
         report = run_doctor(verbose=verbose)
         print(format_doctor_report(report, verbose=verbose))
         # v19 Phase 7 — the human interaction panel on the normal path
@@ -1983,8 +1986,15 @@ def main():
                                    on_transcript=_on_transcript)
         if voice.is_available():
             voice.start()
-            print(f"  >> VOICE ONLINE ({sensitivity} mode) — say: click, right click,"
-                  f" scroll up, zoom in, freeze, precision, quit ...")
+            print(f"  >> VOICE ONLINE ({sensitivity} mode) — say: click, "
+                  f"right click, scroll up, zoom in, freeze, precision, "
+                  f"quit ...")
+            # v19.0.3 — mandatory cloud disclosure on the v5 path:
+            try:
+                from .offline_voice import cloud_voice_banner as _cvb
+                print(f"     {_cvb()}")
+            except Exception:
+                print("     uses Google Web Speech (cloud)")
         else:
             print("  >> Voice requested but SpeechRecognition/pyaudio unavailable.")
             print("     Install:  pip install SpeechRecognition pyaudio")
@@ -2104,8 +2114,16 @@ def main():
                 voice = None
                 print("  >> v5 cloud voice stopped — v10 offline voice owns speech")
             # deterministic transcript injection hook for CI (AIRMOUSE_VOICE_TEXT)
-            print(f"  >> V10 OFFLINE VOICE ONLINE — mode: "
-                  f"{voice_engine10.mode.value.upper()} (deterministic local grammar)")
+            # v19.0.3 — HONEST banner: LIVE only when a real local ASR
+            # provider is constructed AND available; otherwise the exact
+            # gap + remedy. No fake ONLINE claims.
+            try:
+                from .offline_voice import session_banner_state as _sbs
+                _vstate, _vwhy = _sbs()
+            except Exception as _vse:
+                _vstate, _vwhy = "GRAMMAR-ONLY", f"voice probe failed: {_vse}"
+            print(f"  >> V10 OFFLINE VOICE {_vstate} — mode: "
+                  f"{voice_engine10.mode.value.upper()} — {_vwhy}")
         # browser subsystem
         if args.launch_browser:
             # v16 browser last mile (audit #16): launch Chrome/Chromium/

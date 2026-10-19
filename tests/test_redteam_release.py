@@ -192,10 +192,14 @@ class TestCLISurfaceFuzz:
         code, out, err = _cli(
             ["doctor", "--json", "--verbose", "--debug",
              "--to", "A" * 10_000, "garbage-position"])
-        assert code == 0
+        # v19.0.3 — doctor --json carries the honest exit contract:
+        # READY -> 0, PARTIAL -> 1, BLOCKED -> 2 (garbage flags tolerated).
         parsed = json.loads(out)          # machine output stays JSON
         assert parsed["overall"] in ("READY FOR TESTING", "PARTIAL",
                                      "BLOCKED")
+        _ov = parsed["overall"]
+        assert code == (0 if "READY" in _ov
+                        else (2 if "BLOCKED" in _ov else 1))
 
     def test_export_error_is_friendly_no_traceback(self, home):
         persistence.ensure_dirs()
@@ -763,7 +767,8 @@ class TestEnvLeakScan:
         monkeypatch.setenv("AIRMOUSE_TEST_SECRET", self.SECRET)
 
         code, out, err = _cli(["doctor", "--json"])
-        assert code == 0
+        # v19.0.3 — honest exit contract (READY 0 / PARTIAL 1 / BLOCKED 2)
+        assert code in (0, 1, 2)
         assert self.SECRET not in out + err
 
         code2, out2, err2 = _cli(["privacy", "--json"])

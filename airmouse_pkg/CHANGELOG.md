@@ -1,5 +1,50 @@
 # Changelog
 
+## v19.0.3 — One Safety Gate, Real Audio, Truthful Diagnostics (2026-10-17)
+
+Centralized-safety and voice-truth release. Full user-facing notes in
+the root CHANGELOG.md; engineering summary (rebuilt from the verified
+published baseline df26494 = v19.0.2 after an infrastructure loss; the
+rebuild was re-verified end-to-end against the same contracts):
+
+* **Central safety gate (`safety_gate.py`, NEW)** — one process E-STOP
+  latch + shutdown + backend-availability + confirmation flags; the
+  session binds it (`bind_session`) and every consequential route
+  consults it: gesture spine, browser voice side-door,
+  BrowserController.execute, AIP EXECUTE (fail-closed for unclassified
+  actions), macro replay stop_check, PEACE scroll (per-iteration).
+  Cross-process E-STOP flag file + `airmouse estop` CLI (subcommand 44).
+* **TF-001 root fix** — `_LazyMp` delegating proxy bound as a real
+  module global (PEP 562 could not satisfy bare LOAD_GLOBAL);
+  actionable ImportError; camera probe BEFORE detector creation with
+  actionable failure; tolerant release(); dead-camera read() never
+  raises or lies.
+* **TF-004/005 voice truth** — `feed_audio` hands real buffered
+  utterance PCM to the recognizer (`transcribe(None)` eliminated,
+  AST-verified); no fabricated confidence; honest LIVE vs GRAMMAR-ONLY
+  banners with exact-reason strings (`session_banner_state()`); v5
+  cloud banner discloses the Google upload; self-test SKIP semantics
+  (installed-but-unusable = SKIP + reason; FAIL never downgraded; SKIP
+  counted).
+* **Truthful CLI** — `doctor --json` structured + exit contract
+  (READY 0 / PARTIAL 1 / BLOCKED 2); dictation TEXT_EDIT intents edit
+  the buffer only (files untouchable); deictic `move over there`;
+  autostart entries launch `<python> -m airmouse --skip` +
+  `verify_launch_command`; voice extra declares vosk (TT-22).
+* **E-STOP hotkeys (`estop_hotkey.py`, NEW)** — Ctrl+Alt+E/R armed
+  every session, honest unavailability reporting, bounded cleanup.
+* **Ordered shutdown** — gate shutdown first, macro bounded cancel,
+  voice stop, bounded joins, honest unterminated-worker report.
+* 76+ new deterministic regression tests
+  (tests/test_final_form_safety.py, tests/test_final_form_macros_safety.py,
+  tests/test_final_form_voice.py, tests/test_final_form_cli.py,
+  tests/test_final_form_tracker.py).
+* Suite at v19.0.3: **2271 passed / 16 skipped / 0 failed** (37.3 s,
+  Linux headless, Python 3.12.15; bare pytest collects 2287, 0 errors).
+* The legacy root-level `airmouse_simple.py` single-file demo is now
+  explicitly marked LEGACY/UNSUPPORTED in its docstring (no central
+  safety gate, no E-STOP) and remains excluded from the wheel/sdist.
+
 ## v19.0.2 — Real Physics, E-STOP Contract, Honest Diagnostics (2026-10-16)
 
 Safety, physics and honesty release. Full user-facing notes in the root

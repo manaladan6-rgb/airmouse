@@ -10,6 +10,32 @@ through one safety spine: every action passes a permission gate, every predictio
 
 ---
 
+## What's new in 19.0.3
+
+- **One authoritative E-STOP for every route.** A new central safety gate
+  (`airmouse.safety_gate`) carries the process-wide emergency stop, shutdown state,
+  backend availability and confirmation flags. Gestures, browser voice commands,
+  browser-bridge actions, AIP agent execution, macro replay and PEACE scrolling all
+  consult it — and `airmouse estop trip` (cross-process flag file) stops a RUNNING
+  session within one frame, with no camera or preview required.
+- **Global E-STOP hotkeys** — `Ctrl+Alt+E` trips, `Ctrl+Alt+R` resets, armed every
+  session with honest availability reporting.
+- **TF-001 root fix** — `HandTracker()` no longer crashes with `NameError: name 'mp'
+  is not defined`; actionable camera/model/dependency errors instead.
+- **Real audio path + honest voice banners** — utterance PCM is buffered and handed to
+  the offline recognizer as real frames (`transcribe(None)` eliminated); the session
+  banner says `LIVE` only when a real local ASR provider is available, otherwise
+  `GRAMMAR-ONLY` with the exact gap and remedy; the v5 path discloses its Google cloud
+  upload on the banner.
+- **Truthful CLI** — `doctor --json` carries the same exit contract as the panel
+  (READY 0 / PARTIAL 1 / BLOCKED 2); dictation edits ("delete last word") edit the
+  dictation buffer, never files; deictic `move over there`; autostart entries launch
+  the real CLI; self-test counts SKIP rows honestly.
+- **Grammar 90 commands / 11 namespaces** (+14 dictation TEXT_EDIT intents, +1 deictic
+  move); 44 CLI subcommands incl. `estop`.
+
+---
+
 ## The 60-second answer
 
 | Question | Answer |
@@ -21,7 +47,7 @@ through one safety spine: every action passes a permission gate, every predictio
 | How do I control it? | Wave to move, pinch to click, say "click" (after `airmouse voice-setup`) |
 | Does voice work offline? | Yes — after the one-time `airmouse voice-setup`, recognition is 100% local |
 | What permissions does it need? | Camera and/or microphone only if you use those modes; Accessibility/Input permission for controlling the mouse |
-| How do I stop it immediately? | Press `Esc` in the AirMouse window, or `Ctrl+C` in the terminal |
+| How do I stop it immediately? | `Ctrl+Alt+E` (global hotkey), `airmouse estop trip` from any terminal, `Esc` in the AirMouse window, or `Ctrl+C` in the terminal |
 | How do I fix problems? | `airmouse doctor` → `airmouse repair` → [Troubleshooting](airmouse_pkg/docs/TROUBLESHOOTING.md) |
 | How do I remove it? | `airmouse uninstall` (asks first, explains what is deleted), then `pip uninstall airmouse` |
 
@@ -51,7 +77,7 @@ Nothing leaves your machine: no cloud AI, no telemetry, no hidden network calls.
 network access AirMouse ever performs is a model download **you explicitly request** with a
 verified checksum, and an update check **you explicitly request**.
 
-## Verified in this release (v19.0.2)
+## Verified in this release (v19.0.3)
 
 Status vocabulary: **REAL** = implemented and verified by automated tests ·
 **SIMULATED** = verified in a labelled simulation only · **OPTIONAL** = available when you
@@ -70,14 +96,14 @@ device to confirm · **NOT AVAILABLE** = not in this release.
 | Deterministic simulation + failure-injection test harness | REAL | runs on machines with no camera/mic at all |
 | Offline speech on a machine you can install Vosk on | OPTIONAL | `airmouse voice-setup` picks the smallest compatible engine for your Python/OS |
 
-| E-STOP contract (movement gate + button release from every trip source) | REAL | locked by `tests/test_estop_contract.py`; ESC / [x] / voice / long-blink / safety system all funnel through one spine |
+| E-STOP contract (movement gate + button release from every trip source) | REAL | one central gate locked by `tests/test_estop_contract.py` + `tests/test_final_form_safety.py`; ESC / [x] / voice / long-blink / safety system / `Ctrl+Alt+E` / `airmouse estop` all funnel through one latch |
 | Real-timestamp physics (gap → hold + re-acquire, no teleport/sweep) | REAL | deterministic benchmarks in `tests/test_physics_benchmark.py`; on-camera behavior PHYSICAL TEST REQUIRED |
 | Gaze calibration loads + quality-gates at runtime | REAL | a fit below "fair" quality or a screen-size mismatch cannot drive gaze clicks |
 | `airmouse logs` / `airmouse config validate` / `diagnostics --live-sim` | REAL | bounded, injection-safe, honest SIMULATED labels |
 | Hand-model download (consent, pinned SHA-256, atomic install, kill-switch) | REAL | `AIRMOUSE_NO_MODEL_DOWNLOAD=1` refuses all downloads |
 | Real-camera accuracy, dwell ergonomics, OS-cursor feel | PHYSICAL TEST REQUIRED | run `WINDOWS_REAL_WORLD_TEST.md`; sandboxed CI has no camera |
 
-The full 136-row evidence matrix lives at
+The full 111-row evidence matrix lives at
 [airmouse_pkg/docs/CAPABILITY_MATRIX.md](airmouse_pkg/docs/CAPABILITY_MATRIX.md).
 
 ## Supported platforms
@@ -120,7 +146,8 @@ to inspect before running: download the script and read it; it is ~120 readable 
 git clone https://github.com/manaladan6-rgb/airmouse.git
 cd airmouse/airmouse_pkg
 pip install -e .
-pytest ../tests   # 2100+ tests
+pytest ../tests   # 2271 passed / 16 skipped / 0 failed
+                  # (CPython 3.12.15, Linux headless; `python -m pytest tests -q`)
 ```
 
 </details>
@@ -145,7 +172,7 @@ airmouse --skip   # start tracking immediately, skip the menu
 
 - **Move** the cursor: hold your hand up, point with your index finger.
 - **Left-click**: pinch (thumb + index together). **Right-click**: peace sign. **Scroll**: three fingers, move hand up/down. **Drag**: open palm. **Freeze**: fist.
-- **Stop instantly**: `Esc` in the AirMouse window, or `Ctrl+C` in the terminal. Voice: "stop" (when voice is set up). E-STOP outranks everything — movement, clicks, voice and prediction — and always releases a held mouse button. Press `[x]` in the window to reset the stop state.
+- **Stop instantly**: `Ctrl+Alt+E` (global hotkey, armed every session), `airmouse estop trip` (works against a RUNNING session from any terminal, no camera needed), `Esc` in the AirMouse window, or `Ctrl+C` in the terminal. Voice: "stop" (when voice is set up). E-STOP outranks everything — movement, clicks, voice, browser, agents, macros and prediction — and always releases a held mouse button. Press `[x]` in the window or `Ctrl+Alt+R` to reset the stop state.
 - **Watch the physics live**: `airmouse diagnostics --live-sim` shows the real filter engine fed a labelled synthetic hand (raw vs filtered position, velocity in px/s, tracking state, fusion weight). With a camera: `airmouse diagnostics --live`.
 
 ## Test your hardware
@@ -228,10 +255,16 @@ MIT — see [LICENSE](LICENSE).
 
 ## Known limitations (honest list)
 
-- Physical-hardware behaviour (real webcam tracking on your specific machine, real
-  microphone arrays, specific browser builds) is implemented and software-verified, but the
-  final on-device confirmation is [WINDOWS_REAL_WORLD_TEST.md](WINDOWS_REAL_WORLD_TEST.md)
-  — a checklist anyone can run.
+- **No physical hardware validation is included in this release's automated evidence** —
+  the release is software-verified only. Real webcam tracking on your specific machine,
+  real microphone arrays and real hotkey delivery still need the on-device checklist at
+  [WINDOWS_REAL_WORLD_TEST.md](WINDOWS_REAL_WORLD_TEST.md) (or run `airmouse verify`
+  for the ACTION_REQUIRED physical list).
+- Offline ASR needs a one-time model install via `airmouse voice-setup` (consent-gated,
+  checksum-verified, never auto-downloaded). Without an engine + model the voice session
+  runs GRAMMAR-ONLY (deterministic phrase matching — no dictation), and the banner says so.
+- The root-level `airmouse_simple.py` single-file demo is **legacy and unsupported** — it
+  does not use the central safety gate (no E-STOP) and is not packaged. Use the `airmouse` CLI.
 - Wayland: raw input automation is restricted by the OS display protocol.
 - macOS: experimental.
 - The browser bridge needs Chrome/Edge with a debug port; without it, a clearly-labelled

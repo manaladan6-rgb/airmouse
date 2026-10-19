@@ -1,4 +1,4 @@
-# AirMouse v19.0.0 — INSTANT DEPLOYMENT
+# AirMouse v19.0.3 — INSTANT DEPLOYMENT
 
 Voice + hand + gaze + RF + keyboard/mouse + screen + browser → one
 **event bus** → fusion → world model → intent → **one execution spine**
@@ -253,8 +253,12 @@ memory lifecycle (export / reset / delete) that you control.
   DESTRUCTIVE) > destructive policy > rate limit > dispatch**.
   OK-gesture Alt+F4 and macro replay are REFUSED by default;
   `[ESC]` trips the spine e-stop, `[x]` resets it.
-- **Deterministic offline grammar:** 75 commands across 10 namespaces
-  (30-phrase spoken grammar); no cloud, no LLM on the control path.
+- **Deterministic offline grammar:** 90 commands across 11 namespaces
+  (30-phrase spoken grammar panel; v19.0.3 adds dictation TEXT_EDIT
+  commands and the deictic move); no cloud, no LLM on the control path.
+- **One central safety gate:** every consequential route (gestures,
+  browser voice/bridge, AIP agents, macros, PEACE scroll) consults one
+  E-STOP latch; `Ctrl+Alt+E` / `airmouse estop trip` stop everything.
 - **Gesture-first learning tools:** `airmouse academy` (11 lessons,
   never auto-passes a physical skill), `airmouse gesture-lab`
   (dry-run observatory that shows the safety gates refusing actions
