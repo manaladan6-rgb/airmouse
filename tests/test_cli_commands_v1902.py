@@ -47,7 +47,7 @@ def test_version_does_not_import_cv2():
 def test_logs_command_empty_state():
     r = _cli("logs")
     assert r.returncode == 0
-    out = r.stdout + r.stderr
+    out = (r.stdout or "") + (r.stderr or "")
     assert ("No command-log entries" in out) or ("Recent command outcomes" in out)
 
 
@@ -63,7 +63,7 @@ def test_logs_json_shape():
 def test_logs_rejects_non_numeric_n():
     r = _cli("logs", "not-a-number")
     assert r.returncode == 2
-    assert "usage" in (r.stdout + r.stderr)
+    assert "usage" in ((r.stdout or "") + (r.stderr or ""))
 
 
 def test_config_path_prints_toml_path():
@@ -75,7 +75,7 @@ def test_config_path_prints_toml_path():
 def test_config_validate_clean_home(tmp_path):
     r = _cli("config", "validate",
              env_extra={"AIRMOUSE_HOME": str(tmp_path)})
-    out = r.stdout + r.stderr
+    out = (r.stdout or "") + (r.stderr or "")
     # no config file in a fresh home → the validator says so (or clean)
     assert r.returncode in (0, 1)
     assert ("not found" in out) or ("parses cleanly" in out)
@@ -87,7 +87,7 @@ def test_config_validate_unknown_section_fails(tmp_path):
     r = _cli("config", "validate",
              env_extra={"AIRMOUSE_HOME": str(tmp_path)})
     assert r.returncode == 1
-    assert "unknown section" in (r.stdout + r.stderr)
+    assert "unknown section" in ((r.stdout or "") + (r.stderr or ""))
 
 
 def test_config_validate_bad_toml_fails(tmp_path):
@@ -109,7 +109,7 @@ def test_diagnostics_live_sim_honest_labels():
     """SIM mode must label itself SIMULATED and never claim OS movement."""
     r = _cli("diagnostics", "--live-sim", "--live-seconds", "0.8")
     assert r.returncode == 0
-    out = r.stdout + r.stderr
+    out = (r.stdout or "") + (r.stderr or "")
     assert "SIMULATED" in out
     assert "OS cursor was NOT moved" in out
     assert "PHYSICAL_TEST_REQUIRED" in out
@@ -118,7 +118,7 @@ def test_diagnostics_live_sim_honest_labels():
 
 def test_diagnostics_live_sim_columns_present():
     r = _cli("diagnostics", "--live-sim", "--live-seconds", "0.5")
-    out = r.stdout + r.stderr
+    out = (r.stdout or "") + (r.stderr or "")
     for col in ("raw(x,y)", "filtered(px)", "vel(px/s)", "state"):
         assert col in out, f"missing telemetry column {col}"
 
@@ -126,7 +126,7 @@ def test_diagnostics_live_sim_columns_present():
 def test_diagnostics_live_real_without_camera_fails_honestly():
     """Headless sandbox: real camera path must fail with a clear FIX."""
     r = _cli("diagnostics", "--live", "--live-seconds", "0.5")
-    out = r.stdout + r.stderr
+    out = (r.stdout or "") + (r.stderr or "")
     assert r.returncode in (0, 1)
     if r.returncode == 1:
         assert ("unavailable" in out) and ("live-sim" in out)
@@ -134,7 +134,7 @@ def test_diagnostics_live_real_without_camera_fails_honestly():
 
 def test_self_test_exit_code_honest():
     r = _cli("self-test")
-    out = r.stdout + r.stderr
+    out = (r.stdout or "") + (r.stderr or "")
     # the deterministic self-test passes in CI; a FAIL row must mean rc 1
     if "FAIL" in out:
         assert r.returncode == 1

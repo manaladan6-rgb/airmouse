@@ -37,14 +37,14 @@ def test_cli_version_reports_version():
     import airmouse as _am
     r = _cli("--version")
     assert r.returncode == 0
-    assert _am.__version__ in (r.stdout + r.stderr)
-    assert "AirMouse" in (r.stdout + r.stderr)
+    assert _am.__version__ in ((r.stdout or "") + (r.stderr or ""))
+    assert "AirMouse" in ((r.stdout or "") + (r.stderr or ""))
 
 
 def test_cli_help_lists_v9_flags():
     r = _cli("--help")
     assert r.returncode == 0
-    out = r.stdout + r.stderr
+    out = (r.stdout or "") + (r.stderr or "")
     for flag in ("--gaze", "--no-gaze", "--gaze-calibrate", "--fusion",
                  "--hands-free", "--assist", "--interaction", "--no-voice",
                  "--voice", "--no-kalman", "--no-zoom", "--record", "--play",
@@ -57,7 +57,7 @@ def test_cli_gaze_calibration_simulated_end_to_end():
     gaze-calibration workflow through the real CLI (simulated eye)."""
     r = _cli("--gaze-calibrate", "--gaze-sim")
     assert r.returncode == 0
-    out = r.stdout + r.stderr
+    out = (r.stdout or "") + (r.stderr or "")
     assert "GAZE CALIBRATION" in out
     assert "good" in out or "fair" in out
     assert "SAVED" in out
