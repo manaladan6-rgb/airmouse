@@ -18,6 +18,10 @@ def _cli(*args, env_extra=None):
     env = dict(os.environ)
     env["PYTHONPATH"] = os.path.join(_REPO, "airmouse_pkg")
     env.setdefault("AIRMOUSE_HOME", os.path.join(_REPO, ".tmp-airmouse-home"))
+    # Windows CI runners: child stdout must be unbuffered + UTF-8 or the
+    # diagnostics telemetry lines can be lost (observed: rc=0, empty output)
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
